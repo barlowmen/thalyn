@@ -31,6 +31,7 @@ from thalyn_brain.orchestration.critic import (
     crossed_thresholds,
     run_critic_checkpoint,
 )
+from thalyn_brain.orchestration.drift import combined_drift
 from thalyn_brain.orchestration.planner import plan_for
 from thalyn_brain.orchestration.state import (
     ActionLogEntry,
@@ -429,7 +430,12 @@ def _critic_node(
                 action_log=action_log,
                 threshold_label=threshold_label,
             )
-            latest_drift = report.drift_score
+            # The reported drift score combines the LLM verdict with a
+            # local heuristic over plan-node ↔ action-log adherence;
+            # either signal can independently push the run into the
+            # pause-pending zone.
+            combined_score = combined_drift(report.drift_score, state.get("plan"), action_log)
+            latest_drift = combined_score
             already_hit.append(threshold_label)
             critic_entry = ActionLogEntry(
                 at_ms=_now_ms(),
@@ -437,7 +443,8 @@ def _critic_node(
                 payload={
                     "step": "critic",
                     "threshold": threshold_label,
-                    "driftScore": report.drift_score,
+                    "driftScore": combined_score,
+                    "criticScore": report.drift_score,
                     "onTrack": report.on_track,
                     "reason": report.reason,
                 },
@@ -445,14 +452,14 @@ def _critic_node(
             await _emit_action(state, critic_entry, notify)
             action_log = _append_log({**state, "action_log": action_log}, critic_entry)
 
-            if report.drift_score >= DEFAULT_DRIFT_PAUSE_THRESHOLD:
+            if combined_score >= DEFAULT_DRIFT_PAUSE_THRESHOLD:
                 await notify(
                     RUN_APPROVAL_REQUIRED,
                     {
                         "runId": state["run_id"],
                         "gateKind": "drift",
                         "threshold": threshold_label,
-                        "driftScore": report.drift_score,
+                        "driftScore": combined_score,
                         "reason": report.reason,
                     },
                 )
@@ -470,7 +477,7 @@ def _critic_node(
                     "action_log": action_log,
                     "budget_consumed": consumed.to_wire(),
                     "critic_thresholds_hit": already_hit,
-                    "drift_score": report.drift_score,
+                    "drift_score": combined_score,
                 }
 
         return {

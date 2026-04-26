@@ -119,11 +119,12 @@ async def test_critic_runs_at_threshold_and_records_drift_in_index(
     tmp_path: Path,
 ) -> None:
     """A budget that crosses 25 % drives one critic LLM call; the
-    drift score lands on the run header."""
+    drift score lands on the run header. Plan is empty so the
+    heuristic stays at 0 — only the LLM verdict matters here."""
     _fake, factory = factory_for(
         [
             # Plan turn.
-            text_message('{"goal": "x", "steps": [{"description":"step","rationale":"r"}]}'),
+            text_message('{"goal": "x", "steps": []}'),
             result_message(),
             # Critic turn — fires from critic_node when iteration count
             # crosses 25 % (3rd iteration with maxIterations=12 = 25 %).
@@ -175,8 +176,9 @@ async def test_high_drift_score_pauses_run_with_drift_gate(tmp_path: Path) -> No
     a `gateKind: "drift"` notification."""
     _fake, factory = factory_for(
         [
-            # Plan.
-            text_message('{"goal": "x", "steps": [{"description":"step","rationale":"r"}]}'),
+            # Plan — empty so the heuristic stays at 0 and only the LLM
+            # verdict drives the gate.
+            text_message('{"goal": "x", "steps": []}'),
             result_message(),
             # Critic — high drift score.
             text_message('{"drift_score": 0.9, "on_track": false, "reason": "Wandered off-goal."}'),
