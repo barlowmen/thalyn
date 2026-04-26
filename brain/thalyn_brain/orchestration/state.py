@@ -145,3 +145,5 @@ class GraphState(TypedDict, total=False):
     subagent_results: list[dict[str, Any]]
     budget: dict[str, Any] | None
     budget_consumed: dict[str, Any]
+    critic_thresholds_hit: list[str]
+    drift_score: float

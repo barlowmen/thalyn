@@ -26,6 +26,11 @@ from thalyn_brain.orchestration.budget import (
     check_budget,
     estimate_tokens_from_text,
 )
+from thalyn_brain.orchestration.critic import (
+    DEFAULT_DRIFT_PAUSE_THRESHOLD,
+    crossed_thresholds,
+    run_critic_checkpoint,
+)
 from thalyn_brain.orchestration.planner import plan_for
 from thalyn_brain.orchestration.state import (
     ActionLogEntry,
@@ -101,9 +106,7 @@ async def _maybe_halt_after_work(
     cap trips.
     """
     refreshed = consumed.refresh_elapsed()
-    log = await _record_budget_check(
-        state, refreshed, node_name=f"{node_name}_post", notify=notify
-    )
+    log = await _record_budget_check(state, refreshed, node_name=f"{node_name}_post", notify=notify)
     return await _halt_if_over_budget(state, refreshed, action_log=log, notify=notify)
 
 
@@ -212,7 +215,7 @@ def build_graph(
         "execute",
         _execute_node(notify, spawn_subagent),  # type: ignore[call-overload]
     )
-    graph.add_node("critic", _critic_node(notify))  # type: ignore[call-overload]
+    graph.add_node("critic", _critic_node(provider, notify))  # type: ignore[call-overload]
     graph.add_node("respond", _respond_node(provider, notify))  # type: ignore[call-overload]
 
     graph.add_edge(START, "plan")
@@ -380,10 +383,21 @@ def _execute_node(
 
 
 def _critic_node(
+    provider: LlmProvider,
     notify: Notifier,
 ) -> Callable[[GraphState], Awaitable[dict[str, Any]]]:
-    """Critic gate. Today: budget enforcement only; the drift monitor
-    lands alongside in commits v0.8.x."""
+    """Critic gate.
+
+    Two responsibilities here:
+
+    1. Budget enforcement (inherited from the entry check) — a node
+       transition counts as one iteration.
+    2. Drift monitoring at 25 / 50 / 75 % budget consumption. For
+       each newly-crossed threshold we drive a critic LLM round-trip
+       and record the result in the action log. A drift score above
+       the pause threshold halts the run pending review (the resume
+       wire surface lands in a follow-up commit).
+    """
 
     async def node(state: GraphState) -> dict[str, Any]:
         if _is_halted(state):
@@ -398,9 +412,72 @@ def _critic_node(
             payload={"from": "execute", "to": "critic"},
         )
         await _emit_action(state, entry, notify)
+        action_log = _append_log(state, entry)
+
+        already_hit = list(state.get("critic_thresholds_hit") or [])
+        new_thresholds = crossed_thresholds(
+            consumed.to_wire(),
+            state.get("budget"),
+            already_hit=already_hit,
+        )
+        latest_drift = float(state.get("drift_score") or 0.0)
+        for threshold_label in new_thresholds:
+            report = await run_critic_checkpoint(
+                provider,
+                user_message=state.get("user_message", ""),
+                plan=state.get("plan"),
+                action_log=action_log,
+                threshold_label=threshold_label,
+            )
+            latest_drift = report.drift_score
+            already_hit.append(threshold_label)
+            critic_entry = ActionLogEntry(
+                at_ms=_now_ms(),
+                kind="drift_check",
+                payload={
+                    "step": "critic",
+                    "threshold": threshold_label,
+                    "driftScore": report.drift_score,
+                    "onTrack": report.on_track,
+                    "reason": report.reason,
+                },
+            )
+            await _emit_action(state, critic_entry, notify)
+            action_log = _append_log({**state, "action_log": action_log}, critic_entry)
+
+            if report.drift_score >= DEFAULT_DRIFT_PAUSE_THRESHOLD:
+                await notify(
+                    RUN_APPROVAL_REQUIRED,
+                    {
+                        "runId": state["run_id"],
+                        "gateKind": "drift",
+                        "threshold": threshold_label,
+                        "driftScore": report.drift_score,
+                        "reason": report.reason,
+                    },
+                )
+                await notify(
+                    RUN_STATUS,
+                    {
+                        "runId": state["run_id"],
+                        "status": RunStatus.KILLED.value,
+                        "parentRunId": state.get("parent_run_id"),
+                    },
+                )
+                return {
+                    "status": RunStatus.KILLED.value,
+                    "error": (f"drift exceeded threshold at {threshold_label}: {report.reason}"),
+                    "action_log": action_log,
+                    "budget_consumed": consumed.to_wire(),
+                    "critic_thresholds_hit": already_hit,
+                    "drift_score": report.drift_score,
+                }
+
         return {
-            "action_log": _append_log(state, entry),
+            "action_log": action_log,
             "budget_consumed": consumed.to_wire(),
+            "critic_thresholds_hit": already_hit,
+            "drift_score": latest_drift,
         }
 
     return node

@@ -227,6 +227,8 @@ class Runner:
                 "subagent_results": [],
                 "budget": budget_wire,
                 "budget_consumed": consumed.to_wire(),
+                "critic_thresholds_hit": [],
+                "drift_score": 0.0,
             }
             config = {"configurable": {"thread_id": run_id}}
 
@@ -624,6 +626,7 @@ class Runner:
         plan = final_state.get("plan")
         final_response = final_state.get("final_response", "")
         budget_consumed = final_state.get("budget_consumed")
+        drift_score = final_state.get("drift_score")
 
         if self._runs_store is not None:
             await self._runs_store.update(
@@ -632,6 +635,9 @@ class Runner:
                     status=status,
                     completed_at_ms=int(time.time() * 1000),
                     final_response=final_response,
+                    drift_score=float(drift_score)
+                    if isinstance(drift_score, int | float)
+                    else None,
                 )
                 .with_plan(plan)
                 .with_budget_consumed(budget_consumed),
