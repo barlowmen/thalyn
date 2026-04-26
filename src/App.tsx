@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 
 import { ChatSurface } from "@/components/chat/chat-surface";
+import { EditorSurface } from "@/components/editor/editor-surface";
 import { AppShell } from "@/components/shell/app-shell";
 import { SubAgentDetail } from "@/components/subagent/subagent-detail";
 
@@ -26,14 +27,20 @@ function App() {
     <AppShell
       openSubAgentRunId={openSubAgentRunId}
       onOpenSubAgent={handleOpenSubAgent}
-      main={({ openSettings }) =>
-        openSubAgentRunId ? (
-          <SubAgentDetail
-            runId={openSubAgentRunId}
-            onClose={handleCloseSubAgent}
-            onTakeOver={handleTakeOver}
-          />
-        ) : (
+      main={({ openSettings, activeRail }) => {
+        if (openSubAgentRunId) {
+          return (
+            <SubAgentDetail
+              runId={openSubAgentRunId}
+              onClose={handleCloseSubAgent}
+              onTakeOver={handleTakeOver}
+            />
+          );
+        }
+        if (activeRail === "editor") {
+          return <EditorSurface />;
+        }
+        return (
           <ChatSurface
             // Remount on takeover so the chat session, message list,
             // and system prompt all reset cleanly.
@@ -43,8 +50,8 @@ function App() {
             takeOverRunId={takeOverRunId}
             onHandBack={handleHandBack}
           />
-        )
-      }
+        );
+      }}
     />
   );
 }

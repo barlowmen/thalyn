@@ -24,6 +24,7 @@ import { readActiveProvider } from "@/lib/active-provider";
 
 export type ShellApi = {
   openSettings: () => void;
+  activeRail: string;
 };
 
 /**
@@ -167,7 +168,9 @@ export function AppShell({
             className="flex h-full flex-col bg-background"
           >
             <DriftGateLayer onReview={onOpenSubAgent} />
-            {typeof main === "function" ? main({ openSettings }) : main}
+            {typeof main === "function"
+              ? main({ openSettings, activeRail })
+              : main}
           </section>
         </ResizablePanel>
 
