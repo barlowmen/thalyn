@@ -4,6 +4,10 @@ import type {
   PanelImperativeHandle,
 } from "react-resizable-panels";
 
+export type ShellApi = {
+  openSettings: () => void;
+};
+
 import { CommandPalette } from "@/components/command-palette";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { ActivityRail } from "@/components/shell/activity-rail";
@@ -74,7 +78,11 @@ function togglePanel(ref: React.RefObject<PanelImperativeHandle | null>) {
   }
 }
 
-export function AppShell({ main }: { main: ReactNode }) {
+export function AppShell({
+  main,
+}: {
+  main: ReactNode | ((api: ShellApi) => ReactNode);
+}) {
   const [activeRail, setActiveRail] = useState<string>("chat");
   const [defaultLayout] = useState<Layout>(() => loadLayout());
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -135,7 +143,7 @@ export function AppShell({ main }: { main: ReactNode }) {
             aria-label="Main"
             className="flex h-full flex-col bg-background"
           >
-            {main}
+            {typeof main === "function" ? main({ openSettings }) : main}
           </section>
         </ResizablePanel>
 
