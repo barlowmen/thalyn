@@ -1,5 +1,6 @@
 mod brain;
 mod provider;
+mod sandbox;
 mod secrets;
 
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use tokio::sync::RwLock;
 
 use crate::brain::{BrainSupervisor, SpawnConfig};
 use crate::provider::{builtin_providers, ProviderMeta, ProviderRegistry};
+use crate::sandbox::SandboxManager;
 use crate::secrets::SecretsManager;
 
 const BRAIN_CALL_TIMEOUT: Duration = Duration::from_secs(15);
@@ -28,6 +30,11 @@ struct AppState {
     brain: Arc<BrainSupervisor>,
     providers: RwLock<ProviderRegistry>,
     secrets: Arc<SecretsManager>,
+    /// Sandbox manager is plumbed through AppState now so the
+    /// restricted-shell + tier-1 commits land into a stable surface.
+    /// Consumed by Tauri commands in subsequent commits.
+    #[allow(dead_code)]
+    sandboxes: Arc<SandboxManager>,
 }
 
 /// Trimmed pong payload sent back to the renderer.
@@ -318,6 +325,7 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
         brain: Arc::new(supervisor),
         providers: RwLock::new(registry),
         secrets,
+        sandboxes: Arc::new(SandboxManager::new()),
     });
     Ok(())
 }
