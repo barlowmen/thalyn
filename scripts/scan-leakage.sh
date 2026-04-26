@@ -25,6 +25,15 @@ PATTERNS=(
   '\bautopilot\s+run\b'
 )
 
+# Literal substrings that look like forbidden tokens but are legitimate
+# repo-local references — e.g. the on-disk filename of the build plan, which
+# reasonable docs need to cite. Stripped from the haystack before pattern
+# matching so the bare-word form still trips.
+ALLOWED_LITERALS=(
+  ''
+  ''
+)
+
 added_diff() {
   # Lines added in the staged diff, with their unified-diff prefix stripped.
   # The scanner itself is excluded — it defines the forbidden tokens by
@@ -49,9 +58,17 @@ commit_msg_text() {
 haystack="$(added_diff)
 $(commit_msg_text "$@")"
 
+# Strip allowed literals so legitimate filename references don't trip the
+# bare-word patterns. After this, what remains is narrative text and the
+# patterns can be applied without false positives.
+filtered="$haystack"
+for literal in "${ALLOWED_LITERALS[@]}"; do
+  filtered="${filtered//${literal}/}"
+done
+
 failures=0
 for pattern in "${PATTERNS[@]}"; do
-  matches="$(printf '%s\n' "$haystack" | grep -inE "$pattern" || true)"
+  matches="$(printf '%s\n' "$filtered" | grep -inE "$pattern" || true)"
   if [ -n "$matches" ]; then
     printf 'Forbidden pattern matched: /%s/\n' "$pattern" >&2
     printf '%s\n' "$matches" | head -5 >&2
