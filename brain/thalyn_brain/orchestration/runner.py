@@ -127,6 +127,30 @@ class Runner:
             if existing is None or not existing.values:
                 return None
             existing_values = dict(existing.values)
+
+            # If the run is parked at the plan-approval interrupt,
+            # leave it parked — the user owns the resume by calling
+            # ``approve_plan``. Auto-running past the interrupt would
+            # silently make the approval gate moot after a restart.
+            if await _paused_at_interrupt(graph, config):
+                await notify(
+                    RUN_STATUS,
+                    {
+                        "runId": run_id,
+                        "status": RunStatus.AWAITING_APPROVAL.value,
+                        "parentRunId": existing_values.get("parent_run_id"),
+                    },
+                )
+                return RunResult(
+                    run_id=run_id,
+                    session_id=existing_values.get("session_id", ""),
+                    provider_id=provider_id,
+                    status=RunStatus.AWAITING_APPROVAL.value,
+                    final_response="",
+                    plan=existing_values.get("plan"),
+                    action_log_size=len(existing_values.get("action_log") or []),
+                )
+
             spawner = self._spawner_for(
                 session_id=existing_values.get("session_id", ""),
                 provider_id=provider_id,
