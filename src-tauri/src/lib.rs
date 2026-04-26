@@ -3,6 +3,7 @@ mod power;
 mod provider;
 mod sandbox;
 mod secrets;
+mod terminal;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,6 +19,7 @@ use crate::power::{AssertionToken, PowerManager};
 use crate::provider::{builtin_providers, ProviderMeta, ProviderRegistry};
 use crate::sandbox::SandboxManager;
 use crate::secrets::SecretsManager;
+use crate::terminal::TerminalManager;
 
 const BRAIN_CALL_TIMEOUT: Duration = Duration::from_secs(15);
 const CHAT_DEADLINE: Duration = Duration::from_secs(180);
@@ -28,6 +30,7 @@ const RUN_ACTION_LOG_EVENT: &str = "run:action_log";
 const RUN_APPROVAL_REQUIRED_EVENT: &str = "run:approval_required";
 const LSP_MESSAGE_EVENT: &str = "lsp:message";
 const LSP_ERROR_EVENT: &str = "lsp:error";
+const TERMINAL_DATA_EVENT: &str = "terminal:data";
 
 /// Shared application state, registered with Tauri's `manage` so commands
 /// can pull it via `State<...>`.
@@ -45,6 +48,7 @@ struct AppState {
     /// notification forwarder release a previously-acquired
     /// assertion when the same run hits a terminal status.
     assertions: Arc<Mutex<HashMap<String, AssertionToken>>>,
+    terminals: Arc<TerminalManager>,
 }
 
 /// Trimmed pong payload sent back to the renderer.
@@ -424,6 +428,102 @@ async fn lsp_list(state: State<'_, AppState>) -> Result<Value, String> {
 }
 
 #[tauri::command]
+async fn terminal_open(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    cwd: Option<String>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    program: Option<String>,
+) -> Result<Value, String> {
+    let cwd_path = cwd.map(std::path::PathBuf::from);
+    let session_id = state
+        .terminals
+        .open(program, cwd_path, cols.unwrap_or(80), rows.unwrap_or(24))
+        .await
+        .map_err(|err| err.to_string())?;
+
+    // Subscribe and forward output to the renderer. The replay
+    // snapshot is empty for a fresh session — there is no recent
+    // buffer yet — but we still emit an initial event so the
+    // renderer knows about the session id from the worker.
+    let (mut rx, snapshot) = state
+        .terminals
+        .subscribe(&session_id)
+        .await
+        .map_err(|err| err.to_string())?;
+
+    if !snapshot.is_empty() {
+        let _ = app.emit(
+            TERMINAL_DATA_EVENT,
+            json!({ "sessionId": session_id, "seq": 0u64, "data": snapshot }),
+        );
+    }
+
+    let app_for_task = app.clone();
+    let session_id_clone = session_id.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(chunk) => {
+                    if let Err(err) = app_for_task.emit(TERMINAL_DATA_EVENT, &chunk) {
+                        tracing::warn!(?err, "failed to forward terminal chunk");
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(skipped = n, session_id = %session_id_clone, "terminal subscriber lagged");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+
+    Ok(json!({ "sessionId": session_id, "snapshot": snapshot }))
+}
+
+#[tauri::command]
+async fn terminal_input(
+    state: State<'_, AppState>,
+    session_id: String,
+    data: String,
+) -> Result<(), String> {
+    state
+        .terminals
+        .write(&session_id, data.as_bytes())
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn terminal_resize(
+    state: State<'_, AppState>,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    state
+        .terminals
+        .resize(&session_id, cols, rows)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn terminal_close(state: State<'_, AppState>, session_id: String) -> Result<Value, String> {
+    let closed = state
+        .terminals
+        .close(&session_id)
+        .await
+        .map_err(|err| err.to_string())?;
+    Ok(json!({ "closed": closed, "sessionId": session_id }))
+}
+
+#[tauri::command]
+async fn terminal_list(state: State<'_, AppState>) -> Result<Value, String> {
+    Ok(json!({ "sessions": state.terminals.list().await }))
+}
+
+#[tauri::command]
 async fn inline_suggest(
     state: State<'_, AppState>,
     provider_id: String,
@@ -646,6 +746,7 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
         sandboxes: Arc::new(SandboxManager::new()),
         power: Arc::new(PowerManager::new()),
         assertions: Arc::new(Mutex::new(HashMap::new())),
+        terminals: Arc::new(TerminalManager::new()),
     });
     Ok(())
 }
@@ -724,6 +825,11 @@ pub fn run() {
             lsp_stop,
             lsp_list,
             inline_suggest,
+            terminal_open,
+            terminal_input,
+            terminal_resize,
+            terminal_close,
+            terminal_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -4,6 +4,7 @@ import { ChatSurface } from "@/components/chat/chat-surface";
 import { EditorSurface } from "@/components/editor/editor-surface";
 import { AppShell } from "@/components/shell/app-shell";
 import { SubAgentDetail } from "@/components/subagent/subagent-detail";
+import { TerminalSurface } from "@/components/terminal/terminal-surface";
 
 function App() {
   const [openSubAgentRunId, setOpenSubAgentRunId] = useState<string | null>(null);
@@ -39,6 +40,9 @@ function App() {
         }
         if (activeRail === "editor") {
           return <EditorSurface />;
+        }
+        if (activeRail === "terminal") {
+          return <TerminalSurface />;
         }
         return (
           <ChatSurface

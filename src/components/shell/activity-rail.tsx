@@ -8,6 +8,7 @@ import {
   Plug,
   ScrollText,
   Settings,
+  Terminal,
 } from "lucide-react";
 
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -31,6 +32,7 @@ type RailItem = {
 const ITEMS: readonly RailItem[] = [
   { id: "chat", label: "Chat", icon: MessagesSquare },
   { id: "editor", label: "Editor", icon: Code2 },
+  { id: "terminal", label: "Terminal", icon: Terminal },
   { id: "agents", label: "Agents", icon: Compass },
   { id: "memory", label: "Memory", icon: Brain },
   { id: "schedules", label: "Schedules", icon: CalendarClock },

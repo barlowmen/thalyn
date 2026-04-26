@@ -117,6 +117,21 @@ stubbed.__TAURI_INTERNALS__ = {
         truncated: false,
       };
     }
+    if (command === "terminal_open") {
+      return { sessionId: "", snapshot: "" };
+    }
+    if (command === "terminal_input") {
+      return null;
+    }
+    if (command === "terminal_resize") {
+      return null;
+    }
+    if (command === "terminal_close") {
+      return { closed: true, sessionId: "" };
+    }
+    if (command === "terminal_list") {
+      return { sessions: [] };
+    }
     return null;
   },
 };
