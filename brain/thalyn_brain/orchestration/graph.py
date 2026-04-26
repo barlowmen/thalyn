@@ -15,18 +15,15 @@ client mid-flight without coupling the orchestrator to the transport.
 from __future__ import annotations
 
 import time
-import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
+from thalyn_brain.orchestration.planner import plan_for
 from thalyn_brain.orchestration.state import (
     ActionLogEntry,
     GraphState,
-    Plan,
-    PlanNode,
-    PlanNodeStatus,
     RunStatus,
 )
 from thalyn_brain.provider import (
@@ -95,33 +92,22 @@ def build_graph(
 
 
 def _plan_node(
-    _provider: LlmProvider,
+    provider: LlmProvider,
     notify: Notifier,
 ) -> Callable[[GraphState], Awaitable[dict[str, Any]]]:
     """Build the plan node closure.
 
-    v0.4 ships a stub plan — a single PlanNode that captures the user
-    message verbatim. Commit 5 promotes this to LLM-generated, with
-    rationale + estimated cost. Wiring stays the same; only the body
-    of this closure changes.
+    The planner asks the active provider for a structured plan and
+    surfaces it as a `Plan` tree. The fallback path inside the planner
+    guarantees we always emit at least a single-step plan even if the
+    model declines to decompose or the JSON fails to parse.
     """
 
     async def node(state: GraphState) -> dict[str, Any]:
         await _emit_status(state, RunStatus.PLANNING, notify)
 
-        plan = Plan(
-            goal=state["user_message"],
-            nodes=[
-                PlanNode(
-                    id=f"step_{uuid.uuid4().hex[:8]}",
-                    order=0,
-                    description=f"Answer: {state['user_message']!s:.120}",
-                    rationale="Direct response (v0.4 single-step plan).",
-                    status=PlanNodeStatus.PENDING,
-                )
-            ],
-        )
-        plan_wire = plan.to_wire()
+        result = await plan_for(provider, state["user_message"])
+        plan_wire = result.plan.to_wire()
         await notify(
             RUN_PLAN_UPDATE,
             {"runId": state["run_id"], "plan": plan_wire},
@@ -130,7 +116,11 @@ def _plan_node(
         entry = ActionLogEntry(
             at_ms=_now_ms(),
             kind="decision",
-            payload={"step": "plan", "nodeCount": len(plan.nodes)},
+            payload={
+                "step": "plan",
+                "nodeCount": len(result.plan.nodes),
+                "rawTextLength": len(result.raw_text),
+            },
         )
         await _emit_action(state, entry, notify)
         return {"plan": plan_wire, "action_log": _append_log(state, entry)}
