@@ -58,3 +58,24 @@ export function clearApiKey(providerId: string): Promise<void> {
 export function isProviderConfigured(providerId: string): Promise<boolean> {
   return invoke<boolean>("provider_configured", { providerId });
 }
+
+export type CapabilityChange = {
+  dimension: string;
+  before: unknown;
+  after: unknown;
+  severity: "info" | "warning";
+};
+
+export type CapabilityDelta = {
+  fromProviderId: string;
+  toProviderId: string;
+  changes: CapabilityChange[];
+};
+
+/** Diff two providers' capability profiles via the brain. */
+export function providerDelta(
+  fromId: string,
+  toId: string,
+): Promise<CapabilityDelta> {
+  return invoke<CapabilityDelta>("provider_delta", { fromId, toId });
+}

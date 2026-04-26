@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { CapabilityDeltaDialog } from "@/components/chat/capability-delta-dialog";
 import { Composer } from "@/components/chat/composer";
 import { MessageList } from "@/components/chat/message-list";
 import {
@@ -16,7 +17,7 @@ import {
   readActiveProvider,
   subscribeActiveProvider,
 } from "@/lib/active-provider";
-import { isProviderConfigured } from "@/lib/providers";
+import { isProviderConfigured, type ProviderMeta } from "@/lib/providers";
 import { killRun, type Plan } from "@/lib/runs";
 
 /**
@@ -38,6 +39,22 @@ export function ChatSurface({
 }) {
   const [providerId, setProviderId] = useState<string>(() => readActiveProvider());
   const [configured, setConfigured] = useState<boolean | null>(null);
+  const [pendingSwap, setPendingSwap] = useState<{
+    from: ProviderMeta;
+    to: ProviderMeta;
+  } | null>(null);
+  const handleSwapRequest = useCallback(
+    (swap: { from: ProviderMeta; to: ProviderMeta } | null) => {
+      if (!swap) return;
+      setPendingSwap(swap);
+    },
+    [],
+  );
+  const handleConfirmSwap = useCallback((toId: string) => {
+    commitProviderSwap(toId);
+    setPendingSwap(null);
+  }, []);
+  const handleCancelSwap = useCallback(() => setPendingSwap(null), []);
   const takeOverDetail = useRunDetail(takeOverRunId ?? null);
   const takeOverPrompt = useMemo(
     () =>
@@ -92,10 +109,7 @@ export function ChatSurface({
           <ProviderSwitcher
             activeProviderId={providerId}
             configured={configured}
-            onSwap={(swap) => {
-              if (!swap) return;
-              commitProviderSwap(swap.to.id);
-            }}
+            onSwap={handleSwapRequest}
           />
         </div>
         <button
@@ -154,6 +168,12 @@ export function ChatSurface({
             : undefined
         }
         onSubmit={send}
+      />
+
+      <CapabilityDeltaDialog
+        pending={pendingSwap}
+        onCancel={handleCancelSwap}
+        onConfirm={handleConfirmSwap}
       />
     </div>
   );

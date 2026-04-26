@@ -203,6 +203,23 @@ async fn list_schedules(state: State<'_, AppState>) -> Result<Value, String> {
 }
 
 #[tauri::command]
+async fn provider_delta(
+    state: State<'_, AppState>,
+    from_id: String,
+    to_id: String,
+) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "providers.delta",
+            json!({ "fromId": from_id, "toId": to_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 async fn create_schedule(
     state: State<'_, AppState>,
     title: String,
@@ -492,6 +509,7 @@ pub fn run() {
             create_schedule,
             delete_schedule,
             translate_cron,
+            provider_delta,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
