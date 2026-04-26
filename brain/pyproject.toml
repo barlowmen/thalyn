@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.13,<3.14"
 license = { text = "MIT" }
 authors = [{ name = "Thalyn contributors" }]
-dependencies = []
+dependencies = [
+    "claude-agent-sdk>=0.1.4,<0.2",
+]
 
 [project.scripts]
 thalyn-brain = "thalyn_brain.__main__:main"
