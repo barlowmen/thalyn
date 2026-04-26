@@ -5,6 +5,7 @@ import type {
 } from "react-resizable-panels";
 
 import { CommandPalette } from "@/components/command-palette";
+import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { ActivityRail } from "@/components/shell/activity-rail";
 import { InspectorPanel } from "@/components/shell/inspector-panel";
 import { SidebarPanel } from "@/components/shell/sidebar-panel";
@@ -76,6 +77,7 @@ function togglePanel(ref: React.RefObject<PanelImperativeHandle | null>) {
 export function AppShell({ main }: { main: ReactNode }) {
   const [activeRail, setActiveRail] = useState<string>("chat");
   const [defaultLayout] = useState<Layout>(() => loadLayout());
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const sidebarRef = useRef<PanelImperativeHandle | null>(null);
   const inspectorRef = useRef<PanelImperativeHandle | null>(null);
@@ -86,10 +88,22 @@ export function AppShell({ main }: { main: ReactNode }) {
 
   const toggleSidebar = useCallback(() => togglePanel(sidebarRef), []);
   const toggleInspector = useCallback(() => togglePanel(inspectorRef), []);
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
+
+  const handleRailSelect = useCallback(
+    (id: string) => {
+      if (id === "settings") {
+        openSettings();
+        return;
+      }
+      setActiveRail(id);
+    },
+    [openSettings],
+  );
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
-      <ActivityRail active={activeRail} onSelect={setActiveRail} />
+      <ActivityRail active={activeRail} onSelect={handleRailSelect} />
 
       <ResizableGroup
         id="thalyn-shell"
@@ -143,7 +157,10 @@ export function AppShell({ main }: { main: ReactNode }) {
       <CommandPalette
         onToggleSidebar={toggleSidebar}
         onToggleInspector={toggleInspector}
+        onOpenSettings={openSettings}
       />
+
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 }

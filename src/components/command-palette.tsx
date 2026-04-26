@@ -40,9 +40,11 @@ type Action = {
 export function CommandPalette({
   onToggleSidebar,
   onToggleInspector,
+  onOpenSettings,
 }: {
   onToggleSidebar?: () => void;
   onToggleInspector?: () => void;
+  onOpenSettings?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const { setTheme } = useTheme();
@@ -103,10 +105,7 @@ export function CommandPalette({
       label: "Open settings…",
       icon: SettingsIcon,
       group: "App",
-      run: () => {
-        // placeholder — settings surface lands later
-        close();
-      },
+      run: () => onOpenSettings?.(),
     },
     {
       id: "app.reload",
