@@ -323,7 +323,11 @@ async def _emit_status(
 ) -> None:
     await notify(
         RUN_STATUS,
-        {"runId": state["run_id"], "status": status.value},
+        {
+            "runId": state["run_id"],
+            "status": status.value,
+            "parentRunId": state.get("parent_run_id"),
+        },
     )
 
 

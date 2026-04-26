@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 import { Composer } from "@/components/chat/composer";
 import { MessageList } from "@/components/chat/message-list";
 import { useChat } from "@/components/chat/use-chat";
+import { SubAgentTiles } from "@/components/inspector/subagent-tiles";
+import { useRootRunId } from "@/components/inspector/use-root-run-id";
+import { useSubAgentTree } from "@/components/inspector/use-subagent-tree";
 import { Badge } from "@/components/ui/badge";
 import {
   readActiveProvider,
@@ -13,6 +16,7 @@ import {
   listProviders,
   type ProviderMeta,
 } from "@/lib/providers";
+import { killRun } from "@/lib/runs";
 
 /**
  * The main-panel chat surface. Reads the active provider from the
@@ -20,11 +24,19 @@ import {
  * selector in Settings dispatches a `thalyn:active-provider-changed`
  * event that we listen for here.
  */
-export function ChatSurface({ onOpenSettings }: { onOpenSettings: () => void }) {
+export function ChatSurface({
+  onOpenSettings,
+  onOpenSubAgent,
+}: {
+  onOpenSettings: () => void;
+  onOpenSubAgent?: (runId: string) => void;
+}) {
   const [providerId, setProviderId] = useState<string>(() => readActiveProvider());
   const [provider, setProvider] = useState<ProviderMeta | null>(null);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const { messages, status, send } = useChat({ providerId });
+  const rootRunId = useRootRunId();
+  const subAgentTiles = useSubAgentTree(rootRunId);
 
   // Listen for selection changes coming out of the Settings dialog.
   useEffect(() => subscribeActiveProvider(setProviderId), []);
@@ -74,6 +86,21 @@ export function ChatSurface({ onOpenSettings }: { onOpenSettings: () => void }) 
       </header>
 
       <MessageList messages={messages} />
+
+      {subAgentTiles.length > 0 && (
+        <div className="border-t border-border bg-surface px-6 py-3">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Sub-agents
+          </p>
+          <SubAgentTiles
+            tiles={subAgentTiles}
+            onOpen={onOpenSubAgent}
+            onKill={(runId) => {
+              void killRun(runId).catch(() => undefined);
+            }}
+          />
+        </div>
+      )}
 
       {errorMessage && (
         <p className="border-t border-border bg-destructive/10 px-6 py-2 text-xs text-destructive">

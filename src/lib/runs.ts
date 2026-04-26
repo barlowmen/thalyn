@@ -78,7 +78,11 @@ export type RunTreeNode = RunHeader & {
 
 // --- Live event payloads -----------------------------------------------------
 
-export type RunStatusEvent = { runId: string; status: RunStatus };
+export type RunStatusEvent = {
+  runId: string;
+  status: RunStatus;
+  parentRunId: string | null;
+};
 export type RunPlanUpdateEvent = { runId: string; plan: Plan };
 export type RunActionLogEvent = { runId: string; entry: ActionLogEntry };
 export type RunApprovalRequiredEvent = {

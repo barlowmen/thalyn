@@ -162,7 +162,11 @@ class Runner:
 
         await notify(
             RUN_STATUS,
-            {"runId": run_id, "status": RunStatus.PENDING.value},
+            {
+                "runId": run_id,
+                "status": RunStatus.PENDING.value,
+                "parentRunId": parent_run_id,
+            },
         )
 
         if self._runs_store is not None:
@@ -286,7 +290,11 @@ class Runner:
                 # Mark the run killed and skip resumption.
                 await notify(
                     RUN_STATUS,
-                    {"runId": run_id, "status": RunStatus.KILLED.value},
+                    {
+                        "runId": run_id,
+                        "status": RunStatus.KILLED.value,
+                        "parentRunId": existing_values.get("parent_run_id"),
+                    },
                 )
                 final_state = {
                     **existing.values,
@@ -328,7 +336,11 @@ class Runner:
     ) -> RunResult:
         await notify(
             RUN_STATUS,
-            {"runId": run_id, "status": RunStatus.AWAITING_APPROVAL.value},
+            {
+                "runId": run_id,
+                "status": RunStatus.AWAITING_APPROVAL.value,
+                "parentRunId": final_state.get("parent_run_id"),
+            },
         )
         await notify(
             RUN_APPROVAL_REQUIRED,
@@ -374,16 +386,27 @@ class Runner:
         """
         audit = self._audit_for(run_id)
         teed = wrap_notifier(notify, audit)
-        await teed(
-            RUN_STATUS,
-            {"runId": run_id, "status": RunStatus.KILLED.value},
-        )
-
         if self._runs_store is None:
+            await teed(
+                RUN_STATUS,
+                {
+                    "runId": run_id,
+                    "status": RunStatus.KILLED.value,
+                    "parentRunId": None,
+                },
+            )
             return None
         header = await self._runs_store.get(run_id)
         if header is None:
             return None
+        await teed(
+            RUN_STATUS,
+            {
+                "runId": run_id,
+                "status": RunStatus.KILLED.value,
+                "parentRunId": header.parent_run_id,
+            },
+        )
         await self._runs_store.update(
             run_id,
             RunUpdate(
@@ -465,7 +488,11 @@ class Runner:
 
         await notify(
             RUN_STATUS,
-            {"runId": child_run_id, "status": RunStatus.PENDING.value},
+            {
+                "runId": child_run_id,
+                "status": RunStatus.PENDING.value,
+                "parentRunId": parent_run_id,
+            },
         )
 
         if self._runs_store is not None:

@@ -45,9 +45,13 @@ export function useActiveRun(): ActiveRun | null {
 
     setSafely(() =>
       subscribeRunStatus((event) => {
+        // Sub-agents fire their own status traffic; the inspector's
+        // active-run tracker stays on the root and lets the
+        // sub-agent tree pick those events up.
+        if (event.parentRunId !== null) return;
         setRun((current) => {
           if (current?.runId !== event.runId) {
-            // New run takes over the inspector.
+            // New root run takes over the inspector.
             return {
               runId: event.runId,
               status: event.status,

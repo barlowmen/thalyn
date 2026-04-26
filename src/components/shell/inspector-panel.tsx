@@ -2,9 +2,11 @@ import { Activity } from "lucide-react";
 
 import { ActionLog } from "@/components/inspector/action-log";
 import { PlanTree } from "@/components/inspector/plan-tree";
+import { SubAgentTiles } from "@/components/inspector/subagent-tiles";
 import { useActiveRun } from "@/components/inspector/use-active-run";
+import { useSubAgentTree } from "@/components/inspector/use-subagent-tree";
 import { Badge } from "@/components/ui/badge";
-import type { RunStatus } from "@/lib/runs";
+import { killRun, type RunStatus } from "@/lib/runs";
 
 const STATUS_TONE: Record<
   RunStatus,
@@ -36,8 +38,13 @@ const STATUS_LABEL: Record<RunStatus, string> = {
  * action log. Subscribes to the run.* Tauri events; resets on a new
  * run id. Empty state stays in place when no run has started yet.
  */
-export function InspectorPanel() {
+export function InspectorPanel({
+  onOpenSubAgent,
+}: {
+  onOpenSubAgent?: (runId: string) => void;
+} = {}) {
   const run = useActiveRun();
+  const tiles = useSubAgentTree(run?.runId ?? null);
 
   return (
     <aside
@@ -77,6 +84,18 @@ export function InspectorPanel() {
               </p>
             )}
           </Section>
+
+          {tiles.length > 0 && (
+            <Section title="Sub-agents">
+              <SubAgentTiles
+                tiles={tiles}
+                onOpen={onOpenSubAgent}
+                onKill={(runId) => {
+                  void killRun(runId).catch(() => undefined);
+                }}
+              />
+            </Section>
+          )}
 
           <Section title="Action log">
             <ActionLog entries={run.actionLog} />

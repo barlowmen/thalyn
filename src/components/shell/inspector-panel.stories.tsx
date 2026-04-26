@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 
 import { InspectorPanel } from "@/components/shell/inspector-panel";
 
-const meta = {
+const meta: Meta<typeof InspectorPanel> = {
   title: "Shell/InspectorPanel",
   component: InspectorPanel,
   parameters: { layout: "fullscreen" },
@@ -13,9 +13,9 @@ const meta = {
       </div>
     ),
   ],
-} satisfies Meta<typeof InspectorPanel>;
+};
 
 export default meta;
-type Story = StoryObj<typeof meta>;
+type Story = StoryObj<typeof InspectorPanel>;
 
 export const Empty: Story = {};
