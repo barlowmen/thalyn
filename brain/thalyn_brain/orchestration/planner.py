@@ -68,9 +68,7 @@ async def _collect_planner_text(provider: LlmProvider, user_message: str) -> str
     planner is a "describe a plan" turn, not an "execute" turn.
     """
     parts: list[str] = []
-    async for chunk in provider.stream_chat(
-        user_message, system_prompt=PLAN_SYSTEM_PROMPT
-    ):
+    async for chunk in provider.stream_chat(user_message, system_prompt=PLAN_SYSTEM_PROMPT):
         if isinstance(chunk, ChatTextChunk):
             parts.append(chunk.delta)
     return "".join(parts)

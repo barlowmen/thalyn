@@ -76,6 +76,62 @@ class Runner:
             self._checkpointer_context = _no_checkpointer_cm
         self._runs_store = runs_store
 
+    async def resume(
+        self,
+        *,
+        run_id: str,
+        provider_id: str,
+        notify: Notifier,
+    ) -> RunResult | None:
+        """Resume an in-flight run from its last checkpoint.
+
+        Returns ``None`` when the per-run db has no checkpoint to
+        resume from (typical when a run never made it past status
+        insertion). On success the runs index is updated to reflect
+        the final state.
+        """
+        provider = self._registry.get(provider_id)
+
+        async with self._checkpointer_context(run_id) as checkpointer:
+            if checkpointer is None:
+                # No persistence — nothing to resume against.
+                return None
+            graph = build_graph(provider, notify, checkpointer=checkpointer)
+            config = {"configurable": {"thread_id": run_id}}
+
+            existing = await graph.aget_state(config)
+            if existing is None or not existing.values:
+                return None
+
+            # ``ainvoke(None, config)`` tells LangGraph to pick up from
+            # the latest checkpoint and continue.
+            final_state: GraphState = await graph.ainvoke(None, config=config)
+
+        status = final_state.get("status") or RunStatus.COMPLETED.value
+        plan = final_state.get("plan")
+        final_response = final_state.get("final_response", "")
+        session_id = final_state.get("session_id", "")
+
+        if self._runs_store is not None:
+            await self._runs_store.update(
+                run_id,
+                RunUpdate(
+                    status=status,
+                    completed_at_ms=int(time.time() * 1000),
+                    final_response=final_response,
+                ).with_plan(plan),
+            )
+
+        return RunResult(
+            run_id=run_id,
+            session_id=session_id,
+            provider_id=provider_id,
+            status=status,
+            final_response=final_response,
+            plan=plan,
+            action_log_size=len(final_state.get("action_log") or []),
+        )
+
     async def run(
         self,
         *,
