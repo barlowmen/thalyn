@@ -14,10 +14,15 @@ subscribe to next.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from thalyn_brain.orchestration import Runner
 from thalyn_brain.orchestration.budget import Budget
+from thalyn_brain.project_context import (
+    load_project_context,
+    merge_into_system_prompt,
+)
 from thalyn_brain.provider import ProviderNotImplementedError, ProviderRegistry
 from thalyn_brain.rpc import (
     INVALID_PARAMS,
@@ -59,6 +64,20 @@ async def _handle_chat_send(
     prompt = _require_str(params, "prompt")
     budget = Budget.from_wire(params.get("budget"))
 
+    base_system_prompt = params.get("systemPrompt")
+    if base_system_prompt is not None and not isinstance(base_system_prompt, str):
+        raise RpcError(
+            code=INVALID_PARAMS,
+            message="systemPrompt must be a string when provided",
+        )
+
+    workspace_root_value = params.get("workspaceRoot")
+    project_context = None
+    if isinstance(workspace_root_value, str) and workspace_root_value:
+        project_context = load_project_context(Path(workspace_root_value))
+
+    system_prompt = merge_into_system_prompt(base_system_prompt, project_context)
+
     try:
         result = await runner.run(
             session_id=session_id,
@@ -66,6 +85,7 @@ async def _handle_chat_send(
             prompt=prompt,
             notify=notify,
             budget=budget,
+            system_prompt=system_prompt,
         )
     except ProviderNotImplementedError as exc:
         raise RpcError(code=INVALID_PARAMS, message=str(exc)) from exc
@@ -79,6 +99,8 @@ async def _handle_chat_send(
     }
     if result.plan is not None:
         summary["plan"] = result.plan
+    if project_context is not None:
+        summary["projectContext"] = project_context.to_wire()
     return summary
 
 

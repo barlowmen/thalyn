@@ -183,6 +183,7 @@ class Runner:
         parent_run_id: str | None = None,
         depth: int = 0,
         budget: Budget | None = None,
+        system_prompt: str | None = None,
     ) -> RunResult:
         provider = self._registry.get(provider_id)
 
@@ -253,6 +254,7 @@ class Runner:
                 "budget_consumed": consumed.to_wire(),
                 "critic_thresholds_hit": [],
                 "drift_score": 0.0,
+                "system_prompt": system_prompt,
             }
             config = {"configurable": {"thread_id": run_id}}
 

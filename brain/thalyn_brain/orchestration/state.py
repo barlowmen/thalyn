@@ -147,3 +147,4 @@ class GraphState(TypedDict, total=False):
     budget_consumed: dict[str, Any]
     critic_thresholds_hit: list[str]
     drift_score: float
+    system_prompt: str | None

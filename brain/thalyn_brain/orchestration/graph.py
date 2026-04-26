@@ -508,7 +508,12 @@ def _respond_node(
         text_buffer: list[str] = []
         error_message: str | None = None
 
-        chunks: AsyncIterator[ChatChunk] = provider.stream_chat(state["user_message"])
+        raw_system_prompt = state.get("system_prompt")
+        system_prompt = raw_system_prompt if isinstance(raw_system_prompt, str) else None
+        chunks: AsyncIterator[ChatChunk] = provider.stream_chat(
+            state["user_message"],
+            system_prompt=system_prompt,
+        )
         async for chunk in chunks:
             await notify(
                 CHAT_CHUNK,
