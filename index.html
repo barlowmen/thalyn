@@ -1,10 +1,29 @@
 <!doctype html>
-<html lang="en" data-theme="system">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/tauri.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Thalyn</title>
+    <!--
+      Theme boot — read the stored choice and set data-theme on <html>
+      before any styles render. Avoids the flash-of-default-theme that
+      would otherwise happen between paint and ThemeProvider mount.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem("thalyn:theme");
+          var valid = stored === "dark" || stored === "light" || stored === "system";
+          document.documentElement.setAttribute(
+            "data-theme",
+            valid ? stored : "system",
+          );
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "system");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
