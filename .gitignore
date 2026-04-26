@@ -1,0 +1,142 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# Editors / IDEs
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Node / pnpm
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+.npm/
+.yarn/cache/
+.yarn/install-state.gz
+.yarn/build-state.yml
+.yarn/unplugged/
+
+# Build output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Vite
+.vite/
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+src-tauri/WixTools/
+src-tauri/Cargo.lock.bak
+
+# Rust
+target/
+**/*.rs.bk
+*.pdb
+Cargo.lock.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+
+# uv
+.uv/
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Storybook
+storybook-static/
+
+# Playwright
+playwright-report/
+test-results/
+.playwright/
+
+# Tauri / app data
+*.app
+*.dmg
+*.exe
+*.msi
+
+# Temp / scratch
+tmp/
+*.tmp
+.scratch/
+
+# Local-only Claude Code overrides
+.claude/settings.local.json
+.claude/agents/
+.claude/.local/
+
+# Thalyn runtime data (created at runtime; never committed)
+runs/
+*.db
+*.db-shm
+*.db-wal
+
+# Going-public artifacts that shouldn't be checked in pre-public
+docs/architecture-reviews/
+docs/spikes/
+STUCK.md
