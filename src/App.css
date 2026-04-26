@@ -49,10 +49,30 @@ button {
   background-color: #ffffff;
   cursor: pointer;
   transition: border-color 0.25s;
+  margin-top: 1.25rem;
 }
 
-button:hover {
+button:hover:not(:disabled) {
   border-color: #396cd8;
+}
+
+button:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+
+.status {
+  margin-top: 1rem;
+  font-size: 0.95rem;
+  min-height: 1.5em;
+}
+
+.muted {
+  color: #777;
+}
+
+.error {
+  color: #b91c1c;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -60,8 +80,12 @@ button:hover {
     color: #f6f6f6;
     background-color: #1a1a1a;
   }
-  .subtitle {
+  .subtitle,
+  .muted {
     color: #a0a0a0;
+  }
+  .error {
+    color: #fca5a5;
   }
   button {
     color: #ffffff;
