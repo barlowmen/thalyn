@@ -3,16 +3,20 @@
 A `Runner` ties three things together: the provider registry that
 serves LLM traffic, a notifier that the graph nodes use to push
 plan/action/status events to the renderer, and the resulting
-GraphState the dispatcher hands back to the caller. v0.4 ships an
-in-memory checkpointer; the per-run SqliteSaver lands in commit 2.
+GraphState the dispatcher hands back to the caller. Each run opens a
+per-run SqliteSaver scoped to a file under `runs/{run_id}.db` so
+state is checkpointed at every node transition; tests can pass a
+no-op store to skip persistence.
 """
 
 from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from thalyn_brain.orchestration.graph import (
@@ -21,6 +25,7 @@ from thalyn_brain.orchestration.graph import (
     build_graph,
 )
 from thalyn_brain.orchestration.state import GraphState, RunStatus
+from thalyn_brain.orchestration.storage import open_run_checkpointer
 from thalyn_brain.provider import ProviderRegistry
 
 
@@ -35,7 +40,20 @@ class RunResult:
     action_log_size: int
 
 
-CheckpointerFactory = Callable[[str], Awaitable[Any | None]]
+CheckpointerContext = Callable[[str], AbstractAsyncContextManager[Any]]
+"""A factory yielding a LangGraph checkpointer for a single run."""
+
+
+def _persistent_context(data_dir: Path | None) -> CheckpointerContext:
+    def factory(run_id: str) -> AbstractAsyncContextManager[Any]:
+        return open_run_checkpointer(run_id, data_dir=data_dir)
+
+    return factory
+
+
+@asynccontextmanager
+async def _no_checkpointer_cm(_run_id: str) -> AsyncIterator[Any]:
+    yield None
 
 
 class Runner:
@@ -45,10 +63,16 @@ class Runner:
         self,
         registry: ProviderRegistry,
         *,
-        checkpointer_factory: CheckpointerFactory | None = None,
+        checkpointer_context: CheckpointerContext | None = None,
+        data_dir: Path | None = None,
     ) -> None:
         self._registry = registry
-        self._checkpointer_factory = checkpointer_factory
+        if checkpointer_context is not None:
+            self._checkpointer_context: CheckpointerContext = checkpointer_context
+        elif data_dir is not None:
+            self._checkpointer_context = _persistent_context(data_dir)
+        else:
+            self._checkpointer_context = _no_checkpointer_cm
 
     async def run(
         self,
@@ -68,26 +92,23 @@ class Runner:
             {"runId": run_id, "status": RunStatus.PENDING.value},
         )
 
-        checkpointer: Any | None = None
-        if self._checkpointer_factory is not None:
-            checkpointer = await self._checkpointer_factory(run_id)
+        async with self._checkpointer_context(run_id) as checkpointer:
+            graph = build_graph(provider, notify, checkpointer=checkpointer)
 
-        graph = build_graph(provider, notify, checkpointer=checkpointer)
+            initial: GraphState = {
+                "run_id": run_id,
+                "session_id": session_id,
+                "provider_id": provider_id,
+                "user_message": prompt,
+                "plan": None,
+                "action_log": [],
+                "status": RunStatus.PENDING.value,
+                "final_response": "",
+                "error": None,
+            }
+            config = {"configurable": {"thread_id": run_id}}
 
-        initial: GraphState = {
-            "run_id": run_id,
-            "session_id": session_id,
-            "provider_id": provider_id,
-            "user_message": prompt,
-            "plan": None,
-            "action_log": [],
-            "status": RunStatus.PENDING.value,
-            "final_response": "",
-            "error": None,
-        }
-        config = {"configurable": {"thread_id": run_id}}
-
-        final_state: GraphState = await graph.ainvoke(initial, config=config)
+            final_state: GraphState = await graph.ainvoke(initial, config=config)
 
         return RunResult(
             run_id=run_id,
