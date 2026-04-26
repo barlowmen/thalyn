@@ -1,0 +1,85 @@
+"""Tests for the JSON-RPC dispatcher."""
+
+from __future__ import annotations
+
+import pytest
+from thalyn_brain.rpc import (
+    INVALID_PARAMS,
+    INVALID_REQUEST,
+    METHOD_NOT_FOUND,
+    Dispatcher,
+    RpcError,
+    build_default_dispatcher,
+)
+
+
+@pytest.fixture
+def dispatcher() -> Dispatcher:
+    return build_default_dispatcher()
+
+
+async def test_ping_returns_pong(dispatcher: Dispatcher) -> None:
+    response = await dispatcher.handle({"jsonrpc": "2.0", "id": 1, "method": "ping"})
+    assert response is not None
+    assert response["id"] == 1
+    assert response["jsonrpc"] == "2.0"
+    result = response["result"]
+    assert result["pong"] is True
+    assert isinstance(result["epoch_ms"], int)
+    assert isinstance(result["version"], str)
+
+
+async def test_unknown_method_returns_method_not_found(dispatcher: Dispatcher) -> None:
+    response = await dispatcher.handle({"jsonrpc": "2.0", "id": 7, "method": "nope"})
+    assert response is not None
+    assert response["error"]["code"] == METHOD_NOT_FOUND
+
+
+async def test_non_object_request_is_invalid(dispatcher: Dispatcher) -> None:
+    response = await dispatcher.handle("not an object")
+    assert response is not None
+    assert response["error"]["code"] == INVALID_REQUEST
+
+
+async def test_non_string_method_is_invalid(dispatcher: Dispatcher) -> None:
+    response = await dispatcher.handle({"jsonrpc": "2.0", "id": 1, "method": 42})
+    assert response is not None
+    assert response["error"]["code"] == INVALID_REQUEST
+
+
+async def test_non_object_params_is_invalid(dispatcher: Dispatcher) -> None:
+    response = await dispatcher.handle(
+        {"jsonrpc": "2.0", "id": 1, "method": "ping", "params": [1, 2]}
+    )
+    assert response is not None
+    assert response["error"]["code"] == INVALID_PARAMS
+
+
+async def test_notification_returns_no_response(dispatcher: Dispatcher) -> None:
+    response = await dispatcher.handle({"jsonrpc": "2.0", "method": "ping"})
+    assert response is None
+
+
+async def test_handler_rpc_error_propagates() -> None:
+    dispatcher = Dispatcher()
+
+    async def boom(_params: dict[str, object]) -> object:
+        raise RpcError(code=-32099, message="custom failure", data={"why": "test"})
+
+    dispatcher.register("boom", boom)
+    response = await dispatcher.handle({"jsonrpc": "2.0", "id": 9, "method": "boom"})
+    assert response is not None
+    assert response["error"]["code"] == -32099
+    assert response["error"]["message"] == "custom failure"
+    assert response["error"]["data"] == {"why": "test"}
+
+
+async def test_register_duplicate_raises() -> None:
+    dispatcher = Dispatcher()
+
+    async def noop(_params: dict[str, object]) -> object:
+        return None
+
+    dispatcher.register("x", noop)
+    with pytest.raises(ValueError):
+        dispatcher.register("x", noop)
