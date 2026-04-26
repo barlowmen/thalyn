@@ -235,6 +235,35 @@ class RunsStore:
             ],
         )
 
+    async def list_descendants(self, root_run_id: str) -> list[RunHeader]:
+        """Walk the parent_run_id chain and return the full subtree.
+
+        Includes the root row itself when one exists, so callers can
+        materialise a tree without a second lookup. The order is the
+        SQLite recursion order — roughly breadth-first by spawn time.
+        """
+        async with self._lock:
+            return await asyncio.to_thread(self._list_descendants_sync, root_run_id)
+
+    def _list_descendants_sync(self, root_run_id: str) -> list[RunHeader]:
+        with self._open() as conn:
+            rows = conn.execute(
+                """
+                WITH RECURSIVE descendants(run_id) AS (
+                    SELECT run_id FROM agent_runs WHERE run_id = ?
+                    UNION ALL
+                    SELECT a.run_id
+                    FROM agent_runs a
+                    INNER JOIN descendants d ON a.parent_run_id = d.run_id
+                )
+                SELECT a.* FROM agent_runs a
+                INNER JOIN descendants USING (run_id)
+                ORDER BY a.started_at_ms ASC
+                """,
+                (root_run_id,),
+            ).fetchall()
+        return [_row_to_header(row) for row in rows]
+
 
 def _row_to_header(row: sqlite3.Row) -> RunHeader:
     plan_json = row["plan_json"]

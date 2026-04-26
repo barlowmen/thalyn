@@ -67,6 +67,15 @@ export type RunHeader = {
   plan: Plan | null;
 };
 
+/**
+ * Nested run-tree node — same shape as RunHeader plus the children
+ * recursively beneath it. Returned by `runs.tree` so the renderer can
+ * draw sub-agent tiles without a second pass over the index.
+ */
+export type RunTreeNode = RunHeader & {
+  children: RunTreeNode[];
+};
+
 // --- Live event payloads -----------------------------------------------------
 
 export type RunStatusEvent = { runId: string; status: RunStatus };
@@ -99,6 +108,16 @@ export function listRuns(options?: {
 
 export function getRun(runId: string): Promise<RunHeader | null> {
   return invoke<RunHeader | null>("get_run", { runId });
+}
+
+export function getRunTree(runId: string): Promise<RunTreeNode | null> {
+  return invoke<RunTreeNode | null>("get_run_tree", { runId });
+}
+
+export function killRun(
+  runId: string,
+): Promise<{ runId: string; status: RunStatus }> {
+  return invoke<{ runId: string; status: RunStatus }>("kill_run", { runId });
 }
 
 export function approvePlan(args: {

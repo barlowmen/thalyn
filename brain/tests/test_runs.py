@@ -218,3 +218,143 @@ async def test_runs_rpc_list_validates_params(tmp_path: Path, params: dict[str, 
     )
     assert response is not None
     assert response["error"]["code"] == -32602
+
+
+async def test_list_descendants_walks_parent_chain(tmp_path: Path) -> None:
+    store = RunsStore(data_dir=tmp_path)
+    await store.insert(_header(run_id="r_root", started_at_ms=100))
+    await store.insert(_header(run_id="r_child_a", parent_run_id="r_root", started_at_ms=200))
+    await store.insert(_header(run_id="r_child_b", parent_run_id="r_root", started_at_ms=300))
+    await store.insert(_header(run_id="r_grand", parent_run_id="r_child_a", started_at_ms=400))
+    # Sibling run that should not appear in r_root's subtree.
+    await store.insert(_header(run_id="r_unrelated", started_at_ms=50))
+
+    rows = await store.list_descendants("r_root")
+    ids = [row.run_id for row in rows]
+    assert ids == ["r_root", "r_child_a", "r_child_b", "r_grand"]
+
+
+async def test_list_descendants_unknown_root_returns_empty(tmp_path: Path) -> None:
+    store = RunsStore(data_dir=tmp_path)
+    rows = await store.list_descendants("missing")
+    assert rows == []
+
+
+async def test_runs_rpc_tree_returns_nested_children(tmp_path: Path) -> None:
+    store = RunsStore(data_dir=tmp_path)
+    await store.insert(_header(run_id="r_root", started_at_ms=100))
+    await store.insert(_header(run_id="r_a", parent_run_id="r_root", started_at_ms=200, title="a"))
+    await store.insert(_header(run_id="r_b", parent_run_id="r_root", started_at_ms=300, title="b"))
+    await store.insert(
+        _header(run_id="r_a_child", parent_run_id="r_a", started_at_ms=400, title="ac")
+    )
+
+    dispatcher = Dispatcher()
+    register_runs_methods(dispatcher, store)
+
+    async def notify(method: str, params: Any) -> None:
+        del method, params
+
+    response = await dispatcher.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "runs.tree",
+            "params": {"runId": "r_root"},
+        },
+        notify,
+    )
+    assert response is not None
+    tree = response["result"]
+    assert tree["runId"] == "r_root"
+    child_ids = [child["runId"] for child in tree["children"]]
+    assert child_ids == ["r_a", "r_b"]
+    grand_ids = [child["runId"] for child in tree["children"][0]["children"]]
+    assert grand_ids == ["r_a_child"]
+
+
+async def test_runs_rpc_tree_unknown_returns_null(tmp_path: Path) -> None:
+    store = RunsStore(data_dir=tmp_path)
+    dispatcher = Dispatcher()
+    register_runs_methods(dispatcher, store)
+
+    async def notify(method: str, params: Any) -> None:
+        del method, params
+
+    response = await dispatcher.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "runs.tree",
+            "params": {"runId": "ghost"},
+        },
+        notify,
+    )
+    assert response is not None
+    assert response["result"] is None
+
+
+async def test_runs_rpc_kill_marks_run_killed(tmp_path: Path) -> None:
+    _fake, factory = factory_for(
+        [
+            text_message('{"goal": "x", "steps": []}'),
+            result_message(),
+        ]
+    )
+    provider = AnthropicProvider(client_factory=factory)
+    registry = _registry_with(provider)
+    store = RunsStore(data_dir=tmp_path)
+    runner = Runner(registry, runs_store=store, data_dir=tmp_path)
+
+    captured: list[tuple[str, Any]] = []
+
+    async def notify(method: str, params: Any) -> None:
+        captured.append((method, params))
+
+    paused = await runner.run(
+        session_id="s",
+        provider_id="anthropic",
+        prompt="Hello",
+        notify=notify,
+    )
+
+    dispatcher = Dispatcher()
+    register_runs_methods(dispatcher, store, runner=runner)
+
+    response = await dispatcher.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "runs.kill",
+            "params": {"runId": paused.run_id},
+        },
+        notify,
+    )
+    assert response is not None
+    assert response["result"]["runId"] == paused.run_id
+    assert response["result"]["status"] == RunStatus.KILLED.value
+
+    header = await store.get(paused.run_id)
+    assert header is not None
+    assert header.status == RunStatus.KILLED.value
+
+
+async def test_runs_rpc_kill_without_runner_returns_invalid_params(tmp_path: Path) -> None:
+    store = RunsStore(data_dir=tmp_path)
+    dispatcher = Dispatcher()
+    register_runs_methods(dispatcher, store)
+
+    async def notify(method: str, params: Any) -> None:
+        del method, params
+
+    response = await dispatcher.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "runs.kill",
+            "params": {"runId": "r_x"},
+        },
+        notify,
+    )
+    assert response is not None
+    assert response["error"]["code"] == -32602

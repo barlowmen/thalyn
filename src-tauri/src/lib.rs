@@ -148,6 +148,36 @@ async fn get_run(state: State<'_, AppState>, run_id: String) -> Result<Value, St
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+async fn get_run_tree(state: State<'_, AppState>, run_id: String) -> Result<Value, String> {
+    state
+        .brain
+        .call("runs.tree", json!({ "runId": run_id }), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn kill_run(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    run_id: String,
+) -> Result<Value, String> {
+    let app_for_callback = app.clone();
+    state
+        .brain
+        .call_streaming(
+            "runs.kill",
+            json!({ "runId": run_id }),
+            BRAIN_CALL_TIMEOUT,
+            move |method, params| {
+                forward_brain_notification(method, params, &app_for_callback, "");
+            },
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// Translate a brain JSON-RPC notification into a Tauri event for the
 /// renderer. `chat.chunk` is wrapped with the session id; the run.*
 /// notifications already carry their runId in the params.
@@ -321,6 +351,8 @@ pub fn run() {
             approve_plan,
             list_runs,
             get_run,
+            get_run_tree,
+            kill_run,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

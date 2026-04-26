@@ -25,7 +25,7 @@ def main() -> int:
     runner = Runner(registry, runs_store=runs_store, data_dir=data_dir)
     register_chat_methods(dispatcher, registry, runner=runner)
     register_approval_methods(dispatcher, runner)
-    register_runs_methods(dispatcher, runs_store)
+    register_runs_methods(dispatcher, runs_store, runner=runner)
 
     async def serve() -> None:
         # Pick up any runs that were in flight when the brain last
