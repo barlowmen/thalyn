@@ -17,6 +17,9 @@ use crate::secrets::SecretsManager;
 const BRAIN_CALL_TIMEOUT: Duration = Duration::from_secs(15);
 const CHAT_DEADLINE: Duration = Duration::from_secs(180);
 const CHAT_CHUNK_EVENT: &str = "chat:chunk";
+const RUN_STATUS_EVENT: &str = "run:status";
+const RUN_PLAN_UPDATE_EVENT: &str = "run:plan_update";
+const RUN_ACTION_LOG_EVENT: &str = "run:action_log";
 
 /// Shared application state, registered with Tauri's `manage` so commands
 /// can pull it via `State<...>`.
@@ -172,17 +175,31 @@ async fn send_chat(
     let result = state
         .brain
         .call_streaming("chat.send", params, CHAT_DEADLINE, move |method, params| {
-            if method != "chat.chunk" {
+            let event_name = match method {
+                "chat.chunk" => CHAT_CHUNK_EVENT,
+                "run.status" => RUN_STATUS_EVENT,
+                "run.plan_update" => RUN_PLAN_UPDATE_EVENT,
+                "run.action_log" => RUN_ACTION_LOG_EVENT,
+                _ => return,
+            };
+            // Chat chunks travel with the session id so the renderer
+            // can multiplex multiple sessions per window once that
+            // arrives; for now there's one. Run-lifecycle events
+            // already carry runId in their params.
+            if event_name == CHAT_CHUNK_EVENT {
+                if let Some(chunk) = params.get("chunk") {
+                    let event = ChatChunkEvent {
+                        session_id: session_id_for_callback.clone(),
+                        chunk: chunk.clone(),
+                    };
+                    if let Err(err) = app_for_callback.emit(event_name, event) {
+                        tracing::error!(?err, "failed to forward chat chunk");
+                    }
+                }
                 return;
             }
-            if let Some(chunk) = params.get("chunk") {
-                let event = ChatChunkEvent {
-                    session_id: session_id_for_callback.clone(),
-                    chunk: chunk.clone(),
-                };
-                if let Err(err) = app_for_callback.emit(CHAT_CHUNK_EVENT, event) {
-                    tracing::error!(?err, "failed to forward chat chunk");
-                }
+            if let Err(err) = app_for_callback.emit(event_name, params.clone()) {
+                tracing::error!(?err, %event_name, "failed to forward brain notification");
             }
         })
         .await

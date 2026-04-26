@@ -53,6 +53,12 @@ stubbed.__TAURI_INTERNALS__ = {
     if (command === "provider_configured") {
       return false;
     }
+    if (command === "list_runs") {
+      return { runs: [] };
+    }
+    if (command === "get_run") {
+      return null;
+    }
     return null;
   },
 };
