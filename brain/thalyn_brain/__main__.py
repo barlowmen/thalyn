@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
+from thalyn_brain.approval_rpc import register_approval_methods
 from thalyn_brain.chat import register_chat_methods
 from thalyn_brain.orchestration import Runner
 from thalyn_brain.orchestration.resume import resume_unfinished_runs
@@ -23,6 +24,7 @@ def main() -> int:
     runs_store = RunsStore(data_dir=data_dir)
     runner = Runner(registry, runs_store=runs_store, data_dir=data_dir)
     register_chat_methods(dispatcher, registry, runner=runner)
+    register_approval_methods(dispatcher, runner)
     register_runs_methods(dispatcher, runs_store)
 
     async def serve() -> None:

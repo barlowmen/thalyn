@@ -20,6 +20,7 @@ const CHAT_CHUNK_EVENT: &str = "chat:chunk";
 const RUN_STATUS_EVENT: &str = "run:status";
 const RUN_PLAN_UPDATE_EVENT: &str = "run:plan_update";
 const RUN_ACTION_LOG_EVENT: &str = "run:action_log";
+const RUN_APPROVAL_REQUIRED_EVENT: &str = "run:approval_required";
 
 /// Shared application state, registered with Tauri's `manage` so commands
 /// can pull it via `State<...>`.
@@ -147,6 +148,76 @@ async fn get_run(state: State<'_, AppState>, run_id: String) -> Result<Value, St
         .map_err(|err| err.to_string())
 }
 
+/// Translate a brain JSON-RPC notification into a Tauri event for the
+/// renderer. `chat.chunk` is wrapped with the session id; the run.*
+/// notifications already carry their runId in the params.
+fn forward_brain_notification(method: &str, params: &Value, app: &AppHandle, session_id: &str) {
+    let event_name = match method {
+        "chat.chunk" => CHAT_CHUNK_EVENT,
+        "run.status" => RUN_STATUS_EVENT,
+        "run.plan_update" => RUN_PLAN_UPDATE_EVENT,
+        "run.action_log" => RUN_ACTION_LOG_EVENT,
+        "run.approval_required" => RUN_APPROVAL_REQUIRED_EVENT,
+        _ => return,
+    };
+    if event_name == CHAT_CHUNK_EVENT {
+        if let Some(chunk) = params.get("chunk") {
+            let event = ChatChunkEvent {
+                session_id: session_id.to_owned(),
+                chunk: chunk.clone(),
+            };
+            if let Err(err) = app.emit(event_name, event) {
+                tracing::error!(?err, "failed to forward chat chunk");
+            }
+        }
+        return;
+    }
+    if let Err(err) = app.emit(event_name, params.clone()) {
+        tracing::error!(?err, %event_name, "failed to forward brain notification");
+    }
+}
+
+#[tauri::command]
+async fn approve_plan(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    run_id: String,
+    provider_id: String,
+    decision: String,
+    edited_plan: Option<Value>,
+    session_id: Option<String>,
+) -> Result<Value, String> {
+    let app_for_callback = app.clone();
+    let session_id_for_callback = session_id.unwrap_or_default();
+
+    let mut params = json!({
+        "runId": run_id,
+        "providerId": provider_id,
+        "decision": decision,
+    });
+    if let Some(plan) = edited_plan {
+        params["editedPlan"] = plan;
+    }
+
+    state
+        .brain
+        .call_streaming(
+            "run.approve_plan",
+            params,
+            CHAT_DEADLINE,
+            move |method, params| {
+                forward_brain_notification(
+                    method,
+                    params,
+                    &app_for_callback,
+                    &session_id_for_callback,
+                );
+            },
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
 #[tauri::command]
 async fn send_chat(
     app: AppHandle,
@@ -175,32 +246,7 @@ async fn send_chat(
     let result = state
         .brain
         .call_streaming("chat.send", params, CHAT_DEADLINE, move |method, params| {
-            let event_name = match method {
-                "chat.chunk" => CHAT_CHUNK_EVENT,
-                "run.status" => RUN_STATUS_EVENT,
-                "run.plan_update" => RUN_PLAN_UPDATE_EVENT,
-                "run.action_log" => RUN_ACTION_LOG_EVENT,
-                _ => return,
-            };
-            // Chat chunks travel with the session id so the renderer
-            // can multiplex multiple sessions per window once that
-            // arrives; for now there's one. Run-lifecycle events
-            // already carry runId in their params.
-            if event_name == CHAT_CHUNK_EVENT {
-                if let Some(chunk) = params.get("chunk") {
-                    let event = ChatChunkEvent {
-                        session_id: session_id_for_callback.clone(),
-                        chunk: chunk.clone(),
-                    };
-                    if let Err(err) = app_for_callback.emit(event_name, event) {
-                        tracing::error!(?err, "failed to forward chat chunk");
-                    }
-                }
-                return;
-            }
-            if let Err(err) = app_for_callback.emit(event_name, params.clone()) {
-                tracing::error!(?err, %event_name, "failed to forward brain notification");
-            }
+            forward_brain_notification(method, params, &app_for_callback, &session_id_for_callback);
         })
         .await
         .map_err(|err| err.to_string())?;
@@ -272,6 +318,7 @@ pub fn run() {
             clear_api_key,
             provider_configured,
             send_chat,
+            approve_plan,
             list_runs,
             get_run,
         ])
