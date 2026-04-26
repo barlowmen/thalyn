@@ -5,6 +5,7 @@ import {
   type Plan,
   type RunHeader,
   type RunStatus,
+  type SandboxTier,
   getRun,
   subscribeRunActionLog,
   subscribeRunPlanUpdate,
@@ -21,6 +22,7 @@ export type RunDetail = {
   plan: Plan | null;
   actionLog: ActionLogEntry[];
   finalResponse: string;
+  sandboxTier: SandboxTier | null;
 };
 
 /**
@@ -91,5 +93,6 @@ function detailFromHeader(header: RunHeader): RunDetail {
     plan: header.plan,
     actionLog: [],
     finalResponse: header.finalResponse,
+    sandboxTier: header.sandboxTier ?? null,
   };
 }

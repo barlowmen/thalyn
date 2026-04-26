@@ -30,7 +30,8 @@ nothing else:
       "description": "<imperative, action-focused step>",
       "rationale": "<why this step is needed>",
       "estimated_tokens": <integer>,
-      "subagent_kind": "<optional; one of \"research\", \"edit\", \"tool\", or omit>"
+      "subagent_kind": "<optional; one of \"research\", \"edit\", \"tool\", or omit>",
+      "sandbox_tier": "<optional; one of \"tier_0\", \"tier_1\", \"tier_2\", \"tier_3\", or omit>"
     }
   ]
 }
@@ -39,6 +40,13 @@ If a step needs a focused worker — gathering context, editing a file,
 running a tool — set ``subagent_kind`` so the runtime can dispatch a
 sub-agent. Steps that simply summarise or answer should omit it.
 
+``sandbox_tier`` selects the isolation level for a delegated step:
+``tier_0`` is bare process (read-only inspection), ``tier_1`` is the
+default (devcontainer + git worktree, default-deny egress) for any
+step that touches the filesystem or shell, and ``tier_2``/``tier_3``
+are higher-isolation tiers reserved for risky or compute-heavy work.
+Omit when ``subagent_kind`` is not set.
+
 If the task is a simple question or doesn't need decomposition, emit
 a single step that is "Answer the user's question." with rationale
 "Trivial response; no decomposition needed." and estimated_tokens
@@ -46,6 +54,8 @@ between 100 and 500. Otherwise produce 2 to 6 steps.
 
 Do not include any prose outside the JSON object.
 """
+
+_SANDBOX_TIER_VALUES = frozenset({"tier_0", "tier_1", "tier_2", "tier_3"})
 
 
 @dataclass
@@ -113,6 +123,17 @@ def _parse_plan(text: str, *, fallback_goal: str) -> Plan:
             if isinstance(subagent_kind_value, str) and subagent_kind_value.strip()
             else None
         )
+        sandbox_tier_value = raw.get("sandbox_tier")
+        sandbox_tier: str | None = None
+        if isinstance(sandbox_tier_value, str):
+            candidate = sandbox_tier_value.strip()
+            if candidate in _SANDBOX_TIER_VALUES:
+                sandbox_tier = candidate
+        # Default delegated steps to tier-1; non-delegated steps stay
+        # without a tier so the renderer doesn't show a badge for
+        # work that never spawns a sub-agent.
+        if sandbox_tier is None and subagent_kind is not None:
+            sandbox_tier = "tier_1"
         nodes.append(
             PlanNode(
                 id=f"step_{uuid.uuid4().hex[:8]}",
@@ -122,6 +143,7 @@ def _parse_plan(text: str, *, fallback_goal: str) -> Plan:
                 estimated_cost=cost,
                 status=PlanNodeStatus.PENDING,
                 subagent_kind=subagent_kind,
+                sandbox_tier=sandbox_tier,
             )
         )
 

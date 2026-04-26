@@ -3,7 +3,14 @@ import { Bot, X } from "lucide-react";
 import type { SubAgentTile } from "@/components/inspector/use-subagent-tree";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { RunStatus } from "@/lib/runs";
+import type { RunStatus, SandboxTier } from "@/lib/runs";
+
+const TIER_LABEL: Record<SandboxTier, string> = {
+  tier_0: "Tier 0",
+  tier_1: "Tier 1",
+  tier_2: "Tier 2",
+  tier_3: "Tier 3",
+};
 
 const STATUS_TONE: Record<
   RunStatus,
@@ -77,6 +84,11 @@ export function SubAgentTiles({
                   </p>
                 </div>
               </button>
+              {tile.sandboxTier && (
+                <Badge tone="muted" aria-label={`Sandbox ${TIER_LABEL[tile.sandboxTier]}`}>
+                  {TIER_LABEL[tile.sandboxTier]}
+                </Badge>
+              )}
               <Badge tone={STATUS_TONE[tile.status]}>
                 {STATUS_LABEL[tile.status]}
               </Badge>

@@ -527,6 +527,9 @@ class Runner:
             },
         )
 
+        sandbox_tier_raw = plan_node.get("sandboxTier")
+        sandbox_tier = sandbox_tier_raw if isinstance(sandbox_tier_raw, str) else None
+
         if self._runs_store is not None:
             await self._runs_store.insert(
                 RunHeader(
@@ -540,6 +543,7 @@ class Runner:
                     completed_at_ms=None,
                     drift_score=0.0,
                     final_response="",
+                    sandbox_tier=sandbox_tier,
                 )
             )
 

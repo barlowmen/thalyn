@@ -51,6 +51,7 @@ class PlanNode:
     status: PlanNodeStatus = PlanNodeStatus.PENDING
     parent_id: str | None = None
     subagent_kind: str | None = None
+    sandbox_tier: str | None = None
 
     def to_wire(self) -> dict[str, Any]:
         return {
@@ -62,6 +63,7 @@ class PlanNode:
             "status": self.status.value,
             "parentId": self.parent_id,
             "subagentKind": self.subagent_kind,
+            "sandboxTier": self.sandbox_tier,
         }
 
 

@@ -25,6 +25,8 @@ export type PlanNodeStatus =
   | "errored"
   | "skipped";
 
+export type SandboxTier = "tier_0" | "tier_1" | "tier_2" | "tier_3";
+
 export type PlanNode = {
   id: string;
   order: number;
@@ -33,6 +35,8 @@ export type PlanNode = {
   estimatedCost: Record<string, unknown>;
   status: PlanNodeStatus;
   parentId: string | null;
+  subagentKind?: string | null;
+  sandboxTier?: SandboxTier | null;
 };
 
 export type Plan = {
@@ -65,6 +69,7 @@ export type RunHeader = {
   driftScore: number;
   finalResponse: string;
   plan: Plan | null;
+  sandboxTier?: SandboxTier | null;
 };
 
 /**

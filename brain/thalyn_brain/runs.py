@@ -43,6 +43,7 @@ class RunHeader:
     drift_score: float
     final_response: str
     plan: dict[str, Any] | None = None
+    sandbox_tier: str | None = None
 
     def to_wire(self) -> dict[str, Any]:
         d = asdict(self)
@@ -58,6 +59,7 @@ class RunHeader:
             "driftScore": d["drift_score"],
             "finalResponse": d["final_response"],
             "plan": d["plan"],
+            "sandboxTier": d["sandbox_tier"],
         }
 
 
@@ -90,7 +92,8 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     completed_at_ms INTEGER,
     drift_score REAL NOT NULL DEFAULT 0,
     final_response TEXT NOT NULL DEFAULT '',
-    plan_json TEXT
+    plan_json TEXT,
+    sandbox_tier TEXT
 );
 
 CREATE INDEX IF NOT EXISTS agent_runs_status_idx ON agent_runs(status);
@@ -109,6 +112,13 @@ class RunsStore:
         self._lock = asyncio.Lock()
         with self._open() as conn:
             conn.executescript(_SCHEMA)
+            # Forward-compat: ALTER TABLE for older databases that
+            # predate columns introduced after the initial schema.
+            existing_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(agent_runs)").fetchall()
+            }
+            if "sandbox_tier" not in existing_columns:
+                conn.execute("ALTER TABLE agent_runs ADD COLUMN sandbox_tier TEXT")
 
     def _open(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, isolation_level=None)
@@ -128,8 +138,8 @@ class RunsStore:
                 INSERT INTO agent_runs
                     (run_id, project_id, parent_run_id, status, title,
                      provider_id, started_at_ms, completed_at_ms,
-                     drift_score, final_response, plan_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     drift_score, final_response, plan_json, sandbox_tier)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     header.run_id,
@@ -143,6 +153,7 @@ class RunsStore:
                     header.drift_score,
                     header.final_response,
                     json.dumps(header.plan) if header.plan is not None else None,
+                    header.sandbox_tier,
                 ),
             )
 
@@ -268,6 +279,7 @@ class RunsStore:
 def _row_to_header(row: sqlite3.Row) -> RunHeader:
     plan_json = row["plan_json"]
     plan = json.loads(plan_json) if plan_json else None
+    sandbox_tier = row["sandbox_tier"] if "sandbox_tier" in row.keys() else None
     return RunHeader(
         run_id=row["run_id"],
         project_id=row["project_id"],
@@ -280,4 +292,5 @@ def _row_to_header(row: sqlite3.Row) -> RunHeader:
         drift_score=row["drift_score"],
         final_response=row["final_response"],
         plan=plan,
+        sandbox_tier=sandbox_tier,
     )

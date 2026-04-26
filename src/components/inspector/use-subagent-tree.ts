@@ -6,6 +6,7 @@ import {
   type RunHeader,
   type RunStatus,
   type RunTreeNode,
+  type SandboxTier,
   subscribeRunStatus,
 } from "@/lib/runs";
 
@@ -15,6 +16,7 @@ export type SubAgentTile = {
   title: string;
   status: RunStatus;
   startedAtMs: number;
+  sandboxTier?: SandboxTier | null;
 };
 
 /**
@@ -103,6 +105,7 @@ function tileFromHeader(header: RunHeader): SubAgentTile {
     title: header.title,
     status: header.status,
     startedAtMs: header.startedAtMs,
+    sandboxTier: header.sandboxTier ?? null,
   };
 }
 

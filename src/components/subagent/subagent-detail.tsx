@@ -5,7 +5,14 @@ import { PlanTree } from "@/components/inspector/plan-tree";
 import { useRunDetail } from "@/components/inspector/use-run-detail";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { killRun, type RunStatus } from "@/lib/runs";
+import { killRun, type RunStatus, type SandboxTier } from "@/lib/runs";
+
+const TIER_LABEL: Record<SandboxTier, string> = {
+  tier_0: "Tier 0 — bare process",
+  tier_1: "Tier 1 — devcontainer + worktree",
+  tier_2: "Tier 2 — microVM",
+  tier_3: "Tier 3 — cloud sandbox",
+};
 
 const STATUS_TONE: Record<
   RunStatus,
@@ -73,6 +80,9 @@ export function SubAgentDetail({ runId, onClose, onTakeOver }: Props) {
             </p>
           </div>
           <Badge tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</Badge>
+          {detail?.sandboxTier && (
+            <Badge tone="muted">{TIER_LABEL[detail.sandboxTier]}</Badge>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {!isTerminal && (
