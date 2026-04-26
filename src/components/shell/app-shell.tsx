@@ -1,6 +1,10 @@
-import { type ReactNode, useCallback, useState } from "react";
-import type { Layout } from "react-resizable-panels";
+import { type ReactNode, useCallback, useRef, useState } from "react";
+import type {
+  Layout,
+  PanelImperativeHandle,
+} from "react-resizable-panels";
 
+import { CommandPalette } from "@/components/command-palette";
 import { ActivityRail } from "@/components/shell/activity-rail";
 import { InspectorPanel } from "@/components/shell/inspector-panel";
 import { SidebarPanel } from "@/components/shell/sidebar-panel";
@@ -18,9 +22,9 @@ import {
  *   │ 56px │ 200–360 px  │  fluid                  │  280–480 px  │
  *   └──────┴─────────────┴─────────────────────────┴──────────────┘
  *
- * Sidebar and inspector are collapsible (drag the separator to the
- * edge). The layout is persisted to localStorage; a per-project key
- * lands when projects come online — for now there is one shared key.
+ * Sidebar and inspector are collapsible — by drag-to-edge or via the
+ * command palette. Layout is persisted per shell instance to
+ * localStorage; a per-project key lands when projects come online.
  */
 const STORAGE_KEY = "thalyn:layout:default";
 const DEFAULT_LAYOUT: Layout = {
@@ -55,7 +59,17 @@ function saveLayout(layout: Layout): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
   } catch {
-    // Storage may be full or disabled; persistence is best-effort.
+    // best-effort — storage may be full or disabled
+  }
+}
+
+function togglePanel(ref: React.RefObject<PanelImperativeHandle | null>) {
+  const handle = ref.current;
+  if (!handle) return;
+  if (handle.isCollapsed()) {
+    handle.expand();
+  } else {
+    handle.collapse();
   }
 }
 
@@ -63,9 +77,15 @@ export function AppShell({ main }: { main: ReactNode }) {
   const [activeRail, setActiveRail] = useState<string>("chat");
   const [defaultLayout] = useState<Layout>(() => loadLayout());
 
+  const sidebarRef = useRef<PanelImperativeHandle | null>(null);
+  const inspectorRef = useRef<PanelImperativeHandle | null>(null);
+
   const onLayoutChange = useCallback((layout: Layout) => {
     saveLayout(layout);
   }, []);
+
+  const toggleSidebar = useCallback(() => togglePanel(sidebarRef), []);
+  const toggleInspector = useCallback(() => togglePanel(inspectorRef), []);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
@@ -80,6 +100,7 @@ export function AppShell({ main }: { main: ReactNode }) {
       >
         <ResizablePanel
           id="sidebar"
+          panelRef={sidebarRef}
           defaultSize={defaultLayout.sidebar}
           minSize={14}
           maxSize={30}
@@ -108,6 +129,7 @@ export function AppShell({ main }: { main: ReactNode }) {
 
         <ResizablePanel
           id="inspector"
+          panelRef={inspectorRef}
           defaultSize={defaultLayout.inspector}
           minSize={18}
           maxSize={36}
@@ -117,6 +139,11 @@ export function AppShell({ main }: { main: ReactNode }) {
           <InspectorPanel />
         </ResizablePanel>
       </ResizableGroup>
+
+      <CommandPalette
+        onToggleSidebar={toggleSidebar}
+        onToggleInspector={toggleInspector}
+      />
     </div>
   );
 }
