@@ -136,7 +136,5 @@ runs/
 *.db-shm
 *.db-wal
 
-# Going-public artifacts that shouldn't be checked in pre-public
-docs/architecture-reviews/
-docs/spikes/
+# In-progress agent state (transient; never committed)
 STUCK.md

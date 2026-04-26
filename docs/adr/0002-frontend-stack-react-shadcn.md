@@ -26,3 +26,7 @@ Use **React 18** as the frontend framework, **shadcn/ui** as the component layer
 ## Notes
 
 Re-evaluate React version, Tailwind version, and shadcn equivalents at every architecture review.
+
+### Refinement at v0.2/v0.3 implementation
+
+We adopted **React 19** and **Tailwind v4** when the design system landed in v0.2, ahead of the "v0.6 review" note in **Consequences** above. Both have been stable through v0.3 (provider settings, command palette, chat surface, dialog/input/label/badge primitives) and the migration has paid for itself: Tailwind v4's first-class `@theme inline` block is a much cleaner home for the OKLCH bridge than v3's `tailwind.config.js`. The architecture-review on 2026-04-26 retired the upgrade item.
