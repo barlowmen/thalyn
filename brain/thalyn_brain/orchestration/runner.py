@@ -25,8 +25,9 @@ from thalyn_brain.orchestration.graph import (
     Notifier,
     build_graph,
 )
-from thalyn_brain.orchestration.state import GraphState, RunStatus
+from thalyn_brain.orchestration.state import GraphState, RunStatus, SubAgentResult
 from thalyn_brain.orchestration.storage import open_run_checkpointer
+from thalyn_brain.orchestration.subagent import SubAgentSpawner
 from thalyn_brain.provider import ProviderRegistry
 from thalyn_brain.runs import RunHeader, RunsStore, RunUpdate
 
@@ -117,6 +118,18 @@ class Runner:
             existing = await graph.aget_state(config)
             if existing is None or not existing.values:
                 return None
+            existing_values = dict(existing.values)
+            spawner = self._spawner_for(
+                session_id=existing_values.get("session_id", ""),
+                provider_id=provider_id,
+                parent_notify=notify,
+            )
+            graph = build_graph(
+                provider,
+                notify,
+                checkpointer=checkpointer,
+                spawn_subagent=spawner,
+            )
 
             final_state = await graph.ainvoke(None, config=config)
 
@@ -135,6 +148,8 @@ class Runner:
         prompt: str,
         notify: Notifier,
         run_id: str | None = None,
+        parent_run_id: str | None = None,
+        depth: int = 0,
     ) -> RunResult:
         provider = self._registry.get(provider_id)
 
@@ -155,7 +170,7 @@ class Runner:
                 RunHeader(
                     run_id=run_id,
                     project_id=None,
-                    parent_run_id=None,
+                    parent_run_id=parent_run_id,
                     status=RunStatus.PLANNING.value,
                     title=title,
                     provider_id=provider_id,
@@ -166,19 +181,33 @@ class Runner:
                 )
             )
 
+        spawner = self._spawner_for(
+            session_id=session_id,
+            provider_id=provider_id,
+            parent_notify=notify,
+        )
+
         async with self._checkpointer_context(run_id) as checkpointer:
-            graph = build_graph(provider, notify, checkpointer=checkpointer)
+            graph = build_graph(
+                provider,
+                notify,
+                checkpointer=checkpointer,
+                spawn_subagent=spawner,
+            )
 
             initial: GraphState = {
                 "run_id": run_id,
                 "session_id": session_id,
                 "provider_id": provider_id,
+                "parent_run_id": parent_run_id,
+                "depth": depth,
                 "user_message": prompt,
                 "plan": None,
                 "action_log": [],
                 "status": RunStatus.PENDING.value,
                 "final_response": "",
                 "error": None,
+                "subagent_results": [],
             }
             config = {"configurable": {"thread_id": run_id}}
 
@@ -239,6 +268,19 @@ class Runner:
             existing = await graph.aget_state(config)
             if existing is None or not existing.values:
                 return None
+
+            existing_values = dict(existing.values)
+            spawner = self._spawner_for(
+                session_id=existing_values.get("session_id", ""),
+                provider_id=provider_id,
+                parent_notify=notify,
+            )
+            graph = build_graph(
+                provider,
+                notify,
+                checkpointer=checkpointer,
+                spawn_subagent=spawner,
+            )
 
             if decision == "reject":
                 # Mark the run killed and skip resumption.
@@ -313,6 +355,172 @@ class Runner:
             final_response="",
             plan=final_state.get("plan"),
             action_log_size=len(final_state.get("action_log") or []),
+        )
+
+    async def kill_run(
+        self,
+        *,
+        run_id: str,
+        notify: Notifier,
+    ) -> RunResult | None:
+        """Mark a run killed and surface the status transition.
+
+        Used when the user aborts a sub-agent (or the parent that
+        spawned one) before it reaches its terminal state. The
+        in-flight asyncio task driving the graph is not forcibly
+        cancelled here — the kill flips the persistent state and
+        notifies the renderer; in-flight work will exit on its own
+        next checkpoint barrier.
+        """
+        audit = self._audit_for(run_id)
+        teed = wrap_notifier(notify, audit)
+        await teed(
+            RUN_STATUS,
+            {"runId": run_id, "status": RunStatus.KILLED.value},
+        )
+
+        if self._runs_store is None:
+            return None
+        header = await self._runs_store.get(run_id)
+        if header is None:
+            return None
+        await self._runs_store.update(
+            run_id,
+            RunUpdate(
+                status=RunStatus.KILLED.value,
+                completed_at_ms=int(time.time() * 1000),
+            ),
+        )
+        return RunResult(
+            run_id=run_id,
+            session_id="",
+            provider_id=header.provider_id,
+            status=RunStatus.KILLED.value,
+            final_response=header.final_response,
+            plan=header.plan,
+            action_log_size=0,
+        )
+
+    def _spawner_for(
+        self,
+        *,
+        session_id: str,
+        provider_id: str,
+        parent_notify: Notifier,
+    ) -> SubAgentSpawner:
+        """Build a closure the graph layer uses to dispatch a sub-agent.
+
+        The graph supplies the parent's current depth on each call —
+        that's the only authoritative reading once the run resumes
+        across an interrupt — so the closure forwards it verbatim.
+        """
+
+        async def spawner(
+            *,
+            parent_run_id: str,
+            plan_node: dict[str, Any],
+            depth: int,
+        ) -> SubAgentResult:
+            return await self._spawn_subagent(
+                parent_run_id=parent_run_id,
+                plan_node=plan_node,
+                depth=depth,
+                session_id=session_id,
+                provider_id=provider_id,
+                parent_notify=parent_notify,
+            )
+
+        return spawner
+
+    async def _spawn_subagent(
+        self,
+        *,
+        parent_run_id: str,
+        plan_node: dict[str, Any],
+        depth: int,
+        session_id: str,
+        provider_id: str,
+        parent_notify: Notifier,
+    ) -> SubAgentResult:
+        """Drive one sub-agent run to completion and return its outcome.
+
+        The child shares the parent's session and provider but gets a
+        fresh ``run_id``, its own checkpoint db, its own audit log,
+        and its own ``parent_run_id`` / ``depth`` markers in state. Sub-agent
+        events flow through the same notifier the parent is using —
+        the renderer routes them by ``runId``.
+        """
+        child_run_id = _new_run_id()
+        title = plan_node.get("description") or "Sub-agent task"
+        if isinstance(title, str):
+            title = title[:80]
+        description = plan_node.get("description") or ""
+        plan_node_id = plan_node.get("id") or ""
+        child_depth = depth + 1
+
+        provider = self._registry.get(provider_id)
+        audit = self._audit_for(child_run_id)
+        notify = wrap_notifier(parent_notify, audit)
+        started_at = int(time.time() * 1000)
+
+        await notify(
+            RUN_STATUS,
+            {"runId": child_run_id, "status": RunStatus.PENDING.value},
+        )
+
+        if self._runs_store is not None:
+            await self._runs_store.insert(
+                RunHeader(
+                    run_id=child_run_id,
+                    project_id=None,
+                    parent_run_id=parent_run_id,
+                    status=RunStatus.PLANNING.value,
+                    title=str(title),
+                    provider_id=provider_id,
+                    started_at_ms=started_at,
+                    completed_at_ms=None,
+                    drift_score=0.0,
+                    final_response="",
+                )
+            )
+
+        async with self._checkpointer_context(child_run_id) as checkpointer:
+            graph = build_graph(
+                provider,
+                notify,
+                checkpointer=checkpointer,
+                interrupt_on_plan_approval=False,
+                spawn_subagent=None,
+            )
+            initial: GraphState = {
+                "run_id": child_run_id,
+                "session_id": session_id,
+                "provider_id": provider_id,
+                "parent_run_id": parent_run_id,
+                "depth": child_depth,
+                "user_message": description,
+                "plan": None,
+                "action_log": [],
+                "status": RunStatus.PENDING.value,
+                "final_response": "",
+                "error": None,
+                "subagent_results": [],
+            }
+            config = {"configurable": {"thread_id": child_run_id}}
+            final_state = await graph.ainvoke(initial, config=config)
+
+        finalised = await self._finalize(
+            run_id=child_run_id,
+            provider_id=provider_id,
+            session_id=session_id,
+            final_state=final_state,
+        )
+        return SubAgentResult(
+            parent_run_id=parent_run_id,
+            child_run_id=child_run_id,
+            plan_node_id=str(plan_node_id),
+            status=finalised.status,
+            final_response=finalised.final_response,
         )
 
     async def _finalize(

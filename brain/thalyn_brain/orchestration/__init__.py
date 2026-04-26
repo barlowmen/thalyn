@@ -20,7 +20,9 @@ from thalyn_brain.orchestration.state import (
     PlanNode,
     PlanNodeStatus,
     RunStatus,
+    SubAgentResult,
 )
+from thalyn_brain.orchestration.subagent import SubAgentSpawner
 
 __all__ = [
     "CHAT_CHUNK",
@@ -37,5 +39,7 @@ __all__ = [
     "RunResult",
     "RunStatus",
     "Runner",
+    "SubAgentResult",
+    "SubAgentSpawner",
     "build_graph",
 ]

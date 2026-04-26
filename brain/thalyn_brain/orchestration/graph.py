@@ -1,13 +1,13 @@
 """LangGraph wiring for the brain orchestrator.
 
-The v0.4 graph runs `plan → execute → critic → respond` sequentially.
-Plan and critic are placeholder structural nodes today — plan emits a
-single-step structured plan from the user's message; critic is a
-pass-through gate that lands real review logic in v0.8. Execute is a
-no-op until the sub-agent surface arrives in v0.6, so the v0.4 flow
-collapses to plan → respond once you trace through it.
+The graph runs ``plan → execute → critic → respond`` sequentially.
+Plan asks the active provider for a structured plan; critic is a
+pass-through gate until the drift / budget logic lands; execute
+dispatches a sub-agent for any plan step that requested one and
+otherwise stays a structural transition. Respond streams the final
+user-visible turn.
 
-A `Notifier` is threaded through every node so they can announce
+A ``Notifier`` is threaded through every node so they can announce
 plan updates, action-log entries, and status transitions to the IPC
 client mid-flight without coupling the orchestrator to the transport.
 """
@@ -26,6 +26,7 @@ from thalyn_brain.orchestration.state import (
     GraphState,
     RunStatus,
 )
+from thalyn_brain.orchestration.subagent import SubAgentSpawner
 from thalyn_brain.provider import (
     ChatChunk,
     ChatErrorChunk,
@@ -62,6 +63,7 @@ def build_graph(
     *,
     checkpointer: Any | None = None,
     interrupt_on_plan_approval: bool = True,
+    spawn_subagent: SubAgentSpawner | None = None,
 ) -> Any:
     """Build and compile the brain graph.
 
@@ -73,13 +75,22 @@ def build_graph(
     before the ``execute`` node so the user can approve, edit, or
     reject the plan. Tests that don't care about the interrupt can
     flip the flag off and let the graph run end-to-end.
+
+    ``spawn_subagent`` is the runner-supplied callback the execute
+    node uses to dispatch a focused worker for any plan step that
+    asks for one. Leaving it ``None`` keeps execute as a structural
+    pass-through, which is the right default for sub-agents
+    themselves and for tests that don't exercise the spawn path.
     """
     graph: StateGraph[GraphState] = StateGraph(GraphState)
     # LangGraph's add_node overloads don't enjoy our explicit
     # Callable signature on the closure factories. The runtime
     # contract is satisfied — we ignore the typed surface here.
     graph.add_node("plan", _plan_node(provider, notify))  # type: ignore[call-overload]
-    graph.add_node("execute", _execute_node(notify))  # type: ignore[call-overload]
+    graph.add_node(
+        "execute",
+        _execute_node(notify, spawn_subagent),  # type: ignore[call-overload]
+    )
     graph.add_node("critic", _critic_node(notify))  # type: ignore[call-overload]
     graph.add_node("respond", _respond_node(provider, notify))  # type: ignore[call-overload]
 
@@ -140,12 +151,15 @@ def _plan_node(
 
 def _execute_node(
     notify: Notifier,
+    spawn_subagent: SubAgentSpawner | None,
 ) -> Callable[[GraphState], Awaitable[dict[str, Any]]]:
-    """No-op pass-through until sub-agents arrive in v0.6.
+    """Run the plan.
 
-    Real execution will spawn sub-agents into sandboxes and wait for
-    their results. For v0.4 this node simply transitions status from
-    PLANNING to RUNNING and records the boundary in the action log.
+    Plan steps that carry a ``subagentKind`` are dispatched to the
+    runner's spawner; the resulting child run drives its own graph
+    against its own checkpoint and surfaces lifecycle events under
+    its own ``runId``. Steps without a kind stay inline — execute
+    simply records the boundary and lets respond pick up from there.
     """
 
     async def node(state: GraphState) -> dict[str, Any]:
@@ -156,7 +170,58 @@ def _execute_node(
             payload={"from": "plan", "to": "execute"},
         )
         await _emit_action(state, entry, notify)
-        return {"action_log": _append_log(state, entry)}
+        action_log = _append_log(state, entry)
+        state = {**state, "action_log": action_log}
+
+        plan = state.get("plan") or {}
+        nodes_wire = plan.get("nodes") if isinstance(plan, dict) else None
+        results: list[dict[str, Any]] = []
+        if spawn_subagent is not None and isinstance(nodes_wire, list) and nodes_wire:
+            depth = int(state.get("depth", 0))
+            for plan_node in nodes_wire:
+                if not isinstance(plan_node, dict):
+                    continue
+                if not plan_node.get("subagentKind"):
+                    continue
+                spawn_entry = ActionLogEntry(
+                    at_ms=_now_ms(),
+                    kind="decision",
+                    payload={
+                        "step": "spawn_subagent",
+                        "planNodeId": plan_node.get("id"),
+                        "subagentKind": plan_node.get("subagentKind"),
+                    },
+                )
+                await _emit_action(state, spawn_entry, notify)
+                action_log = _append_log(state, spawn_entry)
+                state = {**state, "action_log": action_log}
+
+                spawn_result = await spawn_subagent(
+                    parent_run_id=state["run_id"],
+                    plan_node=plan_node,
+                    depth=depth,
+                )
+                wire = spawn_result.to_wire()
+                results.append(wire)
+
+                done_entry = ActionLogEntry(
+                    at_ms=_now_ms(),
+                    kind="decision",
+                    payload={
+                        "step": "subagent_completed",
+                        "planNodeId": wire["planNodeId"],
+                        "childRunId": wire["childRunId"],
+                        "status": wire["status"],
+                    },
+                )
+                await _emit_action(state, done_entry, notify)
+                action_log = _append_log(state, done_entry)
+                state = {**state, "action_log": action_log}
+
+        return {
+            "action_log": action_log,
+            "subagent_results": results,
+        }
 
     return node
 

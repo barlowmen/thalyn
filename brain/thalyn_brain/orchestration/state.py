@@ -35,8 +35,13 @@ class PlanNodeStatus(StrEnum):
 
 @dataclass
 class PlanNode:
-    """One step inside a plan tree. v0.4 uses a flat list (no nesting);
-    parent_id is wired in for v0.5+ when sub-tasks land."""
+    """One step inside a plan tree.
+
+    ``subagent_kind`` is the planner's signal that this step should be
+    handed off to a focused worker (research, edit, tool, …) instead of
+    inlined into the respond turn. ``None`` keeps the historical
+    pass-through behaviour.
+    """
 
     id: str
     order: int
@@ -45,6 +50,7 @@ class PlanNode:
     estimated_cost: dict[str, Any] = field(default_factory=dict)
     status: PlanNodeStatus = PlanNodeStatus.PENDING
     parent_id: str | None = None
+    subagent_kind: str | None = None
 
     def to_wire(self) -> dict[str, Any]:
         return {
@@ -55,6 +61,7 @@ class PlanNode:
             "estimatedCost": self.estimated_cost,
             "status": self.status.value,
             "parentId": self.parent_id,
+            "subagentKind": self.subagent_kind,
         }
 
 
@@ -95,6 +102,26 @@ class ActionLogEntry:
         return {"atMs": self.at_ms, "kind": self.kind, "payload": self.payload}
 
 
+@dataclass
+class SubAgentResult:
+    """Outcome of a spawned sub-agent run, as returned by the spawner."""
+
+    parent_run_id: str
+    child_run_id: str
+    plan_node_id: str
+    status: str
+    final_response: str
+
+    def to_wire(self) -> dict[str, Any]:
+        return {
+            "parentRunId": self.parent_run_id,
+            "childRunId": self.child_run_id,
+            "planNodeId": self.plan_node_id,
+            "status": self.status,
+            "finalResponse": self.final_response,
+        }
+
+
 class GraphState(TypedDict, total=False):
     """LangGraph state schema.
 
@@ -105,9 +132,12 @@ class GraphState(TypedDict, total=False):
     run_id: str
     session_id: str
     provider_id: str
+    parent_run_id: str | None
+    depth: int
     user_message: str
     plan: dict[str, Any] | None
     action_log: list[dict[str, Any]]
     status: str
     final_response: str
     error: str | None
+    subagent_results: list[dict[str, Any]]

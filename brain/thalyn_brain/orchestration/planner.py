@@ -29,10 +29,15 @@ nothing else:
     {
       "description": "<imperative, action-focused step>",
       "rationale": "<why this step is needed>",
-      "estimated_tokens": <integer>
+      "estimated_tokens": <integer>,
+      "subagent_kind": "<optional; one of \"research\", \"edit\", \"tool\", or omit>"
     }
   ]
 }
+
+If a step needs a focused worker — gathering context, editing a file,
+running a tool — set ``subagent_kind`` so the runtime can dispatch a
+sub-agent. Steps that simply summarise or answer should omit it.
 
 If the task is a simple question or doesn't need decomposition, emit
 a single step that is "Answer the user's question." with rationale
@@ -102,6 +107,12 @@ def _parse_plan(text: str, *, fallback_goal: str) -> Plan:
         cost: dict[str, int | float] = {}
         if isinstance(estimated, int | float):
             cost["tokens"] = int(estimated)
+        subagent_kind_value = raw.get("subagent_kind")
+        subagent_kind = (
+            subagent_kind_value.strip()
+            if isinstance(subagent_kind_value, str) and subagent_kind_value.strip()
+            else None
+        )
         nodes.append(
             PlanNode(
                 id=f"step_{uuid.uuid4().hex[:8]}",
@@ -110,6 +121,7 @@ def _parse_plan(text: str, *, fallback_goal: str) -> Plan:
                 rationale=rationale.strip(),
                 estimated_cost=cost,
                 status=PlanNodeStatus.PENDING,
+                subagent_kind=subagent_kind,
             )
         )
 
