@@ -1,7 +1,7 @@
-import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useState } from "react";
 
-import "./App.css";
+import { Button } from "@/components/ui/button";
 
 type PongPayload = {
   pong: boolean;
@@ -32,20 +32,25 @@ function App() {
   };
 
   return (
-    <main className="container">
-      <h1>Thalyn</h1>
-      <p className="subtitle">Walking skeleton &mdash; ping the brain.</p>
+    <main className="flex min-h-screen flex-col items-center gap-4 px-6 pt-[12vh] text-center">
+      <h1 className="text-3xl font-semibold tracking-tight">Thalyn</h1>
+      <p className="text-muted-foreground">
+        Walking skeleton &mdash; ping the brain.
+      </p>
 
-      <button
-        type="button"
+      <Button
         onClick={ping}
         disabled={state.kind === "pending"}
         aria-busy={state.kind === "pending"}
       >
         {state.kind === "pending" ? "Pinging…" : "Ping brain"}
-      </button>
+      </Button>
 
-      <div className="status" role="status" aria-live="polite">
+      <div
+        className="min-h-6 text-sm"
+        role="status"
+        aria-live="polite"
+      >
         <PingStatus state={state} />
       </div>
     </main>
@@ -55,9 +60,15 @@ function App() {
 function PingStatus({ state }: { state: PingState }) {
   switch (state.kind) {
     case "idle":
-      return <span className="muted">No request issued yet.</span>;
+      return (
+        <span className="text-muted-foreground">No request issued yet.</span>
+      );
     case "pending":
-      return <span className="muted">Waiting for the sidecar…</span>;
+      return (
+        <span className="text-muted-foreground">
+          Waiting for the sidecar…
+        </span>
+      );
     case "ok":
       return (
         <span>
@@ -66,7 +77,7 @@ function PingStatus({ state }: { state: PingState }) {
         </span>
       );
     case "error":
-      return <span className="error">{state.message}</span>;
+      return <span className="text-destructive">{state.message}</span>;
   }
 }
 

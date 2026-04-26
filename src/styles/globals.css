@@ -1,0 +1,105 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "../design/tokens.css";
+
+/*
+ * Tailwind utilities pick up the dark variant when `data-theme="dark"`
+ * (or its descendants) is present on the page. This matches the
+ * attribute-driven theme switcher and avoids the .dark class strategy
+ * shadcn defaults to.
+ */
+@custom-variant dark (&:is([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+ * Bridge layer: shadcn-named CSS variables that point at Thalyn tokens.
+ * Components consume these via Tailwind utility classes (`bg-primary`,
+ * `text-muted-foreground`, etc.) — the @theme inline block below
+ * exposes them to Tailwind's compiler.
+ *
+ * Note: shadcn's `--accent` is a hover-state surface, not a brand
+ * accent; we route Tailwind's accent utilities through `--surface-hover`
+ * to avoid clashing with the Thalyn brand `--accent` defined in
+ * tokens.css.
+ */
+@layer base {
+  :root {
+    --background: var(--bg);
+    --foreground: var(--text);
+    --card: var(--surface-elevated);
+    --card-foreground: var(--text);
+    --popover: var(--surface-elevated);
+    --popover-foreground: var(--text);
+    --primary: var(--accent);
+    --primary-foreground: var(--accent-fg);
+    --secondary: var(--surface);
+    --secondary-foreground: var(--text);
+    --muted: var(--surface);
+    --muted-foreground: var(--text-muted);
+    --surface-hover: var(--surface);
+    --surface-hover-foreground: var(--text);
+    --destructive: var(--danger);
+    --destructive-foreground: var(--accent-fg);
+    --input: var(--border);
+    --ring: var(--focus-ring);
+    --radius: var(--radius-card);
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--surface-hover);
+  --color-accent-foreground: var(--surface-hover-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+}
+
+/*
+ * Reduced-motion: components subscribe to the duration tokens already
+ * zeroed out in tokens.css. Layered animations on third-party libraries
+ * (Tailwind's `animate-*` utilities, tw-animate-css) get neutralised
+ * here as a last-line guarantee.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
