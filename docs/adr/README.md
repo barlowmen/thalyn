@@ -1,0 +1,32 @@
+# Architecture Decision Records
+
+This directory contains Thalyn's ADRs — one decision per file, in [MADR](https://adr.github.io/madr/) format.
+
+## Conventions
+
+- Filenames: `NNNN-short-slug.md` (zero-padded 4-digit number, kebab-case slug).
+- Status: `Proposed`, `Accepted`, `Accepted (provisional)`, `Deprecated`, `Superseded by ADR-NNNN`.
+- ADRs are **immutable once accepted**. To revise a decision, write a new ADR that explicitly **supersedes** the old one and update the old one's status.
+- Keep each ADR short — context, decision, consequences, alternatives. The architecture overview lives in `ARCHITECTURE.md` (later) and `02-architecture.md` (current draft).
+
+## Index
+
+| # | Title | Status |
+|---|---|---|
+| [0001](0001-desktop-runtime-tauri-2.md) | Desktop runtime: Tauri 2 | Accepted (provisional) |
+| [0002](0002-frontend-stack-react-shadcn.md) | Frontend stack: React 18 + shadcn/ui + Tailwind + Vite | Accepted (provisional) |
+| [0003](0003-code-editor-monaco.md) | Code editor: Monaco | Accepted (provisional) |
+| [0004](0004-brain-process-model-python-sidecar.md) | Brain process model: Python sidecar | Accepted (provisional) |
+| [0005](0005-rust-python-ipc-ndjson-jsonrpc.md) | Rust ↔ Python IPC: NDJSON + JSON-RPC 2.0 | Accepted (provisional) |
+| [0006](0006-python-sidecar-packaging-pyoxidizer.md) | Python sidecar packaging: PyOxidizer | Accepted (provisional) |
+| [0007](0007-orchestration-langgraph-claude-sdk.md) | Orchestration: LangGraph 1.0 + Claude Agent SDK | Accepted (provisional) |
+| [0008](0008-durable-execution-sqlitesaver.md) | Durable execution: LangGraph SqliteSaver | Accepted (provisional) |
+| [0009](0009-memory-mem0-langgraph-checkpoints.md) | Memory: Mem0 + LangGraph checkpoints + project files | Accepted (provisional) |
+| [0010](0010-browser-sidecar-chromium-cdp.md) | Browser: sidecar Chromium driven over CDP | Accepted (provisional) |
+| [0011](0011-sandbox-tiers-devcontainer-microvm.md) | Sandbox tiers: devcontainer + worktree default; microVM opt-in | Accepted (provisional) |
+| [0012](0012-provider-abstraction.md) | Provider abstraction: in-process trait + adapters | Accepted (provisional) |
+| [0013](0013-design-system-oklch-geist.md) | Design system: OKLCH tokens, Geist typography, three-panel mosaic | Accepted (provisional) |
+| [0014](0014-documentation-madr-mermaid.md) | Documentation: MADR + Mermaid C4 + ARCHITECTURE.md | Accepted (provisional) |
+| [0015](0015-commit-hygiene-conventional-commits.md) | Commit hygiene: Conventional Commits + git-cliff + leakage scan + no Co-Authored-By | Accepted (provisional) |
+| [0016](0016-license-mit.md) | License: MIT (revisit before public) | Accepted (provisional) |
+| [0017](0017-observability-otel-langfuse.md) | Observability: OpenTelemetry GenAI + self-hosted Langfuse | Accepted (provisional) |
