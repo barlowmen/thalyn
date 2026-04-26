@@ -1,6 +1,7 @@
 import { ArrowLeft, Bot } from "lucide-react";
 
 import { ActionLog } from "@/components/inspector/action-log";
+import { BudgetMeter } from "@/components/inspector/budget-meter";
 import { PlanTree } from "@/components/inspector/plan-tree";
 import { useRunDetail } from "@/components/inspector/use-run-detail";
 import { Badge } from "@/components/ui/badge";
@@ -105,6 +106,17 @@ export function SubAgentDetail({ runId, onClose, onTakeOver }: Props) {
       </header>
 
       <div className="flex-1 overflow-y-auto px-6 py-4">
+        {detail && (detail.budget || detail.driftScore > 0) && (
+          <Section title="Budget &amp; drift">
+            <BudgetMeter
+              budget={detail.budget}
+              consumed={detail.budgetConsumed}
+              driftScore={detail.driftScore}
+              variant="full"
+            />
+          </Section>
+        )}
+
         <Section title="Plan">
           {detail?.plan ? (
             <>

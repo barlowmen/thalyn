@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import {
   getRun,
   getRunTree,
+  type Budget,
+  type BudgetConsumed,
   type RunHeader,
   type RunStatus,
   type RunTreeNode,
@@ -17,6 +19,9 @@ export type SubAgentTile = {
   status: RunStatus;
   startedAtMs: number;
   sandboxTier?: SandboxTier | null;
+  driftScore: number;
+  budget?: Budget | null;
+  budgetConsumed?: BudgetConsumed | null;
 };
 
 /**
@@ -106,6 +111,9 @@ function tileFromHeader(header: RunHeader): SubAgentTile {
     status: header.status,
     startedAtMs: header.startedAtMs,
     sandboxTier: header.sandboxTier ?? null,
+    driftScore: header.driftScore ?? 0,
+    budget: header.budget ?? null,
+    budgetConsumed: header.budgetConsumed ?? null,
   };
 }
 

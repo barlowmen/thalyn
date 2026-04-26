@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 
 import {
   type ActionLogEntry,
+  type Budget,
+  type BudgetConsumed,
   type Plan,
   type RunHeader,
   type RunStatus,
@@ -23,6 +25,9 @@ export type RunDetail = {
   actionLog: ActionLogEntry[];
   finalResponse: string;
   sandboxTier: SandboxTier | null;
+  driftScore: number;
+  budget: Budget | null;
+  budgetConsumed: BudgetConsumed | null;
 };
 
 /**
@@ -94,5 +99,8 @@ function detailFromHeader(header: RunHeader): RunDetail {
     actionLog: [],
     finalResponse: header.finalResponse,
     sandboxTier: header.sandboxTier ?? null,
+    driftScore: header.driftScore ?? 0,
+    budget: header.budget ?? null,
+    budgetConsumed: header.budgetConsumed ?? null,
   };
 }

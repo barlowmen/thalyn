@@ -1,5 +1,6 @@
 import { Bot, X } from "lucide-react";
 
+import { BudgetMeter } from "@/components/inspector/budget-meter";
 import type { SubAgentTile } from "@/components/inspector/use-subagent-tree";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,43 +65,56 @@ export function SubAgentTiles({
       {tiles.map((tile) => {
         const isActive = activeRunId === tile.runId;
         const isTerminal = TERMINAL_STATUSES.includes(tile.status);
+        const hasMeter =
+          (tile.budget && tile.budgetConsumed) || tile.driftScore > 0;
         return (
           <li key={tile.runId}>
             <div
-              className={`group flex items-center gap-2 rounded-md border border-border bg-bg px-3 py-2 transition-colors ${
+              className={`group rounded-md border border-border bg-bg px-3 py-2 transition-colors ${
                 isActive ? "border-accent" : "hover:border-muted-foreground"
               }`}
             >
-              <button
-                type="button"
-                onClick={() => onOpen?.(tile.runId)}
-                className="flex flex-1 items-center gap-2 text-left"
-              >
-                <Bot className="h-4 w-4 text-muted-foreground" aria-hidden />
-                <div className="flex-1 overflow-hidden">
-                  <p className="truncate text-sm">{tile.title}</p>
-                  <p className="truncate font-mono text-[10px] text-muted-foreground">
-                    {tile.runId}
-                  </p>
-                </div>
-              </button>
-              {tile.sandboxTier && (
-                <Badge tone="muted" aria-label={`Sandbox ${TIER_LABEL[tile.sandboxTier]}`}>
-                  {TIER_LABEL[tile.sandboxTier]}
-                </Badge>
-              )}
-              <Badge tone={STATUS_TONE[tile.status]}>
-                {STATUS_LABEL[tile.status]}
-              </Badge>
-              {!isTerminal && onKill && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label={`Kill sub-agent ${tile.title}`}
-                  onClick={() => onKill(tile.runId)}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onOpen?.(tile.runId)}
+                  className="flex flex-1 items-center gap-2 text-left"
                 >
-                  <X className="h-3.5 w-3.5" aria-hidden />
-                </Button>
+                  <Bot className="h-4 w-4 text-muted-foreground" aria-hidden />
+                  <div className="flex-1 overflow-hidden">
+                    <p className="truncate text-sm">{tile.title}</p>
+                    <p className="truncate font-mono text-[10px] text-muted-foreground">
+                      {tile.runId}
+                    </p>
+                  </div>
+                </button>
+                {tile.sandboxTier && (
+                  <Badge tone="muted" aria-label={`Sandbox ${TIER_LABEL[tile.sandboxTier]}`}>
+                    {TIER_LABEL[tile.sandboxTier]}
+                  </Badge>
+                )}
+                <Badge tone={STATUS_TONE[tile.status]}>
+                  {STATUS_LABEL[tile.status]}
+                </Badge>
+                {!isTerminal && onKill && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Kill sub-agent ${tile.title}`}
+                    onClick={() => onKill(tile.runId)}
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden />
+                  </Button>
+                )}
+              </div>
+              {hasMeter && (
+                <div className="mt-2">
+                  <BudgetMeter
+                    budget={tile.budget}
+                    consumed={tile.budgetConsumed}
+                    driftScore={tile.driftScore}
+                  />
+                </div>
               )}
             </div>
           </li>

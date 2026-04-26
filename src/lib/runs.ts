@@ -57,6 +57,19 @@ export type ActionLogEntry = {
   payload: Record<string, unknown>;
 };
 
+export type Budget = {
+  maxTokens?: number | null;
+  maxSeconds?: number | null;
+  maxIterations?: number | null;
+};
+
+export type BudgetConsumed = {
+  tokensUsed: number;
+  elapsedSeconds: number;
+  iterations: number;
+  startedAtMs: number;
+};
+
 export type RunHeader = {
   runId: string;
   projectId: string | null;
@@ -70,6 +83,8 @@ export type RunHeader = {
   finalResponse: string;
   plan: Plan | null;
   sandboxTier?: SandboxTier | null;
+  budget?: Budget | null;
+  budgetConsumed?: BudgetConsumed | null;
 };
 
 /**
