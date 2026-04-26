@@ -89,6 +89,7 @@ ActionKind = Literal[
     "approval",
     "drift_check",
     "node_transition",
+    "memory_write",
 ]
 
 
