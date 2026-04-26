@@ -13,9 +13,15 @@ relevant.
 
 ```sh
 uv sync
-uv run thalyn-brain                  # serve on stdio
-echo '{"jsonrpc":"2.0","id":1,"method":"ping"}' | uv run thalyn-brain
+uv run python -m thalyn_brain                   # serve on stdio
+echo '{"jsonrpc":"2.0","id":1,"method":"ping"}' | uv run python -m thalyn_brain
 uv run pytest
 uv run ruff check
 uv run mypy
 ```
+
+The `thalyn-brain` console script also exists, but Python 3.13 silently
+skips uv's editable-install `_*.pth` hook, so the script can fail to find
+the package when launched outside `uv run`. Invoking the module via
+`python -m thalyn_brain` works in every environment we care about and is
+what the desktop runtime spawns.
