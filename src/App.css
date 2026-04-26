@@ -1,20 +1,21 @@
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
-    sans-serif;
-  font-size: 16px;
+  font-family: var(--font-sans);
+  font-size: 14px;
   line-height: 1.5;
   font-weight: 400;
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
+  color: var(--text);
+  background-color: var(--bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color-scheme: dark light;
 }
 
 body {
   margin: 0;
+  background: var(--bg);
+  color: var(--text);
 }
 
 .container {
@@ -25,35 +26,43 @@ body {
   flex-direction: column;
   align-items: center;
   text-align: center;
+  gap: var(--space-4);
 }
 
 h1 {
-  margin: 0 0 0.5rem;
+  margin: 0 0 var(--space-2);
   font-weight: 600;
   letter-spacing: -0.02em;
+  color: var(--text);
 }
 
 .subtitle {
   margin: 0;
-  color: #555;
+  color: var(--text-muted);
 }
 
 button {
-  border-radius: 8px;
-  border: 1px solid transparent;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--border);
   padding: 0.6em 1.2em;
   font-size: 1em;
   font-weight: 500;
   font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
+  color: var(--text);
+  background-color: var(--surface);
   cursor: pointer;
-  transition: border-color 0.25s;
-  margin-top: 1.25rem;
+  transition:
+    border-color var(--duration-default) var(--easing-default),
+    background-color var(--duration-default) var(--easing-default);
 }
 
 button:hover:not(:disabled) {
-  border-color: #396cd8;
+  border-color: var(--accent);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 button:disabled {
@@ -62,33 +71,15 @@ button:disabled {
 }
 
 .status {
-  margin-top: 1rem;
   font-size: 0.95rem;
   min-height: 1.5em;
+  color: var(--text);
 }
 
 .muted {
-  color: #777;
+  color: var(--text-muted);
 }
 
 .error {
-  color: #b91c1c;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #1a1a1a;
-  }
-  .subtitle,
-  .muted {
-    color: #a0a0a0;
-  }
-  .error {
-    color: #fca5a5;
-  }
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
+  color: var(--danger);
 }

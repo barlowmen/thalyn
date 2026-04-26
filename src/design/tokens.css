@@ -1,0 +1,149 @@
+/*
+ * Thalyn design tokens — OKLCH, dark-first.
+ *
+ * The dark palette is the default (applied to :root). The light palette
+ * is a tonal inversion with the same accent hues at adjusted lightness;
+ * both meet WCAG 2.1 AA contrast at every documented text/background
+ * pairing.
+ *
+ * Theme is selected by a data-theme attribute on <html>:
+ *   <html data-theme="dark">   force dark
+ *   <html data-theme="light">  force light
+ *   <html data-theme="system"> follow prefers-color-scheme (default)
+ *
+ * Token naming follows ADR-0013. The full source of truth lives in
+ * 01-requirements.md §11.4. The TypeScript mirror lives next to this
+ * file in tokens.ts.
+ */
+
+:root,
+:root[data-theme="dark"] {
+  /* Surface ramp */
+  --bg: oklch(14% 0 0);
+  --surface: oklch(18% 0 0);
+  --surface-elevated: oklch(22% 0 0);
+  --border: oklch(28% 0 0);
+
+  /* Text ramp */
+  --text: oklch(96% 0 0);
+  --text-muted: oklch(70% 0 0);
+
+  /* Accent + status */
+  --accent: oklch(70% 0.15 250);
+  --accent-fg: oklch(98% 0 0);
+  --success: oklch(72% 0.16 145);
+  --warning: oklch(78% 0.15 80);
+  --danger: oklch(65% 0.2 25);
+
+  /* Focus ring — WCAG: ≥ 3:1 against any adjacent surface */
+  --focus-ring: oklch(80% 0.15 250);
+
+  /* Radii */
+  --radius-input: 6px;
+  --radius-card: 10px;
+  --radius-window: 14px;
+
+  /* Spacing scale (4 px base, mirrors Tailwind defaults) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Layout — three-panel mosaic */
+  --rail-width: 56px;
+  --sidebar-width-min: 200px;
+  --sidebar-width-default: 260px;
+  --sidebar-width-max: 360px;
+  --inspector-width-min: 280px;
+  --inspector-width-default: 340px;
+  --inspector-width-max: 480px;
+
+  /* Motion */
+  --duration-instant: 150ms;
+  --duration-default: 250ms;
+  --duration-long: 400ms;
+  --easing-default: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+  /* Typography */
+  --font-sans: "Geist Sans", "Inter", system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, "SF Mono",
+    Menlo, monospace;
+}
+
+:root[data-theme="light"] {
+  --bg: oklch(99% 0 0);
+  --surface: oklch(97% 0 0);
+  --surface-elevated: oklch(94% 0 0);
+  --border: oklch(85% 0 0);
+
+  --text: oklch(20% 0 0);
+  --text-muted: oklch(45% 0 0);
+
+  --accent: oklch(50% 0.15 250);
+  --accent-fg: oklch(98% 0 0);
+  --success: oklch(45% 0.16 145);
+  --warning: oklch(55% 0.15 80);
+  --danger: oklch(48% 0.2 25);
+
+  --focus-ring: oklch(45% 0.15 250);
+}
+
+/*
+ * System mode: defer to the user's OS preference. Layered as
+ * media-overrides on the data-theme="system" selector so an
+ * explicit choice wins over the OS hint.
+ */
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    --bg: oklch(99% 0 0);
+    --surface: oklch(97% 0 0);
+    --surface-elevated: oklch(94% 0 0);
+    --border: oklch(85% 0 0);
+
+    --text: oklch(20% 0 0);
+    --text-muted: oklch(45% 0 0);
+
+    --accent: oklch(50% 0.15 250);
+    --accent-fg: oklch(98% 0 0);
+    --success: oklch(45% 0.16 145);
+    --warning: oklch(55% 0.15 80);
+    --danger: oklch(48% 0.2 25);
+
+    --focus-ring: oklch(45% 0.15 250);
+  }
+}
+
+/*
+ * Reduced-transparency: replace any glass/vibrancy surfaces with
+ * opaque equivalents. Components subscribe to this token rather than
+ * checking the media query themselves.
+ */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-tint-opacity: 1;
+    --glass-blur: 0px;
+  }
+}
+
+:root {
+  --glass-tint-opacity: 0.7;
+  --glass-blur: 12px;
+}
+
+/*
+ * Reduced-motion: zero out non-functional animations. Components that
+ * carry information through motion (status transitions) read these
+ * tokens; decorative motion uses prefers-reduced-motion directly.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 0ms;
+    --duration-default: 0ms;
+    --duration-long: 0ms;
+  }
+}
