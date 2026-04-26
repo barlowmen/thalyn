@@ -1,4 +1,5 @@
 mod brain;
+mod provider;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -6,8 +7,10 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, Manager, State};
+use tokio::sync::RwLock;
 
 use crate::brain::{BrainSupervisor, SpawnConfig};
+use crate::provider::{builtin_providers, ProviderMeta, ProviderRegistry};
 
 const BRAIN_CALL_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -15,6 +18,7 @@ const BRAIN_CALL_TIMEOUT: Duration = Duration::from_secs(15);
 /// can pull it via `State<...>`.
 struct AppState {
     brain: Arc<BrainSupervisor>,
+    providers: RwLock<ProviderRegistry>,
 }
 
 /// Trimmed pong payload sent back to the renderer.
@@ -51,6 +55,12 @@ async fn ping_brain(state: State<'_, AppState>) -> Result<PongPayload, String> {
     })
 }
 
+#[tauri::command]
+async fn list_providers(state: State<'_, AppState>) -> Result<Vec<ProviderMeta>, String> {
+    let registry = state.providers.read().await;
+    Ok(registry.list_meta())
+}
+
 /// Spawn the brain sidecar during app setup. Failure here surfaces as a
 /// startup error rather than crashing the app — the renderer can show a
 /// useful message and the user can re-launch after fixing their setup.
@@ -61,8 +71,10 @@ async fn init_brain(app: &AppHandle) -> Result<Arc<BrainSupervisor>, String> {
         .await
         .map_err(|err| format!("brain sidecar failed to start: {err}"))?;
     let arc = Arc::new(supervisor);
+    let registry = ProviderRegistry::new(builtin_providers(false));
     app.manage(AppState {
         brain: Arc::clone(&arc),
+        providers: RwLock::new(registry),
     });
     Ok(arc)
 }
@@ -86,7 +98,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![ping_brain])
+        .invoke_handler(tauri::generate_handler![ping_brain, list_providers])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
