@@ -28,3 +28,11 @@ We **do not** route through an external gateway (LiteLLM as a separate process).
 ## Notes
 
 Adapter test suites use recorded fixtures (VCR-style) so we can re-run against captured provider responses without burning credits.
+
+### Refinement at v0.3 implementation
+
+Two small departures from the sketch landed when the abstraction met working code; the architectural decision in **Decision** above is unchanged.
+
+- **Rust trait is narrower than the sketch.** Live LLM traffic flows through the Python brain, so the Rust trait dropped `complete` / `stream` / `embed` and kept the metadata surface — `id`, `display_name`, `capability_profile`, `supports`, `probe`. The Rust core stays out of the IPC hot path for completion calls; capability listing and reachability stay synchronous.
+- **Python protocol uses a single `stream_chat`.** Single-turn streaming is the only call shape the brain needs for v0.3; chat history threading and embeddings stay deferred until the orchestration layer needs them. The chunk shape (`start` / `text` / `tool_call` / `tool_result` / `stop` / `error`) is the wire contract that JSON-RPC notifications carry to the renderer unchanged.
+- **`ToolCallNormalizer` deferred.** With only the Anthropic adapter live there is nothing to normalize across; the slot lands when the second adapter ships.
