@@ -83,8 +83,12 @@ function togglePanel(ref: React.RefObject<PanelImperativeHandle | null>) {
 
 export function AppShell({
   main,
+  openSubAgentRunId,
+  onOpenSubAgent,
 }: {
   main: ReactNode | ((api: ShellApi) => ReactNode);
+  openSubAgentRunId?: string | null;
+  onOpenSubAgent?: (runId: string) => void;
 }) {
   const [activeRail, setActiveRail] = useState<string>("chat");
   const [defaultLayout] = useState<Layout>(() => loadLayout());
@@ -161,7 +165,10 @@ export function AppShell({
           collapsible
           collapsedSize={0}
         >
-          <InspectorPanel />
+          <InspectorPanel
+            onOpenSubAgent={onOpenSubAgent}
+            highlightedRunId={openSubAgentRunId ?? null}
+          />
         </ResizablePanel>
       </ResizableGroup>
 

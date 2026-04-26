@@ -40,8 +40,10 @@ const STATUS_LABEL: Record<RunStatus, string> = {
  */
 export function InspectorPanel({
   onOpenSubAgent,
+  highlightedRunId,
 }: {
   onOpenSubAgent?: (runId: string) => void;
+  highlightedRunId?: string | null;
 } = {}) {
   const run = useActiveRun();
   const tiles = useSubAgentTree(run?.runId ?? null);
@@ -89,6 +91,7 @@ export function InspectorPanel({
             <Section title="Sub-agents">
               <SubAgentTiles
                 tiles={tiles}
+                activeRunId={highlightedRunId ?? null}
                 onOpen={onOpenSubAgent}
                 onKill={(runId) => {
                   void killRun(runId).catch(() => undefined);
