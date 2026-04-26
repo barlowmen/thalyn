@@ -351,6 +351,98 @@ async def test_default_depth_cap_allows_two_levels(tmp_path: Path) -> None:
     assert grandchildren[0].status == RunStatus.COMPLETED.value
 
 
+async def test_sandbox_tier_propagates_into_child_run_header(tmp_path: Path) -> None:
+    """A delegated plan step's tier defaults to tier-1 when omitted
+    and lands on the spawned child's RunHeader so the renderer can
+    badge it without an extra lookup."""
+    _fake, factory = factory_for(
+        [
+            text_message(_plan_with_subagent()),
+            result_message(),
+            text_message('{"goal": "x", "steps": []}'),
+            result_message(),
+            text_message("ok."),
+            result_message(),
+            text_message("done."),
+            result_message(),
+        ]
+    )
+    provider = AnthropicProvider(client_factory=factory)
+    registry = _registry_with(provider)
+    store = RunsStore(data_dir=tmp_path)
+    runner = Runner(registry, runs_store=store, data_dir=tmp_path)
+
+    _, notify = _captured()
+    paused = await runner.run(
+        session_id="s",
+        provider_id="anthropic",
+        prompt="Investigate.",
+        notify=notify,
+    )
+    finished = await runner.approve_plan(
+        run_id=paused.run_id,
+        provider_id="anthropic",
+        decision="approve",
+        notify=notify,
+    )
+    assert finished is not None
+
+    headers = await store.list_runs()
+    parent = next(h for h in headers if h.run_id == finished.run_id)
+    children = [h for h in headers if h.parent_run_id == finished.run_id]
+    assert parent.sandbox_tier is None
+    assert len(children) == 1
+    assert children[0].sandbox_tier == "tier_1"
+
+
+async def test_explicit_sandbox_tier_overrides_default(tmp_path: Path) -> None:
+    """A planner that names its tier wins over the tier-1 default."""
+    plan_json = (
+        '{"goal": "explicit",'
+        ' "steps": [{'
+        '"description": "Read a file.",'
+        '"rationale": "Just inspection.",'
+        '"estimated_tokens": 100,'
+        '"subagent_kind": "research",'
+        '"sandbox_tier": "tier_0"'
+        "}]}"
+    )
+    _fake, factory = factory_for(
+        [
+            text_message(plan_json),
+            result_message(),
+            text_message('{"goal": "x", "steps": []}'),
+            result_message(),
+            text_message("ok."),
+            result_message(),
+            text_message("done."),
+            result_message(),
+        ]
+    )
+    provider = AnthropicProvider(client_factory=factory)
+    registry = _registry_with(provider)
+    store = RunsStore(data_dir=tmp_path)
+    runner = Runner(registry, runs_store=store, data_dir=tmp_path)
+
+    _, notify = _captured()
+    paused = await runner.run(
+        session_id="s",
+        provider_id="anthropic",
+        prompt="Inspect.",
+        notify=notify,
+    )
+    await runner.approve_plan(
+        run_id=paused.run_id,
+        provider_id="anthropic",
+        decision="approve",
+        notify=notify,
+    )
+
+    children = [h for h in await store.list_runs() if h.parent_run_id == paused.run_id]
+    assert len(children) == 1
+    assert children[0].sandbox_tier == "tier_0"
+
+
 async def test_subagent_kind_round_trips_through_planner(tmp_path: Path) -> None:
     """Planner JSON ``subagent_kind`` lands on the wire as
     ``subagentKind`` so the UI and execute node both see it."""

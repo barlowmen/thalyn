@@ -446,6 +446,122 @@ mod tests {
         cleanup_git_workspace(&workspace);
     }
 
+    /// Inside the container, ``/work`` is writable and
+    /// ``/workspace-ro`` is not. Verified entirely from inside the
+    /// sandbox — host-side propagation depends on Docker Desktop's
+    /// file-sharing configuration, which varies, so the property
+    /// we assert is the in-container view.
+    #[tokio::test]
+    #[ignore = "requires docker; run with `cargo test -- --ignored`"]
+    async fn tier1_worktree_is_writable_workspace_ro_is_not() {
+        if ContainerRuntime::detect().await.is_none() {
+            eprintln!("skipping: no container runtime available");
+            return;
+        }
+
+        let workspace = make_git_workspace("rw_split");
+        let sandbox = match Tier1Sandbox::start(SandboxSpec {
+            run_id: "r_rw_split".into(),
+            workspace: workspace.clone(),
+            egress_allowlist: vec![],
+        })
+        .await
+        {
+            Ok(s) => s,
+            Err(err) => {
+                eprintln!("skipping: tier1 start failed ({err})");
+                cleanup_git_workspace(&workspace);
+                return;
+            }
+        };
+
+        // /work — writable.
+        let ok = sandbox
+            .exec(&[
+                "sh".into(),
+                "-c".into(),
+                "echo agent-wrote > /work/scratch.txt && cat /work/scratch.txt".into(),
+            ])
+            .await
+            .unwrap();
+        assert_eq!(ok.exit_code, 0, "stderr: {}", ok.stderr);
+        assert!(ok.stdout.contains("agent-wrote"));
+
+        // /workspace-ro — read-only at the mount level.
+        let denied = sandbox
+            .exec(&[
+                "sh".into(),
+                "-c".into(),
+                "echo escape > /workspace-ro/escape.txt".into(),
+            ])
+            .await
+            .unwrap();
+        assert_ne!(denied.exit_code, 0);
+        assert!(
+            denied.stderr.contains("Read-only")
+                || denied.stderr.contains("read-only")
+                || denied.stderr.contains("Permission"),
+            "expected a read-only / permission error; got stderr={:?}",
+            denied.stderr
+        );
+
+        Box::new(sandbox).teardown().await.unwrap();
+        cleanup_git_workspace(&workspace);
+    }
+
+    /// Teardown removes the container *and* prunes the worktree.
+    #[tokio::test]
+    #[ignore = "requires docker; run with `cargo test -- --ignored`"]
+    async fn tier1_teardown_removes_container_and_worktree() {
+        if ContainerRuntime::detect().await.is_none() {
+            eprintln!("skipping: no container runtime available");
+            return;
+        }
+
+        let workspace = make_git_workspace("teardown");
+        let sandbox = match Tier1Sandbox::start(SandboxSpec {
+            run_id: "r_teardown".into(),
+            workspace: workspace.clone(),
+            egress_allowlist: vec![],
+        })
+        .await
+        {
+            Ok(s) => s,
+            Err(err) => {
+                eprintln!("skipping: tier1 start failed ({err})");
+                cleanup_git_workspace(&workspace);
+                return;
+            }
+        };
+        let worktree_path = sandbox.worktree().to_path_buf();
+        let name = container_name_for("r_teardown");
+
+        Box::new(sandbox).teardown().await.unwrap();
+
+        // No container is left behind under our prefix.
+        let ps = std::process::Command::new("docker")
+            .args([
+                "ps",
+                "-a",
+                "--filter",
+                &format!("name={name}"),
+                "--format",
+                "{{.Names}}",
+            ])
+            .output()
+            .unwrap();
+        let listing = String::from_utf8_lossy(&ps.stdout);
+        assert!(
+            !listing.contains(&name),
+            "expected no leftover container; got: {listing}"
+        );
+
+        // Worktree directory was pruned.
+        assert!(!worktree_path.exists());
+
+        cleanup_git_workspace(&workspace);
+    }
+
     /// With an allowlist, the listed hostname resolves to the IP the
     /// host saw at start time; anything else still fails to resolve.
     #[tokio::test]
