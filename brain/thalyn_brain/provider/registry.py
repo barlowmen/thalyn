@@ -22,6 +22,12 @@ from thalyn_brain.provider.base import (
     ProviderNotImplementedError,
     ReliabilityTier,
 )
+from thalyn_brain.provider.mlx import (
+    DEFAULT_MODEL as MLX_DEFAULT_MODEL,
+)
+from thalyn_brain.provider.mlx import (
+    MlxProvider,
+)
 from thalyn_brain.provider.ollama import (
     DEFAULT_MODEL as OLLAMA_DEFAULT_MODEL,
 )
@@ -94,7 +100,7 @@ def builtin_providers() -> list[LlmProvider]:
         ),
         OllamaProvider(),
         _PlaceholderProvider("llama_cpp", "llama.cpp (local)", ProviderKind.LLAMA_CPP),
-        _PlaceholderProvider("mlx", "MLX (Apple Silicon)", ProviderKind.MLX),
+        MlxProvider(),
     ]
 
 
@@ -108,7 +114,7 @@ class ProviderRegistry:
 
     def list_meta(self, *, configured: dict[str, bool] | None = None) -> list[ProviderMeta]:
         configured = configured or {}
-        enabled_ids = {"anthropic", "ollama"}
+        enabled_ids = {"anthropic", "ollama", "mlx"}
         out: list[ProviderMeta] = []
         for provider in self._providers.values():
             kind = _kind_for(provider.id)
@@ -117,6 +123,8 @@ class ProviderRegistry:
                 default_model = DEFAULT_MODEL
             elif provider.id == "ollama":
                 default_model = OLLAMA_DEFAULT_MODEL
+            elif provider.id == "mlx":
+                default_model = MLX_DEFAULT_MODEL
             out.append(
                 ProviderMeta(
                     id=provider.id,

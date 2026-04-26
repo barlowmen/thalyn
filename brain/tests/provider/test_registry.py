@@ -25,9 +25,9 @@ def test_registry_lists_anthropic_first_with_local_options_enabled() -> None:
 
     enabled_ids = {meta.id for meta in metas if meta.enabled}
     # Anthropic plus the v0.10 local options that have real adapters.
-    assert enabled_ids == {"anthropic", "ollama"}
+    assert enabled_ids == {"anthropic", "ollama", "mlx"}
     disabled_ids = {meta.id for meta in metas if not meta.enabled}
-    assert disabled_ids == {"openai_compat", "llama_cpp", "mlx"}
+    assert disabled_ids == {"openai_compat", "llama_cpp"}
 
 
 def test_registry_marks_unconfigured_anthropic() -> None:
