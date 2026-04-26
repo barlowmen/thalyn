@@ -79,6 +79,33 @@ jobs:
           pnpm dlx wait-on http://127.0.0.1:6006
           pnpm exec test-storybook --url http://127.0.0.1:6006
 
+  visual:
+    name: visual regression smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm build
+      - name: Visual smoke (snapshot baselines are platform-keyed; the
+          Linux baselines populate on first run via the dedicated
+          baseline workflow)
+        run: pnpm exec playwright test --ignore-snapshots
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7
+
   rust:
     name: rust
     runs-on: ubuntu-latest
