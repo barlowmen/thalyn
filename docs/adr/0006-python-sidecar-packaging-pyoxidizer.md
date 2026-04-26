@@ -1,7 +1,8 @@
 # ADR-0006 — Python sidecar packaging: PyOxidizer (Briefcase fallback)
 
-- **Status:** Accepted (provisional)
+- **Status:** Superseded by [ADR-0018](0018-python-sidecar-packaging-pyinstaller.md)
 - **Date:** 2026-04-25
+- **Superseded:** 2026-04-26 (post-v0.6 architecture review)
 
 ## Context
 

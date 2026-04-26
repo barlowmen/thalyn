@@ -18,7 +18,7 @@ This directory contains Thalyn's ADRs — one decision per file, in [MADR](https
 | [0003](0003-code-editor-monaco.md) | Code editor: Monaco | Accepted (provisional) |
 | [0004](0004-brain-process-model-python-sidecar.md) | Brain process model: Python sidecar | Accepted (provisional) |
 | [0005](0005-rust-python-ipc-ndjson-jsonrpc.md) | Rust ↔ Python IPC: NDJSON + JSON-RPC 2.0 | Accepted (provisional) |
-| [0006](0006-python-sidecar-packaging-pyoxidizer.md) | Python sidecar packaging: PyOxidizer | Accepted (provisional) |
+| [0006](0006-python-sidecar-packaging-pyoxidizer.md) | Python sidecar packaging: PyOxidizer | Superseded by ADR-0018 |
 | [0007](0007-orchestration-langgraph-claude-sdk.md) | Orchestration: LangGraph 1.0 + Claude Agent SDK | Accepted (provisional) |
 | [0008](0008-durable-execution-sqlitesaver.md) | Durable execution: LangGraph SqliteSaver | Accepted (provisional) |
 | [0009](0009-memory-mem0-langgraph-checkpoints.md) | Memory: Mem0 + LangGraph checkpoints + project files | Accepted (provisional) |
@@ -30,3 +30,4 @@ This directory contains Thalyn's ADRs — one decision per file, in [MADR](https
 | [0015](0015-commit-hygiene-conventional-commits.md) | Commit hygiene: Conventional Commits + git-cliff + leakage scan + no Co-Authored-By | Accepted (provisional) |
 | [0016](0016-license-mit.md) | License: MIT (revisit before public) | Accepted (provisional) |
 | [0017](0017-observability-otel-langfuse.md) | Observability: OpenTelemetry GenAI + self-hosted Langfuse | Accepted (provisional) |
+| [0018](0018-python-sidecar-packaging-pyinstaller.md) | Python sidecar packaging: PyInstaller (uv-managed venv during early phases) | Proposed |

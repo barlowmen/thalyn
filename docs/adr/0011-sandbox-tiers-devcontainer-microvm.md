@@ -33,3 +33,11 @@ The brain picks the tier when dispatching a sub-agent; the user can override per
 ## Notes
 
 Tier 2 is the most-likely-to-evolve tier. ADR-update is expected when Apple Containerization replaces Lima on macOS.
+
+### Refinement at v0.6 architecture review
+
+The original ADR estimated Apple Containerization in *"macOS 26 Tahoe (Sept 2026)."* The actual timeline is **earlier**: macOS Tahoe shipped on **September 15, 2025**, and Apple announced both the Containerization framework and the `container` CLI at WWDC 2025. As of this review (2026-04-26), Tahoe is on 26.4.1 and Apple Containerization is generally available.
+
+The four-tier model in **Decision** is unchanged; only the macOS Tier-2 timeline is wrong. v0.7 lands Tier 1 next; v0.15 is when Tier 2 lands, and by then the Mac path should be **Apple Containerization directly**, with Lima as a transitional bridge for users on older macOS or environments where Apple's framework isn't a fit (Lima has also been demonstrated bridging *to* Apple Containerization, so it remains useful as a compatibility layer). Firecracker on macOS via Lima is still available for users who specifically want Firecracker semantics.
+
+No supersession — the decision still holds; the timeline note is correcting a forecast.
