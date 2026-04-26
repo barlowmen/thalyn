@@ -423,6 +423,34 @@ async fn lsp_list(state: State<'_, AppState>) -> Result<Value, String> {
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+async fn inline_suggest(
+    state: State<'_, AppState>,
+    provider_id: String,
+    prefix: String,
+    suffix: Option<String>,
+    language: Option<String>,
+    request_id: Option<String>,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    params.insert("providerId".into(), Value::from(provider_id));
+    params.insert("prefix".into(), Value::from(prefix));
+    if let Some(s) = suffix {
+        params.insert("suffix".into(), Value::from(s));
+    }
+    if let Some(lang) = language {
+        params.insert("language".into(), Value::from(lang));
+    }
+    if let Some(rid) = request_id {
+        params.insert("requestId".into(), Value::from(rid));
+    }
+    state
+        .brain
+        .call("inline.suggest", Value::Object(params), CHAT_DEADLINE)
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// Translate a brain JSON-RPC notification into a Tauri event for the
 /// renderer. `chat.chunk` is wrapped with the session id; the run.*
 /// notifications already carry their runId in the params.
@@ -695,6 +723,7 @@ pub fn run() {
             lsp_send,
             lsp_stop,
             lsp_list,
+            inline_suggest,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

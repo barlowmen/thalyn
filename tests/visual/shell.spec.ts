@@ -107,6 +107,16 @@ stubbed.__TAURI_INTERNALS__ = {
     if (command === "lsp_list") {
       return { sessions: [] };
     }
+    if (command === "inline_suggest") {
+      return {
+        suggestion: "",
+        requestId: "",
+        requestedAtMs: 0,
+        completedAtMs: 0,
+        providerId: "anthropic",
+        truncated: false,
+      };
+    }
     return null;
   },
 };

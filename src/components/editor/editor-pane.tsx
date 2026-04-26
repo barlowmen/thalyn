@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import Editor, { loader, type Monaco, type OnMount } from "@monaco-editor/react";
+import type { IDisposable } from "monaco-editor";
 import * as monaco from "monaco-editor";
 
 import { useTheme } from "@/components/theme-provider";
+import { registerInlineSuggestProvider } from "@/components/editor/inline-suggest-provider";
 import {
   monacoThemeForDocument,
   thalynDarkTheme,
@@ -39,11 +41,23 @@ export function EditorPane() {
   const [monacoTheme, setMonacoTheme] = useState<string>(() =>
     monacoThemeForDocument(),
   );
+  const inlineRegistrationRef = useRef<IDisposable | null>(null);
 
   const handleMount = useCallback<OnMount>((_editor, monacoApi: Monaco) => {
     monacoApi.editor.defineTheme(THALYN_DARK, thalynDarkTheme);
     monacoApi.editor.defineTheme(THALYN_LIGHT, thalynLightTheme);
     monacoApi.editor.setTheme(monacoThemeForDocument());
+    inlineRegistrationRef.current = registerInlineSuggestProvider({
+      monaco: monacoApi,
+      language: "typescript",
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      inlineRegistrationRef.current?.dispose();
+      inlineRegistrationRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -84,6 +98,11 @@ export function EditorPane() {
         },
         bracketPairColorization: { enabled: true },
         automaticLayout: true,
+        inlineSuggest: {
+          enabled: true,
+          mode: "subwordSmart",
+          showToolbar: "onHover",
+        },
       }}
     />
   );

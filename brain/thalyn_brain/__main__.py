@@ -7,6 +7,7 @@ import sys
 
 from thalyn_brain.approval_rpc import register_approval_methods
 from thalyn_brain.chat import register_chat_methods
+from thalyn_brain.inline_rpc import register_inline_methods
 from thalyn_brain.lsp import LspManager
 from thalyn_brain.lsp_rpc import register_lsp_methods
 from thalyn_brain.memory import MemoryStore
@@ -44,6 +45,7 @@ def main() -> int:
     register_provider_methods(dispatcher, registry)
     register_memory_methods(dispatcher, memory_store)
     register_lsp_methods(dispatcher, lsp_manager)
+    register_inline_methods(dispatcher, registry)
 
     async def dispatch_schedule(schedule: Schedule) -> str | None:
         """Fire one schedule into the runner.
