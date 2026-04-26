@@ -7,6 +7,8 @@ import sys
 
 from thalyn_brain.approval_rpc import register_approval_methods
 from thalyn_brain.chat import register_chat_methods
+from thalyn_brain.memory import MemoryStore
+from thalyn_brain.memory_rpc import register_memory_methods
 from thalyn_brain.orchestration import Runner
 from thalyn_brain.orchestration.resume import resume_unfinished_runs
 from thalyn_brain.orchestration.storage import default_data_dir
@@ -30,12 +32,14 @@ def main() -> int:
     registry = build_registry()
     runs_store = RunsStore(data_dir=data_dir)
     schedules_store = SchedulesStore(data_dir=data_dir)
+    memory_store = MemoryStore(data_dir=data_dir)
     runner = Runner(registry, runs_store=runs_store, data_dir=data_dir)
     register_chat_methods(dispatcher, registry, runner=runner)
     register_approval_methods(dispatcher, runner)
     register_runs_methods(dispatcher, runs_store, runner=runner)
     register_schedule_methods(dispatcher, schedules_store, registry)
     register_provider_methods(dispatcher, registry)
+    register_memory_methods(dispatcher, memory_store)
 
     async def dispatch_schedule(schedule: Schedule) -> str | None:
         """Fire one schedule into the runner.
