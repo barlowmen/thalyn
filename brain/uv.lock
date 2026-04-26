@@ -912,6 +912,7 @@ source = { editable = "." }
 dependencies = [
     { name = "claude-agent-sdk" },
     { name = "croniter" },
+    { name = "httpx" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint-sqlite" },
 ]
@@ -928,6 +929,7 @@ dev = [
 requires-dist = [
     { name = "claude-agent-sdk", specifier = ">=0.1.68,<0.2" },
     { name = "croniter", specifier = ">=3,<7" },
+    { name = "httpx", specifier = ">=0.27,<1" },
     { name = "langgraph", specifier = ">=1.0,<2" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3,<4" },
 ]

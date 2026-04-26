@@ -22,6 +22,12 @@ from thalyn_brain.provider.base import (
     ProviderNotImplementedError,
     ReliabilityTier,
 )
+from thalyn_brain.provider.ollama import (
+    DEFAULT_MODEL as OLLAMA_DEFAULT_MODEL,
+)
+from thalyn_brain.provider.ollama import (
+    OllamaProvider,
+)
 
 
 class _PlaceholderProvider:
@@ -86,7 +92,7 @@ def builtin_providers() -> list[LlmProvider]:
             "OpenAI-compatible endpoint",
             ProviderKind.OPENAI_COMPATIBLE,
         ),
-        _PlaceholderProvider("ollama", "Ollama (local)", ProviderKind.OLLAMA),
+        OllamaProvider(),
         _PlaceholderProvider("llama_cpp", "llama.cpp (local)", ProviderKind.LLAMA_CPP),
         _PlaceholderProvider("mlx", "MLX (Apple Silicon)", ProviderKind.MLX),
     ]
@@ -102,19 +108,24 @@ class ProviderRegistry:
 
     def list_meta(self, *, configured: dict[str, bool] | None = None) -> list[ProviderMeta]:
         configured = configured or {}
+        enabled_ids = {"anthropic", "ollama"}
         out: list[ProviderMeta] = []
         for provider in self._providers.values():
             kind = _kind_for(provider.id)
-            is_anthropic = provider.id == "anthropic"
+            default_model = ""
+            if provider.id == "anthropic":
+                default_model = DEFAULT_MODEL
+            elif provider.id == "ollama":
+                default_model = OLLAMA_DEFAULT_MODEL
             out.append(
                 ProviderMeta(
                     id=provider.id,
                     display_name=provider.display_name,
                     kind=kind,
-                    default_model=DEFAULT_MODEL if is_anthropic else "",
+                    default_model=default_model,
                     capability_profile=provider.capability_profile,
                     configured=configured.get(provider.id, False),
-                    enabled=is_anthropic,
+                    enabled=provider.id in enabled_ids,
                 )
             )
         return out

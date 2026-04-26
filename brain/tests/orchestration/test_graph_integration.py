@@ -200,7 +200,7 @@ async def test_resume_replays_graph_from_checkpoint(tmp_path: Path) -> None:
     assert second.status == RunStatus.COMPLETED.value
 
 
-@pytest.mark.parametrize("provider_id", ["openai_compat", "ollama", "mlx"])
+@pytest.mark.parametrize("provider_id", ["openai_compat", "llama_cpp", "mlx"])
 async def test_runner_rejects_placeholder_providers(tmp_path: Path, provider_id: str) -> None:
     registry = ProviderRegistry()
     runner = Runner(registry, data_dir=tmp_path)
