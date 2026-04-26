@@ -1,26 +1,23 @@
 """Chat session lifecycle.
 
-Single-turn for v0.3: the renderer posts a `chat.send` request and the
-brain streams `chat.chunk` notifications until the provider's
-generator is drained, then returns a small completion response.
-Multi-turn history threading and durable run state arrive in
-subsequent iterations.
+Each chat turn now flows through the LangGraph orchestrator
+(`thalyn_brain.orchestration`). The handler routes the user prompt
+through plan → execute → critic → respond and forwards the
+graph's notifications (chat.chunk, run.plan_update, run.action_log,
+run.status) on through the JSON-RPC dispatcher.
+
+The wire shape stays compatible with v0.3 — `chat.send` is still the
+entry point and still emits `chat.chunk` for streamed tokens — but
+it gains the run-lifecycle vocabulary the renderer's inspector will
+subscribe to next.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from thalyn_brain.provider import (
-    ChatErrorChunk,
-    ChatStartChunk,
-    ChatStopChunk,
-    ChatTextChunk,
-    ChatToolCallChunk,
-    ChatToolResultChunk,
-    ProviderNotImplementedError,
-    ProviderRegistry,
-)
+from thalyn_brain.orchestration import Runner
+from thalyn_brain.provider import ProviderNotImplementedError, ProviderRegistry
 from thalyn_brain.rpc import (
     INVALID_PARAMS,
     Dispatcher,
@@ -30,17 +27,23 @@ from thalyn_brain.rpc import (
     RpcParams,
 )
 
-CHUNK_NOTIFICATION = "chat.chunk"
-
 
 def register_chat_methods(
     dispatcher: Dispatcher,
     registry: ProviderRegistry,
+    *,
+    runner: Runner | None = None,
 ) -> None:
-    """Wire chat handlers into the dispatcher."""
+    """Wire chat handlers into the dispatcher.
+
+    A `Runner` may be passed in for tests that want to swap the
+    checkpointer factory; production callers can omit it and use the
+    default in-memory checkpointer.
+    """
+    bound_runner = runner or Runner(registry)
 
     async def chat_send(params: RpcParams, notify: Notifier) -> JsonValue:
-        return await _handle_chat_send(params, notify, registry)
+        return await _handle_chat_send(params, notify, bound_runner)
 
     dispatcher.register_streaming("chat.send", chat_send)
 
@@ -48,43 +51,31 @@ def register_chat_methods(
 async def _handle_chat_send(
     params: RpcParams,
     notify: Notifier,
-    registry: ProviderRegistry,
+    runner: Runner,
 ) -> JsonValue:
     session_id = _require_str(params, "sessionId")
     provider_id = _require_str(params, "providerId")
     prompt = _require_str(params, "prompt")
-    system_prompt = params.get("systemPrompt")
-    if system_prompt is not None and not isinstance(system_prompt, str):
-        raise RpcError(code=INVALID_PARAMS, message="systemPrompt must be a string")
 
     try:
-        provider = registry.get(provider_id)
+        result = await runner.run(
+            session_id=session_id,
+            provider_id=provider_id,
+            prompt=prompt,
+            notify=notify,
+        )
     except ProviderNotImplementedError as exc:
         raise RpcError(code=INVALID_PARAMS, message=str(exc)) from exc
 
-    chunk_count = 0
-    final_reason = "incomplete"
-    final_cost: float | None = None
-
-    async for chunk in provider.stream_chat(prompt, system_prompt=system_prompt):
-        chunk_count += 1
-        wire = chunk.to_wire()
-        await notify(CHUNK_NOTIFICATION, {"sessionId": session_id, "chunk": wire})
-
-        if isinstance(chunk, ChatStopChunk):
-            final_reason = chunk.reason
-            final_cost = chunk.total_cost_usd
-        elif isinstance(chunk, ChatErrorChunk):
-            final_reason = "error"
-
     summary: dict[str, Any] = {
-        "sessionId": session_id,
-        "providerId": provider_id,
-        "chunks": chunk_count,
-        "reason": final_reason,
+        "sessionId": result.session_id,
+        "providerId": result.provider_id,
+        "runId": result.run_id,
+        "status": result.status,
+        "actionLogSize": result.action_log_size,
     }
-    if final_cost is not None:
-        summary["totalCostUsd"] = final_cost
+    if result.plan is not None:
+        summary["plan"] = result.plan
     return summary
 
 
@@ -96,16 +87,3 @@ def _require_str(params: RpcParams, key: str) -> str:
             message=f"missing or non-string '{key}'",
         )
     return value
-
-
-# Keep the chunk classes referenced so static-analysis sees them as
-# imported for typing, even when they're only used inside the
-# isinstance checks above.
-_KNOWN_CHUNKS = (
-    ChatStartChunk,
-    ChatTextChunk,
-    ChatToolCallChunk,
-    ChatToolResultChunk,
-    ChatStopChunk,
-    ChatErrorChunk,
-)
