@@ -57,6 +57,28 @@ jobs:
       - run: pnpm exec tsc --noEmit
       - run: pnpm build
 
+  storybook:
+    name: storybook a11y
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm build-storybook --quiet
+      - name: Run a11y test runner
+        run: |
+          pnpm dlx http-server storybook-static --port 6006 --silent &
+          pnpm dlx wait-on http://127.0.0.1:6006
+          pnpm exec test-storybook --url http://127.0.0.1:6006
+
   rust:
     name: rust
     runs-on: ubuntu-latest
