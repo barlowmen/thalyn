@@ -29,7 +29,14 @@ async def _make_runner_with_run(
     """Drive a run to completion (finalize=True) or simulate a crash
     by inserting a header without ever invoking the runner
     (finalize=False)."""
-    _fake, factory = factory_for([text_message('{"goal": "x", "steps": []}'), result_message()])
+    _fake, factory = factory_for(
+        [
+            text_message('{"goal": "x", "steps": []}'),
+            result_message(),
+            text_message("done."),
+            result_message(),
+        ]
+    )
     provider = AnthropicProvider(client_factory=factory)
     registry = _registry_with(provider)
     store = RunsStore(data_dir=tmp_path)
@@ -40,12 +47,19 @@ async def _make_runner_with_run(
         async def notify(_method: str, _params: Any) -> None:
             return None
 
-        result = await runner.run(
+        paused = await runner.run(
             session_id="s",
             provider_id="anthropic",
             prompt="Hello",
             notify=notify,
         )
+        result = await runner.approve_plan(
+            run_id=paused.run_id,
+            provider_id="anthropic",
+            decision="approve",
+            notify=notify,
+        )
+        assert result is not None
         return store, runner, result.run_id
 
     # Simulate a crash: insert a PLANNING header but never run.

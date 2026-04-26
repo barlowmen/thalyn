@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 from thalyn_brain.chat import register_chat_methods
+from thalyn_brain.orchestration import Runner
 from thalyn_brain.provider import AnthropicProvider, ProviderRegistry
 from thalyn_brain.rpc import Dispatcher, Notifier
 
@@ -39,21 +41,31 @@ def _kinds_for_method(captured: list[tuple[str, Any]], method: str) -> list[str]
     ]
 
 
-async def test_chat_send_routes_through_graph_and_streams_chunks() -> None:
+def _wire(dispatcher: Dispatcher, registry: ProviderRegistry, tmp_path: Path) -> None:
+    """Build a runner with persistence so the interrupt fires."""
+    runner = Runner(registry, data_dir=tmp_path)
+    register_chat_methods(dispatcher, registry, runner=runner)
+
+
+async def test_chat_send_pauses_at_plan_approval_interrupt(tmp_path: Path) -> None:
+    """chat.send returns awaiting_approval after the planner runs.
+
+    The actual chat-chunk stream lands during run.approve_plan; here we
+    just verify that the planner phase fires and the run is paused.
+    """
     _fake, factory = factory_for(
         [
-            text_message("Hello, "),
-            text_message("world."),
-            result_message(total_cost_usd=0.0002),
+            text_message('{"goal": "Hi", "steps": []}'),
+            result_message(),
         ]
     )
     provider = AnthropicProvider(client_factory=factory)
     registry = _registry_with(provider)
 
     dispatcher = Dispatcher()
-    register_chat_methods(dispatcher, registry)
+    _wire(dispatcher, registry, tmp_path)
 
-    captured, notify = _captured_notifier()
+    _captured, notify = _captured_notifier()
     response = await dispatcher.handle(
         {
             "jsonrpc": "2.0",
@@ -71,24 +83,18 @@ async def test_chat_send_routes_through_graph_and_streams_chunks() -> None:
     assert response is not None
     result = response["result"]
     assert result["sessionId"] == "sess_1"
-    assert result["status"] == "completed"
+    assert result["status"] == "awaiting_approval"
     assert result["runId"].startswith("r_")
     assert result["plan"]["goal"] == "Hi"
-    assert len(result["plan"]["nodes"]) == 1
-
-    chat_chunk_kinds = _kinds_for_method(captured, "chat.chunk")
-    assert chat_chunk_kinds == ["start", "text", "text", "stop"]
-    chat_chunks = [params for method, params in captured if method == "chat.chunk"]
-    assert all(p["sessionId"] == "sess_1" for p in chat_chunks)
 
 
-async def test_chat_send_emits_run_lifecycle_notifications() -> None:
-    _fake, factory = factory_for([text_message("ok."), result_message()])
+async def test_chat_send_emits_planning_lifecycle_then_pauses(tmp_path: Path) -> None:
+    _fake, factory = factory_for([text_message('{"goal": "Hello", "steps": []}'), result_message()])
     provider = AnthropicProvider(client_factory=factory)
     registry = _registry_with(provider)
 
     dispatcher = Dispatcher()
-    register_chat_methods(dispatcher, registry)
+    _wire(dispatcher, registry, tmp_path)
 
     captured, notify = _captured_notifier()
     await dispatcher.handle(
@@ -105,28 +111,26 @@ async def test_chat_send_emits_run_lifecycle_notifications() -> None:
         notify,
     )
 
-    methods = [method for method, _ in captured]
     statuses = [params["status"] for method, params in captured if method == "run.status"]
     assert statuses[0] == "pending"
     assert "planning" in statuses
-    assert "running" in statuses
-    assert statuses[-1] == "completed"
+    assert statuses[-1] == "awaiting_approval"
 
     plan_updates = [params for method, params in captured if method == "run.plan_update"]
     assert len(plan_updates) == 1
     assert plan_updates[0]["plan"]["goal"] == "Hello"
 
-    action_log_entries = [params for method, params in captured if method == "run.action_log"]
-    assert len(action_log_entries) >= 2  # at least the plan + node transitions
-
-    assert "chat.chunk" in methods
+    approval_required = [params for method, params in captured if method == "run.approval_required"]
+    assert len(approval_required) == 1
 
 
-async def test_chat_send_includes_tool_call_chunks() -> None:
+async def test_chat_send_chat_chunks_only_arrive_after_approval(tmp_path: Path) -> None:
+    """Tool-call chunks live in the response phase; verify chat.send
+    on its own does not produce respond-phase chunks."""
     _fake, factory = factory_for(
         [
             tool_call_message(call_id="t_1", name="Bash", input_={"command": "ls"}),
-            text_message("Done."),
+            text_message('{"goal": "ls", "steps": []}'),
             result_message(),
         ]
     )
@@ -134,7 +138,7 @@ async def test_chat_send_includes_tool_call_chunks() -> None:
     registry = _registry_with(provider)
 
     dispatcher = Dispatcher()
-    register_chat_methods(dispatcher, registry)
+    _wire(dispatcher, registry, tmp_path)
 
     captured, notify = _captured_notifier()
     await dispatcher.handle(
@@ -152,14 +156,8 @@ async def test_chat_send_includes_tool_call_chunks() -> None:
     )
 
     chat_chunk_kinds = _kinds_for_method(captured, "chat.chunk")
-    assert "tool_call" in chat_chunk_kinds
-
-    # The tool call also lands in the action log.
-    action_log_payloads = [
-        params["entry"]["payload"] for method, params in captured if method == "run.action_log"
-    ]
-    tool_call_actions = [p for p in action_log_payloads if p.get("tool") == "Bash"]
-    assert len(tool_call_actions) >= 1
+    # No chat.chunk events: respond hasn't run yet.
+    assert chat_chunk_kinds == []
 
 
 @pytest.mark.parametrize(
@@ -171,11 +169,12 @@ async def test_chat_send_includes_tool_call_chunks() -> None:
     ],
 )
 async def test_missing_required_params_returns_invalid_params(
+    tmp_path: Path,
     params: dict[str, Any],
 ) -> None:
     registry = ProviderRegistry()
     dispatcher = Dispatcher()
-    register_chat_methods(dispatcher, registry)
+    _wire(dispatcher, registry, tmp_path)
     _, notify = _captured_notifier()
 
     response = await dispatcher.handle(
@@ -187,10 +186,10 @@ async def test_missing_required_params_returns_invalid_params(
     assert response["error"]["code"] == -32602  # INVALID_PARAMS
 
 
-async def test_unknown_provider_returns_invalid_params() -> None:
+async def test_unknown_provider_returns_invalid_params(tmp_path: Path) -> None:
     registry = ProviderRegistry()
     dispatcher = Dispatcher()
-    register_chat_methods(dispatcher, registry)
+    _wire(dispatcher, registry, tmp_path)
     _, notify = _captured_notifier()
 
     response = await dispatcher.handle(

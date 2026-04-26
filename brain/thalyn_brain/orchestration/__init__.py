@@ -8,7 +8,11 @@ from thalyn_brain.orchestration.graph import (
     Notifier,
     build_graph,
 )
-from thalyn_brain.orchestration.runner import Runner, RunResult
+from thalyn_brain.orchestration.runner import (
+    RUN_APPROVAL_REQUIRED,
+    Runner,
+    RunResult,
+)
 from thalyn_brain.orchestration.state import (
     ActionLogEntry,
     GraphState,
@@ -21,6 +25,7 @@ from thalyn_brain.orchestration.state import (
 __all__ = [
     "CHAT_CHUNK",
     "RUN_ACTION_LOG",
+    "RUN_APPROVAL_REQUIRED",
     "RUN_PLAN_UPDATE",
     "RUN_STATUS",
     "ActionLogEntry",

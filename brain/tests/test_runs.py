@@ -102,7 +102,14 @@ async def test_list_unfinished_returns_in_flight_runs(tmp_path: Path) -> None:
 
 
 async def test_runner_writes_header_for_each_run(tmp_path: Path) -> None:
-    _fake, factory = factory_for([text_message("ok."), result_message()])
+    _fake, factory = factory_for(
+        [
+            text_message('{"goal": "x", "steps": []}'),
+            result_message(),
+            text_message("ok."),
+            result_message(),
+        ]
+    )
     provider = AnthropicProvider(client_factory=factory)
     registry = _registry_with(provider)
     store = RunsStore(data_dir=tmp_path)
@@ -111,12 +118,19 @@ async def test_runner_writes_header_for_each_run(tmp_path: Path) -> None:
     async def notify(method: str, params: Any) -> None:
         del method, params
 
-    result = await runner.run(
+    paused = await runner.run(
         session_id="s",
         provider_id="anthropic",
         prompt="Multi\nline\nprompt",
         notify=notify,
     )
+    result = await runner.approve_plan(
+        run_id=paused.run_id,
+        provider_id="anthropic",
+        decision="approve",
+        notify=notify,
+    )
+    assert result is not None
 
     header = await store.get(result.run_id)
     assert header is not None

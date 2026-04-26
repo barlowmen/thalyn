@@ -46,9 +46,17 @@ async def test_default_data_dir_falls_back_to_xdg_when_overridden(
 
 
 async def test_runner_persists_state_to_per_run_db(tmp_path: Path) -> None:
-    """End-to-end: run the graph with a real SqliteSaver and verify
-    the per-run db file exists with non-trivial content."""
-    _fake, factory = factory_for([text_message("Hi."), result_message()])
+    """End-to-end: run the graph with a real SqliteSaver, approve the
+    plan, and verify the per-run db file exists with non-trivial
+    content."""
+    _fake, factory = factory_for(
+        [
+            text_message('{"goal": "x", "steps": []}'),
+            result_message(),
+            text_message("Hi."),
+            result_message(),
+        ]
+    )
     provider = AnthropicProvider(client_factory=factory)
     registry = _registry_with(provider)
     runner = Runner(registry, data_dir=tmp_path)
@@ -58,14 +66,22 @@ async def test_runner_persists_state_to_per_run_db(tmp_path: Path) -> None:
     async def notify(method: str, params: Any) -> None:
         captured.append((method, params))
 
-    result = await runner.run(
+    paused = await runner.run(
         session_id="sess",
         provider_id="anthropic",
         prompt="Hello",
         notify=notify,
         run_id="r_persist_test",
     )
+    assert paused.status == RunStatus.AWAITING_APPROVAL.value
 
+    result = await runner.approve_plan(
+        run_id="r_persist_test",
+        provider_id="anthropic",
+        decision="approve",
+        notify=notify,
+    )
+    assert result is not None
     assert result.status == RunStatus.COMPLETED.value
     db_path = tmp_path / "runs" / "r_persist_test.db"
     assert db_path.exists(), "the per-run db file must be created"

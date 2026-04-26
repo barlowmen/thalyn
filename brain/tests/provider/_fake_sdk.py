@@ -3,10 +3,17 @@
 Records the prompt that was queried and replays a scripted sequence of
 SDK messages so the AnthropicProvider's translation logic can be
 exercised without an Anthropic API key.
+
+Multi-turn shape: each call to ``receive_response`` consumes messages
+from the front of the buffer up to and including the next
+``ResultMessage`` (which terminates a turn). Subsequent calls continue
+from where the previous one stopped, mirroring the real SDK's
+turn-by-turn drain.
 """
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
@@ -63,7 +70,7 @@ def result_message(*, total_cost_usd: float | None = None) -> ResultMessage:
 
 class FakeClient:
     def __init__(self, messages: Iterable[Any]) -> None:
-        self._messages = list(messages)
+        self._messages: deque[Any] = deque(messages)
         self.queries: list[str] = []
         self.options: ClaudeAgentOptions | None = None
 
@@ -77,8 +84,14 @@ class FakeClient:
         self.queries.append(prompt)
 
     async def receive_response(self) -> AsyncIterator[Any]:
-        for message in self._messages:
+        # Yield from the front of the buffer until (and including) the
+        # next ResultMessage; subsequent calls pick up where this one
+        # stops.
+        while self._messages:
+            message = self._messages.popleft()
             yield message
+            if isinstance(message, ResultMessage):
+                return
 
 
 def factory_for(messages: Iterable[Any]) -> tuple[FakeClient, Any]:

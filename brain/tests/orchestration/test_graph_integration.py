@@ -62,13 +62,23 @@ async def test_graph_run_persists_per_run_db_and_emits_lifecycle(
     runner = Runner(registry, runs_store=store, data_dir=tmp_path)
 
     captured, notify = _captured()
-    result = await runner.run(
+    paused = await runner.run(
         session_id="sess",
         provider_id="anthropic",
         prompt="List the repo contents",
         notify=notify,
     )
 
+    # Plan-approval interrupt fires before execute; drive through the
+    # rest of the graph by approving the plan.
+    assert paused.status == RunStatus.AWAITING_APPROVAL.value
+    result = await runner.approve_plan(
+        run_id=paused.run_id,
+        provider_id="anthropic",
+        decision="approve",
+        notify=notify,
+    )
+    assert result is not None
     assert result.status == RunStatus.COMPLETED.value
 
     methods = [method for method, _ in captured]
@@ -80,6 +90,7 @@ async def test_graph_run_persists_per_run_db_and_emits_lifecycle(
     statuses = [params["status"] for method, params in captured if method == "run.status"]
     assert statuses[0] == RunStatus.PENDING.value
     assert RunStatus.PLANNING.value in statuses
+    assert RunStatus.AWAITING_APPROVAL.value in statuses
     assert RunStatus.RUNNING.value in statuses
     assert statuses[-1] == RunStatus.COMPLETED.value
 
@@ -102,9 +113,11 @@ async def test_action_log_records_node_transitions_and_decisions(
 ) -> None:
     _fake, factory = factory_for(
         [
+            text_message('{"goal": "ls", "steps": []}'),
+            result_message(),
             tool_call_message(call_id="t_1", name="Bash", input_={"command": "ls"}),
             tool_result_message(call_id="t_1", output="a\nb\n"),
-            text_message('{"goal": "ls", "steps": []}'),
+            text_message("done."),
             result_message(),
         ]
     )
@@ -114,10 +127,16 @@ async def test_action_log_records_node_transitions_and_decisions(
     runner = Runner(registry, runs_store=store, data_dir=tmp_path)
 
     captured, notify = _captured()
-    await runner.run(
+    paused = await runner.run(
         session_id="sess",
         provider_id="anthropic",
         prompt="ls files",
+        notify=notify,
+    )
+    await runner.approve_plan(
+        run_id=paused.run_id,
+        provider_id="anthropic",
+        decision="approve",
         notify=notify,
     )
 
@@ -131,8 +150,8 @@ async def test_action_log_records_node_transitions_and_decisions(
 
 
 async def test_resume_replays_graph_from_checkpoint(tmp_path: Path) -> None:
-    """Drive a run, then resume it from the checkpoint and confirm the
-    runs-index header is left in COMPLETED state.
+    """Drive a run, approve the plan, then resume from the checkpoint
+    and confirm the runs-index header is left in COMPLETED state.
 
     The fake SDK has its messages drained on the original run; resuming
     against the LangGraph checkpoint replays state but doesn't replay
@@ -153,12 +172,20 @@ async def test_resume_replays_graph_from_checkpoint(tmp_path: Path) -> None:
     runner = Runner(registry, runs_store=store, data_dir=tmp_path)
 
     _, notify = _captured()
-    first = await runner.run(
+    paused = await runner.run(
         session_id="s",
         provider_id="anthropic",
         prompt="Hello",
         notify=notify,
     )
+    assert paused.status == RunStatus.AWAITING_APPROVAL.value
+    first = await runner.approve_plan(
+        run_id=paused.run_id,
+        provider_id="anthropic",
+        decision="approve",
+        notify=notify,
+    )
+    assert first is not None
     assert first.status == RunStatus.COMPLETED.value
 
     second = await runner.resume(

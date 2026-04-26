@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from thalyn_brain.orchestration.graph import (
+    RUN_PLAN_UPDATE,
     RUN_STATUS,
     Notifier,
     build_graph,
@@ -27,6 +28,8 @@ from thalyn_brain.orchestration.state import GraphState, RunStatus
 from thalyn_brain.orchestration.storage import open_run_checkpointer
 from thalyn_brain.provider import ProviderRegistry
 from thalyn_brain.runs import RunHeader, RunsStore, RunUpdate
+
+RUN_APPROVAL_REQUIRED = "run.approval_required"
 
 
 @dataclass
@@ -103,33 +106,13 @@ class Runner:
             if existing is None or not existing.values:
                 return None
 
-            # ``ainvoke(None, config)`` tells LangGraph to pick up from
-            # the latest checkpoint and continue.
-            final_state: GraphState = await graph.ainvoke(None, config=config)
+            final_state = await graph.ainvoke(None, config=config)
 
-        status = final_state.get("status") or RunStatus.COMPLETED.value
-        plan = final_state.get("plan")
-        final_response = final_state.get("final_response", "")
-        session_id = final_state.get("session_id", "")
-
-        if self._runs_store is not None:
-            await self._runs_store.update(
-                run_id,
-                RunUpdate(
-                    status=status,
-                    completed_at_ms=int(time.time() * 1000),
-                    final_response=final_response,
-                ).with_plan(plan),
-            )
-
-        return RunResult(
+        return await self._finalize(
             run_id=run_id,
-            session_id=session_id,
             provider_id=provider_id,
-            status=status,
-            final_response=final_response,
-            plan=plan,
-            action_log_size=len(final_state.get("action_log") or []),
+            session_id=final_state.get("session_id", ""),
+            final_state=final_state,
         )
 
     async def run(
@@ -184,8 +167,143 @@ class Runner:
             }
             config = {"configurable": {"thread_id": run_id}}
 
-            final_state: GraphState = await graph.ainvoke(initial, config=config)
+            final_state = await graph.ainvoke(initial, config=config)
 
+            # If the graph paused at the plan-approval interrupt, surface
+            # that status to the caller and notify the renderer so the
+            # approval modal can open. The run continues async via a
+            # subsequent approve_plan call.
+            if checkpointer is not None and await _paused_at_interrupt(graph, config):
+                return await self._handle_interrupt(
+                    run_id=run_id,
+                    session_id=session_id,
+                    provider_id=provider_id,
+                    final_state=final_state,
+                    notify=notify,
+                )
+
+        return await self._finalize(
+            run_id=run_id,
+            provider_id=provider_id,
+            session_id=session_id,
+            final_state=final_state,
+        )
+
+    async def approve_plan(
+        self,
+        *,
+        run_id: str,
+        provider_id: str,
+        decision: str,
+        notify: Notifier,
+        edited_plan: dict[str, Any] | None = None,
+    ) -> RunResult | None:
+        """Resolve an in-flight approval gate.
+
+        ``decision`` is "approve", "edit", or "reject". On "edit" the
+        provided ``edited_plan`` replaces the planner's output before
+        execution resumes. On "reject" the run is marked killed and
+        the graph is not resumed. ``approve`` and ``edit`` resume the
+        graph from the interrupt; the final state is returned to the
+        caller and the runs index is updated.
+        """
+        if decision not in {"approve", "edit", "reject"}:
+            raise ValueError(f"unknown decision: {decision}")
+        provider = self._registry.get(provider_id)
+
+        async with self._checkpointer_context(run_id) as checkpointer:
+            if checkpointer is None:
+                return None
+            graph = build_graph(provider, notify, checkpointer=checkpointer)
+            config = {"configurable": {"thread_id": run_id}}
+
+            existing = await graph.aget_state(config)
+            if existing is None or not existing.values:
+                return None
+
+            if decision == "reject":
+                # Mark the run killed and skip resumption.
+                await notify(
+                    RUN_STATUS,
+                    {"runId": run_id, "status": RunStatus.KILLED.value},
+                )
+                final_state = {
+                    **existing.values,
+                    "status": RunStatus.KILLED.value,
+                }
+                return await self._finalize(
+                    run_id=run_id,
+                    provider_id=provider_id,
+                    session_id=final_state.get("session_id", ""),
+                    final_state=final_state,
+                )
+
+            if decision == "edit" and edited_plan is not None:
+                # Overwrite the cached plan in the checkpoint state so the
+                # downstream nodes execute against the user's edit.
+                await graph.aupdate_state(config, {"plan": edited_plan})
+                await notify(
+                    RUN_PLAN_UPDATE,
+                    {"runId": run_id, "plan": edited_plan},
+                )
+
+            final_state = await graph.ainvoke(None, config=config)
+
+        return await self._finalize(
+            run_id=run_id,
+            provider_id=provider_id,
+            session_id=final_state.get("session_id", ""),
+            final_state=final_state,
+        )
+
+    async def _handle_interrupt(
+        self,
+        *,
+        run_id: str,
+        session_id: str,
+        provider_id: str,
+        final_state: dict[str, Any],
+        notify: Notifier,
+    ) -> RunResult:
+        await notify(
+            RUN_STATUS,
+            {"runId": run_id, "status": RunStatus.AWAITING_APPROVAL.value},
+        )
+        await notify(
+            RUN_APPROVAL_REQUIRED,
+            {
+                "runId": run_id,
+                "gateKind": "plan",
+                "plan": final_state.get("plan"),
+            },
+        )
+
+        if self._runs_store is not None:
+            await self._runs_store.update(
+                run_id,
+                RunUpdate(status=RunStatus.AWAITING_APPROVAL.value).with_plan(
+                    final_state.get("plan")
+                ),
+            )
+
+        return RunResult(
+            run_id=run_id,
+            session_id=session_id,
+            provider_id=provider_id,
+            status=RunStatus.AWAITING_APPROVAL.value,
+            final_response="",
+            plan=final_state.get("plan"),
+            action_log_size=len(final_state.get("action_log") or []),
+        )
+
+    async def _finalize(
+        self,
+        *,
+        run_id: str,
+        provider_id: str,
+        session_id: str,
+        final_state: dict[str, Any],
+    ) -> RunResult:
         status = final_state.get("status") or RunStatus.COMPLETED.value
         plan = final_state.get("plan")
         final_response = final_state.get("final_response", "")
@@ -209,6 +327,15 @@ class Runner:
             plan=plan,
             action_log_size=len(final_state.get("action_log") or []),
         )
+
+
+async def _paused_at_interrupt(graph: Any, config: dict[str, Any]) -> bool:
+    """True when the graph is currently parked at the plan-approval gate."""
+    snapshot = await graph.aget_state(config)
+    if snapshot is None:
+        return False
+    next_nodes: tuple[str, ...] = getattr(snapshot, "next", ()) or ()
+    return "execute" in next_nodes
 
 
 def _new_run_id() -> str:

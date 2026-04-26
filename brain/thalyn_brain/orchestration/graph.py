@@ -61,12 +61,18 @@ def build_graph(
     notify: Notifier,
     *,
     checkpointer: Any | None = None,
+    interrupt_on_plan_approval: bool = True,
 ) -> Any:
     """Build and compile the brain graph.
 
     The provider supplies LLM traffic; `notify` is the side-channel
-    nodes use to push live updates to the renderer; `checkpointer` is
-    optional and lands wired-up in v0.4's per-run SQLite work.
+    nodes use to push live updates to the renderer; `checkpointer`
+    persists graph state across the interrupt and across app restarts.
+
+    When ``interrupt_on_plan_approval`` is set the graph pauses
+    before the ``execute`` node so the user can approve, edit, or
+    reject the plan. Tests that don't care about the interrupt can
+    flip the flag off and let the graph run end-to-end.
     """
     graph: StateGraph[GraphState] = StateGraph(GraphState)
     # LangGraph's add_node overloads don't enjoy our explicit
@@ -83,7 +89,11 @@ def build_graph(
     graph.add_edge("critic", "respond")
     graph.add_edge("respond", END)
 
-    return graph.compile(checkpointer=checkpointer)
+    interrupt_before = ["execute"] if interrupt_on_plan_approval else []
+    return graph.compile(
+        checkpointer=checkpointer,
+        interrupt_before=interrupt_before,
+    )
 
 
 # ---------------------------------------------------------------------------
