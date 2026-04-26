@@ -1,12 +1,20 @@
 //! Brain sidecar supervisor.
 //!
 //! Spawns the Python sidecar as a child process and exchanges
-//! NDJSON-framed JSON-RPC 2.0 messages with it over stdin/stdout. The
-//! walking-skeleton surface is a single `ping` request; concurrent
-//! in-flight requests, streaming notifications, and a richer transport
-//! (Unix domain socket / Windows named pipe) all land in subsequent
-//! iterations of the runtime.
+//! NDJSON-framed JSON-RPC 2.0 messages with it over stdin/stdout.
+//! Supports two call shapes:
+//!
+//! * [`BrainSupervisor::call`] — request/response, used for `ping`,
+//!   provider listing, and other one-shots.
+//! * [`BrainSupervisor::call_streaming`] — request that may emit
+//!   notifications (with no `id`) before its final response;
+//!   used for chat token streaming.
+//!
+//! A future iteration replaces the per-call mutex with a true
+//! multiplexing reader task driven by an id-keyed correlation map; for
+//! v0.3 the surface is single-user and the lock is enough.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -29,10 +37,12 @@ struct RpcRequest<'a> {
 }
 
 #[derive(Debug, Deserialize)]
-struct RpcResponse {
+struct RpcEnvelope {
     #[allow(dead_code)]
     jsonrpc: Option<String>,
     id: Option<u64>,
+    method: Option<String>,
+    params: Option<Value>,
     result: Option<Value>,
     error: Option<RpcError>,
 }
@@ -65,10 +75,6 @@ pub enum BrainError {
 }
 
 /// Long-lived handle to a running brain sidecar process.
-///
-/// Cheap to clone — the underlying state is held behind an `Arc`-style
-/// `Mutex` so multiple call sites can serialise their requests against
-/// the single duplex stream.
 pub struct BrainSupervisor {
     next_id: AtomicU64,
     inner: Mutex<Inner>,
@@ -86,6 +92,10 @@ pub struct SpawnConfig {
     pub program: String,
     pub args: Vec<String>,
     pub working_dir: Option<PathBuf>,
+    /// Environment variables to set on the spawned process. Used to
+    /// forward API keys read from the OS keychain into the brain
+    /// without writing them to disk.
+    pub env: HashMap<String, String>,
 }
 
 impl SpawnConfig {
@@ -111,7 +121,14 @@ impl SpawnConfig {
                 "thalyn_brain".into(),
             ],
             working_dir,
+            env: HashMap::new(),
         }
+    }
+
+    /// Override an environment variable for the spawn.
+    pub fn with_env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.insert(key.into(), value.into());
+        self
     }
 }
 
@@ -127,6 +144,9 @@ impl BrainSupervisor {
             .kill_on_drop(true);
         if let Some(dir) = &config.working_dir {
             command.current_dir(dir);
+        }
+        for (key, value) in &config.env {
+            command.env(key, value);
         }
 
         let mut child = command.spawn().map_err(BrainError::Spawn)?;
@@ -148,17 +168,29 @@ impl BrainSupervisor {
     }
 
     /// Send a JSON-RPC request and wait for the matching response.
-    ///
-    /// Concurrent callers serialise on the inner mutex — this is fine for
-    /// the walking-skeleton surface where all traffic is request/response.
-    /// A multiplexing layer with id correlation can replace this when
-    /// streaming notifications come online.
     pub async fn call(
         &self,
         method: &str,
         params: Value,
         deadline: Duration,
     ) -> Result<Value, BrainError> {
+        self.call_streaming(method, params, deadline, |_, _| {})
+            .await
+    }
+
+    /// Send a JSON-RPC request, invoking ``on_notification`` for every
+    /// notification the brain emits while the request is in flight,
+    /// then return the final response.
+    pub async fn call_streaming<F>(
+        &self,
+        method: &str,
+        params: Value,
+        deadline: Duration,
+        mut on_notification: F,
+    ) -> Result<Value, BrainError>
+    where
+        F: FnMut(&str, &Value),
+    {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let request = serde_json::to_vec(&RpcRequest {
             jsonrpc: "2.0",
@@ -172,26 +204,39 @@ impl BrainSupervisor {
         inner.stdin.write_all(b"\n").await?;
         inner.stdin.flush().await?;
 
-        let mut buf = String::new();
-        let read = timeout(deadline, inner.stdout.read_line(&mut buf))
-            .await
-            .map_err(|_| BrainError::Timeout)??;
-        if read == 0 {
-            return Err(BrainError::Eof);
-        }
+        loop {
+            let mut buf = String::new();
+            let read = timeout(deadline, inner.stdout.read_line(&mut buf))
+                .await
+                .map_err(|_| BrainError::Timeout)??;
+            if read == 0 {
+                return Err(BrainError::Eof);
+            }
 
-        let response: RpcResponse = serde_json::from_str(buf.trim_end())?;
-        if let Some(err) = response.error {
-            return Err(BrainError::Rpc(err));
+            let envelope: RpcEnvelope = serde_json::from_str(buf.trim_end())?;
+
+            // Notification — no id, has a method.
+            if envelope.id.is_none() {
+                if let Some(method) = envelope.method.as_deref() {
+                    let params = envelope.params.unwrap_or(Value::Null);
+                    on_notification(method, &params);
+                }
+                continue;
+            }
+
+            // Response.
+            if let Some(err) = envelope.error {
+                return Err(BrainError::Rpc(err));
+            }
+            if envelope.id != Some(id) {
+                tracing::warn!(
+                    expected = id,
+                    actual = ?envelope.id,
+                    "brain response id did not match request id",
+                );
+            }
+            return envelope.result.ok_or(BrainError::EmptyResult);
         }
-        if response.id != Some(id) {
-            tracing::warn!(
-                expected = id,
-                actual = ?response.id,
-                "brain response id did not match request id",
-            );
-        }
-        response.result.ok_or(BrainError::EmptyResult)
     }
 
     /// Best-effort shutdown: drop stdin (signals EOF to the sidecar) and
@@ -227,14 +272,11 @@ mod tests {
                 "thalyn_brain".into(),
             ],
             working_dir: Some(brain_dir()),
+            env: HashMap::new(),
         }
     }
 
     /// Round-trip a real ping against a real Python sidecar.
-    ///
-    /// Skipped automatically when `uv` is not on PATH or the brain venv
-    /// has not been synced — that keeps the suite green on a fresh
-    /// checkout where the developer hasn't run `uv sync` yet.
     #[tokio::test]
     async fn pings_real_sidecar() {
         let supervisor = match BrainSupervisor::spawn(dev_config()).await {

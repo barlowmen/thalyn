@@ -89,3 +89,40 @@ async def test_request_after_notification_still_responds() -> None:
 async def test_known_error_codes(payload: bytes, want_code: int) -> None:
     responses = await _drive([payload])
     assert responses[0]["error"]["code"] == want_code
+
+
+async def test_streaming_handler_writes_notifications_then_response() -> None:
+    """Notifications emitted by a handler land on the wire ahead of the response."""
+
+    from thalyn_brain.rpc import Dispatcher, Notifier
+
+    dispatcher = Dispatcher()
+
+    async def streamer(_params: dict[str, Any], notify: Notifier) -> dict[str, Any]:
+        await notify("chunk", {"delta": "Hello, "})
+        await notify("chunk", {"delta": "world."})
+        return {"chunks": 2}
+
+    dispatcher.register_streaming("stream", streamer)
+
+    reader = asyncio.StreamReader()
+    reader.feed_data(b'{"jsonrpc":"2.0","id":1,"method":"stream"}\n')
+    reader.feed_eof()
+
+    sink: list[bytes] = []
+
+    class _Writer:
+        def write(self, data: bytes) -> None:
+            sink.append(data)
+
+        async def drain(self) -> None:
+            return None
+
+    await serve_stream(reader, _Writer(), dispatcher)  # type: ignore[arg-type]
+    lines = [json.loads(line) for line in b"".join(sink).decode("utf-8").splitlines() if line]
+
+    assert len(lines) == 3
+    assert lines[0] == {"jsonrpc": "2.0", "method": "chunk", "params": {"delta": "Hello, "}}
+    assert lines[1] == {"jsonrpc": "2.0", "method": "chunk", "params": {"delta": "world."}}
+    assert lines[2]["id"] == 1
+    assert lines[2]["result"] == {"chunks": 2}

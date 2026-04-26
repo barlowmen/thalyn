@@ -23,7 +23,11 @@ from thalyn_brain.provider.base import (
     ProviderNotImplementedError,
     ReliabilityTier,
 )
-from thalyn_brain.provider.registry import build_registry, builtin_providers
+from thalyn_brain.provider.registry import (
+    ProviderRegistry,
+    build_registry,
+    builtin_providers,
+)
 
 __all__ = [
     "AnthropicProvider",
@@ -41,6 +45,7 @@ __all__ = [
     "ProviderKind",
     "ProviderMeta",
     "ProviderNotImplementedError",
+    "ProviderRegistry",
     "ReliabilityTier",
     "build_registry",
     "builtin_providers",
