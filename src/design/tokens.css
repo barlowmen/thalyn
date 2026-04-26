@@ -28,15 +28,18 @@
   --text: oklch(96% 0 0);
   --text-muted: oklch(70% 0 0);
 
-  /* Accent + status */
-  --accent: oklch(70% 0.15 250);
+  /* Accent + status — dark-on-bright pairings hit WCAG 2.1 AA at the
+     declared `--*-fg` token. The accent ships at 55% L (down from the
+     original 70% sketch) so `bg-primary text-primary-foreground` clears
+     the 4.5:1 threshold for normal text. */
+  --accent: oklch(55% 0.18 260);
   --accent-fg: oklch(98% 0 0);
-  --success: oklch(72% 0.16 145);
-  --warning: oklch(78% 0.15 80);
-  --danger: oklch(65% 0.2 25);
+  --success: oklch(50% 0.16 145);
+  --warning: oklch(56% 0.15 80);
+  --danger: oklch(52% 0.22 25);
 
   /* Focus ring — WCAG: ≥ 3:1 against any adjacent surface */
-  --focus-ring: oklch(80% 0.15 250);
+  --focus-ring: oklch(72% 0.16 260);
 
   /* Radii */
   --radius-input: 6px;
@@ -84,13 +87,13 @@
   --text: oklch(20% 0 0);
   --text-muted: oklch(45% 0 0);
 
-  --accent: oklch(50% 0.15 250);
+  --accent: oklch(48% 0.2 260);
   --accent-fg: oklch(98% 0 0);
-  --success: oklch(45% 0.16 145);
-  --warning: oklch(55% 0.15 80);
-  --danger: oklch(48% 0.2 25);
+  --success: oklch(40% 0.18 145);
+  --warning: oklch(48% 0.16 80);
+  --danger: oklch(45% 0.22 25);
 
-  --focus-ring: oklch(45% 0.15 250);
+  --focus-ring: oklch(48% 0.2 260);
 }
 
 /*
@@ -108,13 +111,13 @@
     --text: oklch(20% 0 0);
     --text-muted: oklch(45% 0 0);
 
-    --accent: oklch(50% 0.15 250);
+    --accent: oklch(48% 0.2 260);
     --accent-fg: oklch(98% 0 0);
-    --success: oklch(45% 0.16 145);
-    --warning: oklch(55% 0.15 80);
-    --danger: oklch(48% 0.2 25);
+    --success: oklch(40% 0.18 145);
+    --warning: oklch(48% 0.16 80);
+    --danger: oklch(45% 0.22 25);
 
-    --focus-ring: oklch(45% 0.15 250);
+    --focus-ring: oklch(48% 0.2 260);
   }
 }
 
