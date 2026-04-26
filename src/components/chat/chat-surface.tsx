@@ -5,38 +5,45 @@ import { MessageList } from "@/components/chat/message-list";
 import { useChat } from "@/components/chat/use-chat";
 import { Badge } from "@/components/ui/badge";
 import {
+  readActiveProvider,
+  subscribeActiveProvider,
+} from "@/lib/active-provider";
+import {
   isProviderConfigured,
   listProviders,
   type ProviderMeta,
 } from "@/lib/providers";
 
-const PROVIDER_ID = "anthropic";
-
 /**
- * The main-panel chat surface. Single Anthropic provider in v0.3;
- * multi-provider switching lands with the brain-mode badge in
- * subsequent iterations.
+ * The main-panel chat surface. Reads the active provider from the
+ * settings store and routes turns through it; the radio-group
+ * selector in Settings dispatches a `thalyn:active-provider-changed`
+ * event that we listen for here.
  */
 export function ChatSurface({ onOpenSettings }: { onOpenSettings: () => void }) {
+  const [providerId, setProviderId] = useState<string>(() => readActiveProvider());
   const [provider, setProvider] = useState<ProviderMeta | null>(null);
   const [configured, setConfigured] = useState<boolean | null>(null);
-  const { messages, status, send } = useChat({ providerId: PROVIDER_ID });
+  const { messages, status, send } = useChat({ providerId });
+
+  // Listen for selection changes coming out of the Settings dialog.
+  useEffect(() => subscribeActiveProvider(setProviderId), []);
 
   useEffect(() => {
     let cancelled = false;
     Promise.all([
       listProviders().catch(() => [] as ProviderMeta[]),
-      isProviderConfigured(PROVIDER_ID).catch(() => false),
+      isProviderConfigured(providerId).catch(() => false),
     ]).then(([providers, isConfigured]) => {
       if (cancelled) return;
-      const found = providers.find((p) => p.id === PROVIDER_ID) ?? null;
+      const found = providers.find((p) => p.id === providerId) ?? null;
       setProvider(found);
       setConfigured(isConfigured);
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [providerId]);
 
   const sending = status.kind === "sending";
   const errorMessage =
