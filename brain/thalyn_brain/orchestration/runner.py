@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from thalyn_brain.audit import AuditLogWriter, wrap_notifier
 from thalyn_brain.orchestration.graph import (
     RUN_PLAN_UPDATE,
     RUN_STATUS,
@@ -78,6 +79,15 @@ class Runner:
         else:
             self._checkpointer_context = _no_checkpointer_cm
         self._runs_store = runs_store
+        # Audit logs land alongside the per-run db, so we keep a copy
+        # of data_dir even when the caller passed in a custom
+        # checkpointer context.
+        self._audit_data_dir = data_dir
+
+    def _audit_for(self, run_id: str) -> AuditLogWriter | None:
+        if self._audit_data_dir is None:
+            return None
+        return AuditLogWriter(run_id, data_dir=self._audit_data_dir)
 
     async def resume(
         self,
@@ -94,6 +104,8 @@ class Runner:
         the final state.
         """
         provider = self._registry.get(provider_id)
+        audit = self._audit_for(run_id)
+        notify = wrap_notifier(notify, audit)
 
         async with self._checkpointer_context(run_id) as checkpointer:
             if checkpointer is None:
@@ -129,6 +141,9 @@ class Runner:
         run_id = run_id or _new_run_id()
         started_at = int(time.time() * 1000)
         title = _title_from(prompt)
+
+        audit = self._audit_for(run_id)
+        notify = wrap_notifier(notify, audit)
 
         await notify(
             RUN_STATUS,
@@ -210,6 +225,10 @@ class Runner:
         if decision not in {"approve", "edit", "reject"}:
             raise ValueError(f"unknown decision: {decision}")
         provider = self._registry.get(provider_id)
+        audit = self._audit_for(run_id)
+        if audit is not None:
+            audit.append_approval(decision, edited_plan_present=edited_plan is not None)
+        notify = wrap_notifier(notify, audit)
 
         async with self._checkpointer_context(run_id) as checkpointer:
             if checkpointer is None:
