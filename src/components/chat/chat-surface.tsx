@@ -2,22 +2,21 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Composer } from "@/components/chat/composer";
 import { MessageList } from "@/components/chat/message-list";
+import {
+  commit as commitProviderSwap,
+  ProviderSwitcher,
+} from "@/components/chat/provider-switcher";
 import { useChat } from "@/components/chat/use-chat";
 import { SubAgentTiles } from "@/components/inspector/subagent-tiles";
 import { useRootRunId } from "@/components/inspector/use-root-run-id";
 import { useRunDetail } from "@/components/inspector/use-run-detail";
 import { useSubAgentTree } from "@/components/inspector/use-subagent-tree";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   readActiveProvider,
   subscribeActiveProvider,
 } from "@/lib/active-provider";
-import {
-  isProviderConfigured,
-  listProviders,
-  type ProviderMeta,
-} from "@/lib/providers";
+import { isProviderConfigured } from "@/lib/providers";
 import { killRun, type Plan } from "@/lib/runs";
 
 /**
@@ -38,7 +37,6 @@ export function ChatSurface({
   onHandBack?: () => void;
 }) {
   const [providerId, setProviderId] = useState<string>(() => readActiveProvider());
-  const [provider, setProvider] = useState<ProviderMeta | null>(null);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const takeOverDetail = useRunDetail(takeOverRunId ?? null);
   const takeOverPrompt = useMemo(
@@ -64,15 +62,15 @@ export function ChatSurface({
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      listProviders().catch(() => [] as ProviderMeta[]),
-      isProviderConfigured(providerId).catch(() => false),
-    ]).then(([providers, isConfigured]) => {
-      if (cancelled) return;
-      const found = providers.find((p) => p.id === providerId) ?? null;
-      setProvider(found);
-      setConfigured(isConfigured);
-    });
+    isProviderConfigured(providerId)
+      .then((isConfigured) => {
+        if (cancelled) return;
+        setConfigured(isConfigured);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setConfigured(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -91,11 +89,14 @@ export function ChatSurface({
       <header className="flex items-center justify-between border-b border-border bg-background px-6 py-3">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold">Chat</h2>
-          {provider && (
-            <Badge tone={configured ? "success" : "warning"}>
-              {provider.displayName}
-            </Badge>
-          )}
+          <ProviderSwitcher
+            activeProviderId={providerId}
+            configured={configured}
+            onSwap={(swap) => {
+              if (!swap) return;
+              commitProviderSwap(swap.to.id);
+            }}
+          />
         </div>
         <button
           type="button"
