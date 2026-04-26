@@ -1,12 +1,11 @@
 """Run a user prompt through the LangGraph orchestrator.
 
-A `Runner` ties three things together: the provider registry that
+A `Runner` ties four things together: the provider registry that
 serves LLM traffic, a notifier that the graph nodes use to push
-plan/action/status events to the renderer, and the resulting
-GraphState the dispatcher hands back to the caller. Each run opens a
-per-run SqliteSaver scoped to a file under `runs/{run_id}.db` so
-state is checkpointed at every node transition; tests can pass a
-no-op store to skip persistence.
+plan/action/status events to the renderer, the per-run SqliteSaver
+where the graph snapshots its state on every node transition, and a
+`RunsStore` that persists the header row used by the runs index UI.
+Tests can pass a no-op store to skip persistence.
 """
 
 from __future__ import annotations
@@ -27,6 +26,7 @@ from thalyn_brain.orchestration.graph import (
 from thalyn_brain.orchestration.state import GraphState, RunStatus
 from thalyn_brain.orchestration.storage import open_run_checkpointer
 from thalyn_brain.provider import ProviderRegistry
+from thalyn_brain.runs import RunHeader, RunsStore, RunUpdate
 
 
 @dataclass
@@ -64,6 +64,7 @@ class Runner:
         registry: ProviderRegistry,
         *,
         checkpointer_context: CheckpointerContext | None = None,
+        runs_store: RunsStore | None = None,
         data_dir: Path | None = None,
     ) -> None:
         self._registry = registry
@@ -73,6 +74,7 @@ class Runner:
             self._checkpointer_context = _persistent_context(data_dir)
         else:
             self._checkpointer_context = _no_checkpointer_cm
+        self._runs_store = runs_store
 
     async def run(
         self,
@@ -86,11 +88,29 @@ class Runner:
         provider = self._registry.get(provider_id)
 
         run_id = run_id or _new_run_id()
+        started_at = int(time.time() * 1000)
+        title = _title_from(prompt)
 
         await notify(
             RUN_STATUS,
             {"runId": run_id, "status": RunStatus.PENDING.value},
         )
+
+        if self._runs_store is not None:
+            await self._runs_store.insert(
+                RunHeader(
+                    run_id=run_id,
+                    project_id=None,
+                    parent_run_id=None,
+                    status=RunStatus.PLANNING.value,
+                    title=title,
+                    provider_id=provider_id,
+                    started_at_ms=started_at,
+                    completed_at_ms=None,
+                    drift_score=0.0,
+                    final_response="",
+                )
+            )
 
         async with self._checkpointer_context(run_id) as checkpointer:
             graph = build_graph(provider, notify, checkpointer=checkpointer)
@@ -110,16 +130,39 @@ class Runner:
 
             final_state: GraphState = await graph.ainvoke(initial, config=config)
 
+        status = final_state.get("status") or RunStatus.COMPLETED.value
+        plan = final_state.get("plan")
+        final_response = final_state.get("final_response", "")
+
+        if self._runs_store is not None:
+            await self._runs_store.update(
+                run_id,
+                RunUpdate(
+                    status=status,
+                    completed_at_ms=int(time.time() * 1000),
+                    final_response=final_response,
+                ).with_plan(plan),
+            )
+
         return RunResult(
             run_id=run_id,
             session_id=session_id,
             provider_id=provider_id,
-            status=final_state.get("status") or RunStatus.COMPLETED.value,
-            final_response=final_state.get("final_response", ""),
-            plan=final_state.get("plan"),
+            status=status,
+            final_response=final_response,
+            plan=plan,
             action_log_size=len(final_state.get("action_log") or []),
         )
 
 
 def _new_run_id() -> str:
     return f"r_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+
+
+def _title_from(prompt: str) -> str:
+    """First non-empty line, capped at 80 chars — used in the runs index UI."""
+    for line in prompt.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:80]
+    return prompt[:80]

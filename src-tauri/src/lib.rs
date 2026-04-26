@@ -116,6 +116,35 @@ async fn provider_configured(
 }
 
 #[tauri::command]
+async fn list_runs(
+    state: State<'_, AppState>,
+    statuses: Option<Vec<String>>,
+    limit: Option<u32>,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    if let Some(statuses) = statuses {
+        params.insert("statuses".into(), Value::from(statuses));
+    }
+    if let Some(limit) = limit {
+        params.insert("limit".into(), Value::from(limit));
+    }
+    state
+        .brain
+        .call("runs.list", Value::Object(params), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn get_run(state: State<'_, AppState>, run_id: String) -> Result<Value, String> {
+    state
+        .brain
+        .call("runs.get", json!({ "runId": run_id }), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 async fn send_chat(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -226,6 +255,8 @@ pub fn run() {
             clear_api_key,
             provider_configured,
             send_chat,
+            list_runs,
+            get_run,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
