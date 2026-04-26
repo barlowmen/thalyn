@@ -143,3 +143,5 @@ class GraphState(TypedDict, total=False):
     final_response: str
     error: str | None
     subagent_results: list[dict[str, Any]]
+    budget: dict[str, Any] | None
+    budget_consumed: dict[str, Any]

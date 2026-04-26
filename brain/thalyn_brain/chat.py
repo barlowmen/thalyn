@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from thalyn_brain.orchestration import Runner
+from thalyn_brain.orchestration.budget import Budget
 from thalyn_brain.provider import ProviderNotImplementedError, ProviderRegistry
 from thalyn_brain.rpc import (
     INVALID_PARAMS,
@@ -56,6 +57,7 @@ async def _handle_chat_send(
     session_id = _require_str(params, "sessionId")
     provider_id = _require_str(params, "providerId")
     prompt = _require_str(params, "prompt")
+    budget = Budget.from_wire(params.get("budget"))
 
     try:
         result = await runner.run(
@@ -63,6 +65,7 @@ async def _handle_chat_send(
             provider_id=provider_id,
             prompt=prompt,
             notify=notify,
+            budget=budget,
         )
     except ProviderNotImplementedError as exc:
         raise RpcError(code=INVALID_PARAMS, message=str(exc)) from exc

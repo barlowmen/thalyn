@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from thalyn_brain.audit import AuditLogWriter, wrap_notifier
+from thalyn_brain.orchestration.budget import Budget, BudgetConsumption
 from thalyn_brain.orchestration.graph import (
     RUN_PLAN_UPDATE,
     RUN_STATUS,
@@ -157,12 +158,15 @@ class Runner:
         run_id: str | None = None,
         parent_run_id: str | None = None,
         depth: int = 0,
+        budget: Budget | None = None,
     ) -> RunResult:
         provider = self._registry.get(provider_id)
 
         run_id = run_id or _new_run_id()
         started_at = int(time.time() * 1000)
         title = _title_from(prompt)
+        budget_wire = budget.to_wire() if budget is not None else None
+        consumed = BudgetConsumption(started_at_ms=started_at)
 
         audit = self._audit_for(run_id)
         notify = wrap_notifier(notify, audit)
@@ -189,6 +193,8 @@ class Runner:
                     completed_at_ms=None,
                     drift_score=0.0,
                     final_response="",
+                    budget=budget_wire,
+                    budget_consumed=consumed.to_wire(),
                 )
             )
 
@@ -219,23 +225,33 @@ class Runner:
                 "final_response": "",
                 "error": None,
                 "subagent_results": [],
+                "budget": budget_wire,
+                "budget_consumed": consumed.to_wire(),
             }
             config = {"configurable": {"thread_id": run_id}}
 
             final_state = await graph.ainvoke(initial, config=config)
 
-            # If the graph paused at the plan-approval interrupt, surface
-            # that status to the caller and notify the renderer so the
-            # approval modal can open. The run continues async via a
-            # subsequent approve_plan call.
-            if checkpointer is not None and await _paused_at_interrupt(graph, config):
-                return await self._handle_interrupt(
-                    run_id=run_id,
-                    session_id=session_id,
-                    provider_id=provider_id,
-                    final_state=final_state,
-                    notify=notify,
-                )
+            # If a node halted on a budget gate the state is already
+            # terminal — fall through to finalisation rather than
+            # surfacing the plan-approval interrupt that would
+            # otherwise have fired next.
+            if final_state.get("status") not in {
+                RunStatus.KILLED.value,
+                RunStatus.ERRORED.value,
+            }:
+                # If the graph paused at the plan-approval interrupt, surface
+                # that status to the caller and notify the renderer so the
+                # approval modal can open. The run continues async via a
+                # subsequent approve_plan call.
+                if checkpointer is not None and await _paused_at_interrupt(graph, config):
+                    return await self._handle_interrupt(
+                        run_id=run_id,
+                        session_id=session_id,
+                        provider_id=provider_id,
+                        final_state=final_state,
+                        notify=notify,
+                    )
 
         return await self._finalize(
             run_id=run_id,
@@ -607,6 +623,7 @@ class Runner:
         status = final_state.get("status") or RunStatus.COMPLETED.value
         plan = final_state.get("plan")
         final_response = final_state.get("final_response", "")
+        budget_consumed = final_state.get("budget_consumed")
 
         if self._runs_store is not None:
             await self._runs_store.update(
@@ -615,7 +632,9 @@ class Runner:
                     status=status,
                     completed_at_ms=int(time.time() * 1000),
                     final_response=final_response,
-                ).with_plan(plan),
+                )
+                .with_plan(plan)
+                .with_budget_consumed(budget_consumed),
             )
 
         return RunResult(

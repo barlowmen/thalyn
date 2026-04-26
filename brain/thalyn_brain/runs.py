@@ -44,6 +44,8 @@ class RunHeader:
     final_response: str
     plan: dict[str, Any] | None = None
     sandbox_tier: str | None = None
+    budget: dict[str, Any] | None = None
+    budget_consumed: dict[str, Any] | None = None
 
     def to_wire(self) -> dict[str, Any]:
         d = asdict(self)
@@ -60,6 +62,8 @@ class RunHeader:
             "finalResponse": d["final_response"],
             "plan": d["plan"],
             "sandboxTier": d["sandbox_tier"],
+            "budget": d["budget"],
+            "budgetConsumed": d["budget_consumed"],
         }
 
 
@@ -73,10 +77,17 @@ class RunUpdate:
     final_response: str | None = None
     plan: dict[str, Any] | None = None
     plan_explicit: bool = field(default=False, init=False)
+    budget_consumed: dict[str, Any] | None = None
+    budget_consumed_explicit: bool = field(default=False, init=False)
 
     def with_plan(self, plan: dict[str, Any] | None) -> RunUpdate:
         self.plan = plan
         self.plan_explicit = True
+        return self
+
+    def with_budget_consumed(self, consumed: dict[str, Any] | None) -> RunUpdate:
+        self.budget_consumed = consumed
+        self.budget_consumed_explicit = True
         return self
 
 
@@ -93,7 +104,9 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     drift_score REAL NOT NULL DEFAULT 0,
     final_response TEXT NOT NULL DEFAULT '',
     plan_json TEXT,
-    sandbox_tier TEXT
+    sandbox_tier TEXT,
+    budget_json TEXT,
+    budget_consumed_json TEXT
 );
 
 CREATE INDEX IF NOT EXISTS agent_runs_status_idx ON agent_runs(status);
@@ -119,6 +132,10 @@ class RunsStore:
             }
             if "sandbox_tier" not in existing_columns:
                 conn.execute("ALTER TABLE agent_runs ADD COLUMN sandbox_tier TEXT")
+            if "budget_json" not in existing_columns:
+                conn.execute("ALTER TABLE agent_runs ADD COLUMN budget_json TEXT")
+            if "budget_consumed_json" not in existing_columns:
+                conn.execute("ALTER TABLE agent_runs ADD COLUMN budget_consumed_json TEXT")
 
     def _open(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, isolation_level=None)
@@ -138,8 +155,9 @@ class RunsStore:
                 INSERT INTO agent_runs
                     (run_id, project_id, parent_run_id, status, title,
                      provider_id, started_at_ms, completed_at_ms,
-                     drift_score, final_response, plan_json, sandbox_tier)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     drift_score, final_response, plan_json, sandbox_tier,
+                     budget_json, budget_consumed_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     header.run_id,
@@ -154,6 +172,10 @@ class RunsStore:
                     header.final_response,
                     json.dumps(header.plan) if header.plan is not None else None,
                     header.sandbox_tier,
+                    json.dumps(header.budget) if header.budget is not None else None,
+                    json.dumps(header.budget_consumed)
+                    if header.budget_consumed is not None
+                    else None,
                 ),
             )
 
@@ -179,6 +201,11 @@ class RunsStore:
         if update.plan_explicit:
             sets.append("plan_json = ?")
             values.append(json.dumps(update.plan) if update.plan is not None else None)
+        if update.budget_consumed_explicit:
+            sets.append("budget_consumed_json = ?")
+            values.append(
+                json.dumps(update.budget_consumed) if update.budget_consumed is not None else None
+            )
         if not sets:
             return
         values.append(run_id)
@@ -280,6 +307,10 @@ def _row_to_header(row: sqlite3.Row) -> RunHeader:
     plan_json = row["plan_json"]
     plan = json.loads(plan_json) if plan_json else None
     sandbox_tier = row["sandbox_tier"] if "sandbox_tier" in row.keys() else None
+    budget_json = row["budget_json"] if "budget_json" in row.keys() else None
+    budget_consumed_json = (
+        row["budget_consumed_json"] if "budget_consumed_json" in row.keys() else None
+    )
     return RunHeader(
         run_id=row["run_id"],
         project_id=row["project_id"],
@@ -293,4 +324,6 @@ def _row_to_header(row: sqlite3.Row) -> RunHeader:
         final_response=row["final_response"],
         plan=plan,
         sandbox_tier=sandbox_tier,
+        budget=json.loads(budget_json) if budget_json else None,
+        budget_consumed=json.loads(budget_consumed_json) if budget_consumed_json else None,
     )
