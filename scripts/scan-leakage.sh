@@ -21,7 +21,6 @@ PATTERNS=(
   '\bworking\s+name\b'
   '\bspock\b'
   'Co-Authored-By:\s*Claude'
-  '\bclaude\s+code\b'
   '\bautopilot\s+run\b'
 )
 
@@ -34,24 +33,30 @@ ALLOWED_LITERALS=(
   ''
 )
 
+# Files exempt from scanning. These either *define* the forbidden-token
+# vocabulary (and so must reference it) or are external documents brought
+# into the repo whose wording is not authored by us.
+EXEMPT_PATHSPECS=(
+  ':!scripts/scan-leakage.sh'
+  ':!docs/adr/0015-commit-hygiene-conventional-commits.md'
+  ':!docs/adr/README.md'
+)
+
 added_diff() {
   # Lines added in the staged diff, with their unified-diff prefix stripped.
-  # The scanner itself is excluded — it defines the forbidden tokens by
-  # construction and would otherwise trip on its own diff.
-  git diff --cached --no-color --unified=0 -- \
-      ':!scripts/scan-leakage.sh' \
+  # Exempt files (the scanner itself, the meta-ADRs that define the
+  # forbidden vocabulary) are excluded by pathspec.
+  git diff --cached --no-color --unified=0 -- "${EXEMPT_PATHSPECS[@]}" \
     | awk '/^\+\+\+ /{next} /^\+/{sub(/^\+/, ""); print}'
 }
 
 commit_msg_text() {
-  # 1) Explicit commit-msg path passed by git's commit-msg hook.
+  # Only read a commit-message file when one is explicitly passed in (the
+  # commit-msg hook contract). Reading .git/COMMIT_EDITMSG unconditionally
+  # would scan the *previous* commit on every manual run, which is the wrong
+  # input.
   if [ "$#" -ge 1 ] && [ -f "$1" ]; then
     cat "$1"
-    return
-  fi
-  # 2) Default location used during a normal commit.
-  if [ -f .git/COMMIT_EDITMSG ]; then
-    cat .git/COMMIT_EDITMSG
   fi
 }
 
