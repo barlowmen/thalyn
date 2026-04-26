@@ -230,6 +230,127 @@ async def test_kill_run_marks_killed_in_index_and_emits_status(
     assert header.completed_at_ms is not None
 
 
+async def test_depth_cap_blocks_deep_spawn_and_emits_approval_gate(
+    tmp_path: Path,
+) -> None:
+    """With a cap of 1, a delegated step at depth 0 spawns a child;
+    the child's own delegated step would land at depth 2 and is
+    blocked behind a depth-gate approval notification."""
+    _fake, factory = factory_for(
+        [
+            # Root run plan: one delegated step.
+            text_message(_plan_with_subagent()),
+            result_message(),
+            # Child run plan: also delegated — would push depth to 2.
+            text_message(_plan_with_subagent(kind="edit")),
+            result_message(),
+            # Child's respond turn (after the depth-blocked spawn skips).
+            text_message("blocked."),
+            result_message(),
+            # Root's respond turn.
+            text_message("done."),
+            result_message(),
+        ]
+    )
+    provider = AnthropicProvider(client_factory=factory)
+    registry = _registry_with(provider)
+    store = RunsStore(data_dir=tmp_path)
+    runner = Runner(
+        registry,
+        runs_store=store,
+        data_dir=tmp_path,
+        depth_cap=1,
+    )
+
+    captured, notify = _captured()
+    paused = await runner.run(
+        session_id="s",
+        provider_id="anthropic",
+        prompt="Do the deep thing.",
+        notify=notify,
+    )
+    finished = await runner.approve_plan(
+        run_id=paused.run_id,
+        provider_id="anthropic",
+        decision="approve",
+        notify=notify,
+    )
+    assert finished is not None
+
+    # Exactly one child landed in the runs index — the depth-blocked
+    # grandchild never spawned.
+    headers = await store.list_runs()
+    children = [h for h in headers if h.parent_run_id == finished.run_id]
+    grandchildren = [h for h in headers if h.parent_run_id == children[0].run_id]
+    assert len(children) == 1
+    assert grandchildren == []
+
+    # A depth-gate approval notification fired against the child's
+    # run id (it was the one trying to spawn).
+    depth_gates = [
+        params
+        for method, params in captured
+        if method == "run.approval_required" and params.get("gateKind") == "depth"
+    ]
+    assert len(depth_gates) == 1
+    assert depth_gates[0]["depth"] == 2
+    assert depth_gates[0]["depthCap"] == 1
+    assert depth_gates[0]["runId"] == children[0].run_id
+
+
+async def test_default_depth_cap_allows_two_levels(tmp_path: Path) -> None:
+    """The default cap (2) lets a sub-agent of a sub-agent run to
+    completion; the third level would be the one that's blocked."""
+    _fake, factory = factory_for(
+        [
+            # Root plan: one delegated step.
+            text_message(_plan_with_subagent()),
+            result_message(),
+            # Child plan: one more delegated step (depth 2 — allowed).
+            text_message(_plan_with_subagent(kind="edit")),
+            result_message(),
+            # Grandchild plan: empty.
+            text_message('{"goal": "x", "steps": []}'),
+            result_message(),
+            # Grandchild respond.
+            text_message("grand."),
+            result_message(),
+            # Child respond.
+            text_message("child."),
+            result_message(),
+            # Root respond.
+            text_message("root."),
+            result_message(),
+        ]
+    )
+    provider = AnthropicProvider(client_factory=factory)
+    registry = _registry_with(provider)
+    store = RunsStore(data_dir=tmp_path)
+    runner = Runner(registry, runs_store=store, data_dir=tmp_path)
+
+    _, notify = _captured()
+    paused = await runner.run(
+        session_id="s",
+        provider_id="anthropic",
+        prompt="Hello",
+        notify=notify,
+    )
+    finished = await runner.approve_plan(
+        run_id=paused.run_id,
+        provider_id="anthropic",
+        decision="approve",
+        notify=notify,
+    )
+    assert finished is not None
+
+    headers = await store.list_runs()
+    children = [h for h in headers if h.parent_run_id == finished.run_id]
+    assert len(children) == 1
+    grandchildren = [h for h in headers if h.parent_run_id == children[0].run_id]
+    assert len(grandchildren) == 1
+    assert grandchildren[0].status == RunStatus.COMPLETED.value
+
+
 async def test_subagent_kind_round_trips_through_planner(tmp_path: Path) -> None:
     """Planner JSON ``subagent_kind`` lands on the wire as
     ``subagentKind`` so the UI and execute node both see it."""

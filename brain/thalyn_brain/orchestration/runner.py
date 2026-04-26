@@ -32,6 +32,7 @@ from thalyn_brain.provider import ProviderRegistry
 from thalyn_brain.runs import RunHeader, RunsStore, RunUpdate
 
 RUN_APPROVAL_REQUIRED = "run.approval_required"
+DEFAULT_DEPTH_CAP = 2
 
 
 @dataclass
@@ -71,6 +72,7 @@ class Runner:
         checkpointer_context: CheckpointerContext | None = None,
         runs_store: RunsStore | None = None,
         data_dir: Path | None = None,
+        depth_cap: int = DEFAULT_DEPTH_CAP,
     ) -> None:
         self._registry = registry
         if checkpointer_context is not None:
@@ -84,6 +86,11 @@ class Runner:
         # of data_dir even when the caller passed in a custom
         # checkpointer context.
         self._audit_data_dir = data_dir
+        # Maximum depth of the spawned-sub-agent tree. Spawns that
+        # would exceed this depth surface a depth-gate
+        # ``run.approval_required`` notification and are skipped until
+        # an explicit-approval surface is wired up.
+        self._depth_cap = depth_cap
 
     def _audit_for(self, run_id: str) -> AuditLogWriter | None:
         if self._audit_data_dir is None:
@@ -472,14 +479,39 @@ class Runner:
         and its own ``parent_run_id`` / ``depth`` markers in state. Sub-agent
         events flow through the same notifier the parent is using —
         the renderer routes them by ``runId``.
+
+        Spawning at a depth that exceeds the runner's depth cap fires
+        a depth-gate ``run.approval_required`` notification and
+        returns a skipped result without running a child graph; the
+        plan node is recorded as untaken in the audit log.
         """
+        plan_node_id = plan_node.get("id") or ""
+        child_depth = depth + 1
+
+        if child_depth > self._depth_cap:
+            await parent_notify(
+                RUN_APPROVAL_REQUIRED,
+                {
+                    "runId": parent_run_id,
+                    "gateKind": "depth",
+                    "depth": child_depth,
+                    "depthCap": self._depth_cap,
+                    "planNode": plan_node,
+                },
+            )
+            return SubAgentResult(
+                parent_run_id=parent_run_id,
+                child_run_id="",
+                plan_node_id=str(plan_node_id),
+                status="skipped",
+                final_response="",
+            )
+
         child_run_id = _new_run_id()
         title = plan_node.get("description") or "Sub-agent task"
         if isinstance(title, str):
             title = title[:80]
         description = plan_node.get("description") or ""
-        plan_node_id = plan_node.get("id") or ""
-        child_depth = depth + 1
 
         provider = self._registry.get(provider_id)
         audit = self._audit_for(child_run_id)
@@ -511,13 +543,23 @@ class Runner:
                 )
             )
 
+        # Children of this child go through the same spawner, so the
+        # tree can grow as deep as the depth cap allows. Each spawn
+        # creates a fresh closure rather than sharing state across
+        # nested calls.
+        child_spawner = self._spawner_for(
+            session_id=session_id,
+            provider_id=provider_id,
+            parent_notify=parent_notify,
+        )
+
         async with self._checkpointer_context(child_run_id) as checkpointer:
             graph = build_graph(
                 provider,
                 notify,
                 checkpointer=checkpointer,
                 interrupt_on_plan_approval=False,
-                spawn_subagent=None,
+                spawn_subagent=child_spawner,
             )
             initial: GraphState = {
                 "run_id": child_run_id,
