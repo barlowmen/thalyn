@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 
+import { AppShell } from "@/components/shell/app-shell";
 import { Button } from "@/components/ui/button";
 
 type PongPayload = {
@@ -16,6 +17,10 @@ type PingState =
   | { kind: "error"; message: string };
 
 function App() {
+  return <AppShell main={<MainPanel />} />;
+}
+
+function MainPanel() {
   const [state, setState] = useState<PingState>({ kind: "idle" });
 
   const ping = async () => {
@@ -32,7 +37,7 @@ function App() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center gap-4 px-6 pt-[12vh] text-center">
+    <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
       <h1 className="text-3xl font-semibold tracking-tight">Thalyn</h1>
       <p className="text-muted-foreground">
         Walking skeleton &mdash; ping the brain.
@@ -46,14 +51,10 @@ function App() {
         {state.kind === "pending" ? "Pinging…" : "Ping brain"}
       </Button>
 
-      <div
-        className="min-h-6 text-sm"
-        role="status"
-        aria-live="polite"
-      >
+      <div className="min-h-6 text-sm" role="status" aria-live="polite">
         <PingStatus state={state} />
       </div>
-    </main>
+    </div>
   );
 }
 
