@@ -1,17 +1,20 @@
 mod brain;
+mod power;
 mod provider;
 mod sandbox;
 mod secrets;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::brain::{BrainSupervisor, SpawnConfig};
+use crate::power::{AssertionToken, PowerManager};
 use crate::provider::{builtin_providers, ProviderMeta, ProviderRegistry};
 use crate::sandbox::SandboxManager;
 use crate::secrets::SecretsManager;
@@ -35,6 +38,11 @@ struct AppState {
     /// Consumed by Tauri commands in subsequent commits.
     #[allow(dead_code)]
     sandboxes: Arc<SandboxManager>,
+    power: Arc<PowerManager>,
+    /// run id → outstanding power-assertion token. Lets the
+    /// notification forwarder release a previously-acquired
+    /// assertion when the same run hits a terminal status.
+    assertions: Arc<Mutex<HashMap<String, AssertionToken>>>,
 }
 
 /// Trimmed pong payload sent back to the renderer.
@@ -209,9 +217,58 @@ fn forward_brain_notification(method: &str, params: &Value, app: &AppHandle, ses
         }
         return;
     }
+    if event_name == RUN_STATUS_EVENT {
+        update_power_assertion(params, app);
+    }
     if let Err(err) = app.emit(event_name, params.clone()) {
         tracing::error!(?err, %event_name, "failed to forward brain notification");
     }
+}
+
+/// Acquire / release the per-run power assertion so a long run keeps
+/// the system awake. Display sleep is intentionally not blocked —
+/// the spec wants the screen to power down even mid-run.
+fn update_power_assertion(params: &Value, app: &AppHandle) {
+    let Some(run_id) = params.get("runId").and_then(|v| v.as_str()) else {
+        return;
+    };
+    let Some(status) = params.get("status").and_then(|v| v.as_str()) else {
+        return;
+    };
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let power = state.power.clone();
+    let assertions = state.assertions.clone();
+    let run_id = run_id.to_owned();
+    let status = status.to_owned();
+
+    tauri::async_runtime::spawn(async move {
+        match status.as_str() {
+            "running" | "planning" | "pending" => {
+                let map = assertions.lock().await;
+                if map.contains_key(&run_id) {
+                    return;
+                }
+                drop(map);
+                match power.acquire(format!("thalyn run {run_id}")).await {
+                    Ok(token) => {
+                        assertions.lock().await.insert(run_id, token);
+                    }
+                    Err(err) => {
+                        tracing::warn!(?err, "could not acquire power assertion");
+                    }
+                }
+            }
+            "completed" | "errored" | "killed" | "awaiting_approval" => {
+                let token = assertions.lock().await.remove(&run_id);
+                if let Some(token) = token {
+                    power.release(token).await;
+                }
+            }
+            _ => {}
+        }
+    });
 }
 
 #[tauri::command]
@@ -326,6 +383,8 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
         providers: RwLock::new(registry),
         secrets,
         sandboxes: Arc::new(SandboxManager::new()),
+        power: Arc::new(PowerManager::new()),
+        assertions: Arc::new(Mutex::new(HashMap::new())),
     });
     Ok(())
 }
