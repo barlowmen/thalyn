@@ -26,6 +26,8 @@ const RUN_STATUS_EVENT: &str = "run:status";
 const RUN_PLAN_UPDATE_EVENT: &str = "run:plan_update";
 const RUN_ACTION_LOG_EVENT: &str = "run:action_log";
 const RUN_APPROVAL_REQUIRED_EVENT: &str = "run:approval_required";
+const LSP_MESSAGE_EVENT: &str = "lsp:message";
+const LSP_ERROR_EVENT: &str = "lsp:error";
 
 /// Shared application state, registered with Tauri's `manage` so commands
 /// can pull it via `State<...>`.
@@ -365,6 +367,62 @@ async fn delete_memory(state: State<'_, AppState>, memory_id: String) -> Result<
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+async fn lsp_start(state: State<'_, AppState>, language: String) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "lsp.start",
+            json!({ "language": language }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn lsp_send(
+    state: State<'_, AppState>,
+    session_id: String,
+    message: Value,
+) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "lsp.send",
+            json!({ "sessionId": session_id, "message": message }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn lsp_stop(state: State<'_, AppState>, session_id: String) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "lsp.stop",
+            json!({ "sessionId": session_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn lsp_list(state: State<'_, AppState>) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "lsp.list",
+            Value::Object(Default::default()),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// Translate a brain JSON-RPC notification into a Tauri event for the
 /// renderer. `chat.chunk` is wrapped with the session id; the run.*
 /// notifications already carry their runId in the params.
@@ -550,8 +608,11 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
         .await
         .map_err(|err| format!("brain sidecar failed to start: {err}"))?;
 
+    let supervisor = Arc::new(supervisor);
+    spawn_global_notification_forwarder(app.clone(), supervisor.clone());
+
     app.manage(AppState {
-        brain: Arc::new(supervisor),
+        brain: supervisor,
         providers: RwLock::new(registry),
         secrets,
         sandboxes: Arc::new(SandboxManager::new()),
@@ -559,6 +620,35 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
         assertions: Arc::new(Mutex::new(HashMap::new())),
     });
     Ok(())
+}
+
+/// Subscribe to brain notifications and forward the long-lived
+/// streams (LSP today, terminal next) to renderer events. Per-call
+/// streams (chat, approve_plan) keep their existing routing through
+/// `forward_brain_notification` — that path remains the way to bind
+/// notifications to a specific session id.
+fn spawn_global_notification_forwarder(app: AppHandle, brain: Arc<BrainSupervisor>) {
+    let mut subscriber = brain.subscribe_notifications();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match subscriber.recv().await {
+                Ok(notification) => {
+                    let event = match notification.method.as_ref() {
+                        "lsp.message" => LSP_MESSAGE_EVENT,
+                        "lsp.error" => LSP_ERROR_EVENT,
+                        _ => continue,
+                    };
+                    if let Err(err) = app.emit(event, notification.params.as_ref().clone()) {
+                        tracing::warn!(?err, %event, "failed to forward brain notification");
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(skipped = n, "brain notification subscriber lagged");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -601,6 +691,10 @@ pub fn run() {
             add_memory,
             update_memory,
             delete_memory,
+            lsp_start,
+            lsp_send,
+            lsp_stop,
+            lsp_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

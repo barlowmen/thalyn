@@ -26,3 +26,26 @@ Use **Monaco** — the editor that powers VS Code, Cursor, Windsurf, Codespaces,
 ## Notes
 
 Mitigate bundle-size hit at the v0.10 (editor pane) phase. Re-evaluate against CodeMirror 6 at the v0.6 architecture review specifically if the bundle hits cold-start budgets in NFR1.
+
+### Refinement — LSP integration shape
+
+When Monaco landed in the editor pane we wired Language Server
+Protocol support through the brain sidecar rather than the renderer:
+
+- The brain holds an `LspManager` that spawns and supervises external
+  LSP processes (e.g. `typescript-language-server`, `pyright-langserver`),
+  Content-Length-framed JSON-RPC over stdin/stdout.
+- Brain JSON-RPC surfaces `lsp.start`, `lsp.send`, `lsp.stop`, `lsp.list`;
+  server-initiated notifications come back as `lsp.message` /
+  `lsp.error`. This rides the existing brain ↔ Tauri NDJSON transport.
+- Tauri proxies these methods one-for-one (`lsp_start`, …) and
+  forwards `lsp:*` events to the renderer via a global notification
+  subscriber on `BrainSupervisor`.
+- The renderer talks to a thin `LspClient` that hides id allocation +
+  promise routing, and `attachLspBridge()` maps the protocol onto
+  Monaco's diagnostics, completion, and hover providers.
+
+This routes language servers through the same supervised subprocess
+surface as everything else (sandboxes, providers), keeps the bundle
+free of heavyweight LSP libraries, and lets the brain enforce a
+single shutdown path on app exit.

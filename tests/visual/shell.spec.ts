@@ -95,6 +95,18 @@ stubbed.__TAURI_INTERNALS__ = {
     if (command === "provider_delta") {
       return { fromProviderId: "", toProviderId: "", changes: [] };
     }
+    if (command === "lsp_start") {
+      return { sessionId: "", language: "", command: [], startedAtMs: 0 };
+    }
+    if (command === "lsp_send") {
+      return { queued: true };
+    }
+    if (command === "lsp_stop") {
+      return { stopped: true, sessionId: "" };
+    }
+    if (command === "lsp_list") {
+      return { sessions: [] };
+    }
     return null;
   },
 };

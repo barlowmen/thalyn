@@ -10,13 +10,17 @@
 //!   notifications (with no `id`) before its final response;
 //!   used for chat token streaming.
 //!
-//! A future iteration replaces the per-call mutex with a true
-//! multiplexing reader task driven by an id-keyed correlation map; for
-//! v0.3 the surface is single-user and the lock is enough.
+//! A persistent reader task decodes envelopes off stdout and routes
+//! them: responses go to a per-id oneshot channel, notifications go to
+//! a broadcast channel that any number of listeners can subscribe to.
+//! That lets LSP-style out-of-band notifications keep flowing even
+//! while another request is in flight, and lets the Tauri layer
+//! forward server-pushed events without holding open a streaming call.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -24,7 +28,8 @@ use serde_json::Value;
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, oneshot, Mutex};
+use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
 /// JSON-RPC 2.0 wire types.
@@ -47,7 +52,7 @@ struct RpcEnvelope {
     error: Option<RpcError>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RpcError {
     pub code: i64,
     pub message: String,
@@ -68,23 +73,32 @@ pub enum BrainError {
     Decode(#[from] serde_json::Error),
     #[error("brain sidecar returned an error: {0:?}")]
     Rpc(RpcError),
-    #[error("brain sidecar response had no result")]
-    EmptyResult,
     #[error("brain sidecar took too long to answer")]
     Timeout,
 }
 
+type ResponseSlot = oneshot::Sender<Result<Value, RpcError>>;
+type Pending = Arc<Mutex<HashMap<u64, ResponseSlot>>>;
+
+const NOTIFICATION_BUFFER: usize = 256;
+
 /// Long-lived handle to a running brain sidecar process.
 pub struct BrainSupervisor {
     next_id: AtomicU64,
-    inner: Mutex<Inner>,
+    stdin: Mutex<ChildStdin>,
+    pending: Pending,
+    notifications: broadcast::Sender<Notification>,
+    child: Mutex<Child>,
+    _reader: JoinHandle<()>,
 }
 
-struct Inner {
-    // Held to keep `kill_on_drop` semantics in scope; `shutdown` consumes it.
-    child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<tokio::process::ChildStdout>,
+/// One server-initiated notification — JSON-RPC `method` and
+/// `params`. Cloned to every subscriber, so the params payload is
+/// shared via `Arc` rather than re-serialised.
+#[derive(Debug, Clone)]
+pub struct Notification {
+    pub method: Arc<str>,
+    pub params: Arc<Value>,
 }
 
 /// Configuration for spawning the sidecar.
@@ -133,7 +147,8 @@ impl SpawnConfig {
 }
 
 impl BrainSupervisor {
-    /// Spawn a sidecar process and capture its stdio.
+    /// Spawn a sidecar process, capture its stdio, and start the
+    /// persistent reader task.
     pub async fn spawn(config: SpawnConfig) -> Result<Self, BrainError> {
         let mut command = Command::new(&config.program);
         command
@@ -157,13 +172,23 @@ impl BrainSupervisor {
             BrainError::Spawn(std::io::Error::other("brain sidecar exposed no stdout"))
         })?;
 
+        let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
+        let (notifications, _) = broadcast::channel(NOTIFICATION_BUFFER);
+        let reader_pending = pending.clone();
+        let reader_notify = notifications.clone();
+        let reader = tokio::spawn(reader_loop(
+            BufReader::new(stdout),
+            reader_pending,
+            reader_notify,
+        ));
+
         Ok(Self {
             next_id: AtomicU64::new(1),
-            inner: Mutex::new(Inner {
-                child,
-                stdin,
-                stdout: BufReader::new(stdout),
-            }),
+            stdin: Mutex::new(stdin),
+            pending,
+            notifications,
+            child: Mutex::new(child),
+            _reader: reader,
         })
     }
 
@@ -199,53 +224,155 @@ impl BrainSupervisor {
             params,
         })?;
 
-        let mut inner = self.inner.lock().await;
-        inner.stdin.write_all(&request).await?;
-        inner.stdin.write_all(b"\n").await?;
-        inner.stdin.flush().await?;
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().await.insert(id, tx);
 
-        loop {
-            let mut buf = String::new();
-            let read = timeout(deadline, inner.stdout.read_line(&mut buf))
-                .await
-                .map_err(|_| BrainError::Timeout)??;
-            if read == 0 {
-                return Err(BrainError::Eof);
-            }
+        let mut subscriber = self.notifications.subscribe();
 
-            let envelope: RpcEnvelope = serde_json::from_str(buf.trim_end())?;
-
-            // Notification — no id, has a method.
-            if envelope.id.is_none() {
-                if let Some(method) = envelope.method.as_deref() {
-                    let params = envelope.params.unwrap_or(Value::Null);
-                    on_notification(method, &params);
-                }
-                continue;
-            }
-
-            // Response.
-            if let Some(err) = envelope.error {
-                return Err(BrainError::Rpc(err));
-            }
-            if envelope.id != Some(id) {
-                tracing::warn!(
-                    expected = id,
-                    actual = ?envelope.id,
-                    "brain response id did not match request id",
-                );
-            }
-            return envelope.result.ok_or(BrainError::EmptyResult);
+        // Write request bytes — stdin is the only point of contention
+        // between concurrent callers.
+        {
+            let mut stdin = self.stdin.lock().await;
+            stdin.write_all(&request).await?;
+            stdin.write_all(b"\n").await?;
+            stdin.flush().await?;
         }
+
+        // Race: the response future, the notification stream, and the
+        // deadline — whichever fires first wins. Notifications reset
+        // the deadline so a long-running streaming call (chat) can
+        // keep going as long as the brain is making progress.
+        let result = tokio::select! {
+            biased;
+            response = consume_response(rx, deadline, &mut subscriber, &mut on_notification) => response,
+        };
+
+        if result.is_err() {
+            self.pending.lock().await.remove(&id);
+        }
+        result
+    }
+
+    /// Subscribe to every server-initiated notification. Use this to
+    /// forward LSP, terminal, or other long-lived event streams to
+    /// the renderer without holding open a streaming RPC call.
+    #[allow(dead_code)]
+    pub fn subscribe_notifications(&self) -> broadcast::Receiver<Notification> {
+        self.notifications.subscribe()
     }
 
     /// Best-effort shutdown: drop stdin (signals EOF to the sidecar) and
     /// wait briefly for the process to exit.
     #[allow(dead_code)]
     pub async fn shutdown(self) {
-        let mut inner = self.inner.into_inner();
-        drop(inner.stdin);
-        let _ = timeout(Duration::from_secs(2), inner.child.wait()).await;
+        // Drop stdin; the reader will see EOF and exit on its own.
+        let mut child = self.child.into_inner();
+        let _ = timeout(Duration::from_secs(2), child.wait()).await;
+    }
+}
+
+/// Reader task: pull lines off the brain's stdout, decode them, and
+/// route responses to the per-id oneshot, notifications to the
+/// broadcast channel.
+async fn reader_loop(
+    mut stdout: BufReader<tokio::process::ChildStdout>,
+    pending: Pending,
+    notifications: broadcast::Sender<Notification>,
+) {
+    loop {
+        let mut buf = String::new();
+        match stdout.read_line(&mut buf).await {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(err) => {
+                tracing::warn!(?err, "brain reader: stdout read failed");
+                break;
+            }
+        }
+
+        let envelope: RpcEnvelope = match serde_json::from_str(buf.trim_end()) {
+            Ok(env) => env,
+            Err(err) => {
+                tracing::warn!(?err, line = %buf.trim_end(), "brain reader: invalid envelope");
+                continue;
+            }
+        };
+
+        if let Some(id) = envelope.id {
+            let slot = pending.lock().await.remove(&id);
+            let Some(slot) = slot else {
+                tracing::warn!(id, "brain reader: response for unknown request id");
+                continue;
+            };
+            let result = if let Some(err) = envelope.error {
+                Err(err)
+            } else {
+                Ok(envelope.result.unwrap_or(Value::Null))
+            };
+            let _ = slot.send(result);
+            continue;
+        }
+
+        if let Some(method) = envelope.method {
+            let params = envelope.params.unwrap_or(Value::Null);
+            let _ = notifications.send(Notification {
+                method: Arc::from(method),
+                params: Arc::new(params),
+            });
+        }
+    }
+
+    // EOF — drain any pending callers with an Eof error so they
+    // don't hang forever.
+    let mut pending = pending.lock().await;
+    for (_, slot) in pending.drain() {
+        let _ = slot.send(Err(RpcError {
+            code: -1,
+            message: "brain sidecar EOF".into(),
+            data: None,
+        }));
+    }
+}
+
+async fn consume_response<F>(
+    mut rx: oneshot::Receiver<Result<Value, RpcError>>,
+    deadline: Duration,
+    subscriber: &mut broadcast::Receiver<Notification>,
+    on_notification: &mut F,
+) -> Result<Value, BrainError>
+where
+    F: FnMut(&str, &Value),
+{
+    loop {
+        tokio::select! {
+            biased;
+            result = &mut rx => {
+                return match result {
+                    Ok(Ok(v)) => Ok(v),
+                    Ok(Err(err)) if err.code == -1 && err.message == "brain sidecar EOF" => {
+                        Err(BrainError::Eof)
+                    }
+                    Ok(Err(err)) => Err(BrainError::Rpc(err)),
+                    Err(_) => Err(BrainError::Eof),
+                };
+            }
+            recv = subscriber.recv() => {
+                match recv {
+                    Ok(notification) => {
+                        on_notification(notification.method.as_ref(), notification.params.as_ref());
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        // Subscriber fell behind — drop the gap and keep going.
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        return Err(BrainError::Eof);
+                    }
+                }
+            }
+            _ = tokio::time::sleep(deadline) => {
+                return Err(BrainError::Timeout);
+            }
+        }
     }
 }
 

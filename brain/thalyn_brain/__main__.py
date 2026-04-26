@@ -7,6 +7,8 @@ import sys
 
 from thalyn_brain.approval_rpc import register_approval_methods
 from thalyn_brain.chat import register_chat_methods
+from thalyn_brain.lsp import LspManager
+from thalyn_brain.lsp_rpc import register_lsp_methods
 from thalyn_brain.memory import MemoryStore
 from thalyn_brain.memory_rpc import register_memory_methods
 from thalyn_brain.orchestration import Runner
@@ -33,6 +35,7 @@ def main() -> int:
     runs_store = RunsStore(data_dir=data_dir)
     schedules_store = SchedulesStore(data_dir=data_dir)
     memory_store = MemoryStore(data_dir=data_dir)
+    lsp_manager = LspManager()
     runner = Runner(registry, runs_store=runs_store, data_dir=data_dir)
     register_chat_methods(dispatcher, registry, runner=runner)
     register_approval_methods(dispatcher, runner)
@@ -40,6 +43,7 @@ def main() -> int:
     register_schedule_methods(dispatcher, schedules_store, registry)
     register_provider_methods(dispatcher, registry)
     register_memory_methods(dispatcher, memory_store)
+    register_lsp_methods(dispatcher, lsp_manager)
 
     async def dispatch_schedule(schedule: Schedule) -> str | None:
         """Fire one schedule into the runner.
@@ -81,6 +85,7 @@ def main() -> int:
             await serve_stdio(dispatcher)
         finally:
             await scheduler.stop()
+            await lsp_manager.shutdown()
 
     try:
         asyncio.run(serve())
