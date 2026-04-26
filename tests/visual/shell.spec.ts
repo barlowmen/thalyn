@@ -80,6 +80,21 @@ stubbed.__TAURI_INTERNALS__ = {
     if (command === "translate_cron") {
       return { cron: "* * * * *", explanation: "", nlInput: "", valid: true, error: null };
     }
+    if (command === "list_memory") {
+      return { entries: [] };
+    }
+    if (command === "add_memory") {
+      return { entry: { memoryId: "", projectId: null, scope: "user", kind: "fact", body: "", author: "", createdAtMs: 0, updatedAtMs: 0 } };
+    }
+    if (command === "update_memory") {
+      return { entry: null };
+    }
+    if (command === "delete_memory") {
+      return { deleted: true, memoryId: "" };
+    }
+    if (command === "provider_delta") {
+      return { fromProviderId: "", toProviderId: "", changes: [] };
+    }
     return null;
   },
 };

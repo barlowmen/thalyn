@@ -278,6 +278,93 @@ async fn translate_cron(
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+async fn list_memory(
+    state: State<'_, AppState>,
+    project_id: Option<String>,
+    scopes: Option<Vec<String>>,
+    limit: Option<u32>,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    if let Some(project) = project_id {
+        params.insert("projectId".into(), Value::from(project));
+    }
+    if let Some(s) = scopes {
+        params.insert("scopes".into(), Value::from(s));
+    }
+    if let Some(l) = limit {
+        params.insert("limit".into(), Value::from(l));
+    }
+    state
+        .brain
+        .call("memory.list", Value::Object(params), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn add_memory(
+    state: State<'_, AppState>,
+    body: String,
+    scope: String,
+    kind: String,
+    author: String,
+    project_id: Option<String>,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    params.insert("body".into(), Value::from(body));
+    params.insert("scope".into(), Value::from(scope));
+    params.insert("kind".into(), Value::from(kind));
+    params.insert("author".into(), Value::from(author));
+    if let Some(project) = project_id {
+        params.insert("projectId".into(), Value::from(project));
+    }
+    state
+        .brain
+        .call("memory.add", Value::Object(params), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn update_memory(
+    state: State<'_, AppState>,
+    memory_id: String,
+    body: Option<String>,
+    kind: Option<String>,
+    scope: Option<String>,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    params.insert("memoryId".into(), Value::from(memory_id));
+    if let Some(b) = body {
+        params.insert("body".into(), Value::from(b));
+    }
+    if let Some(k) = kind {
+        params.insert("kind".into(), Value::from(k));
+    }
+    if let Some(s) = scope {
+        params.insert("scope".into(), Value::from(s));
+    }
+    state
+        .brain
+        .call("memory.update", Value::Object(params), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn delete_memory(state: State<'_, AppState>, memory_id: String) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "memory.delete",
+            json!({ "memoryId": memory_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// Translate a brain JSON-RPC notification into a Tauri event for the
 /// renderer. `chat.chunk` is wrapped with the session id; the run.*
 /// notifications already carry their runId in the params.
@@ -510,6 +597,10 @@ pub fn run() {
             delete_schedule,
             translate_cron,
             provider_delta,
+            list_memory,
+            add_memory,
+            update_memory,
+            delete_memory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -9,6 +9,7 @@ import { useApprovalGate } from "@/components/approval/use-approval-gate";
 import { CommandPalette } from "@/components/command-palette";
 import { DriftGateBanner } from "@/components/inspector/drift-gate-banner";
 import { useDriftGate } from "@/components/inspector/use-drift-gate";
+import { MemoryDialog } from "@/components/memory/memory-dialog";
 import { SchedulesDialog } from "@/components/schedules/schedules-dialog";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { ActivityRail } from "@/components/shell/activity-rail";
@@ -97,6 +98,7 @@ export function AppShell({
   const [defaultLayout] = useState<Layout>(() => loadLayout());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [schedulesOpen, setSchedulesOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
 
   const sidebarRef = useRef<PanelImperativeHandle | null>(null);
   const inspectorRef = useRef<PanelImperativeHandle | null>(null);
@@ -109,6 +111,7 @@ export function AppShell({
   const toggleInspector = useCallback(() => togglePanel(inspectorRef), []);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const openSchedules = useCallback(() => setSchedulesOpen(true), []);
+  const openMemory = useCallback(() => setMemoryOpen(true), []);
 
   const handleRailSelect = useCallback(
     (id: string) => {
@@ -120,9 +123,13 @@ export function AppShell({
         openSchedules();
         return;
       }
+      if (id === "memory") {
+        openMemory();
+        return;
+      }
       setActiveRail(id);
     },
-    [openSettings, openSchedules],
+    [openSettings, openSchedules, openMemory],
   );
 
   return (
@@ -194,6 +201,7 @@ export function AppShell({
         onOpenChange={setSchedulesOpen}
         defaultProviderId={readActiveProvider()}
       />
+      <MemoryDialog open={memoryOpen} onOpenChange={setMemoryOpen} />
 
       <ApprovalLayer />
     </div>
