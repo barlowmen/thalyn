@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Composer } from "@/components/chat/composer";
 import { MessageList } from "@/components/chat/message-list";
 import { useChat } from "@/components/chat/use-chat";
 import { SubAgentTiles } from "@/components/inspector/subagent-tiles";
 import { useRootRunId } from "@/components/inspector/use-root-run-id";
+import { useRunDetail } from "@/components/inspector/use-run-detail";
 import { useSubAgentTree } from "@/components/inspector/use-subagent-tree";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   readActiveProvider,
   subscribeActiveProvider,
@@ -16,7 +18,7 @@ import {
   listProviders,
   type ProviderMeta,
 } from "@/lib/providers";
-import { killRun } from "@/lib/runs";
+import { killRun, type Plan } from "@/lib/runs";
 
 /**
  * The main-panel chat surface. Reads the active provider from the
@@ -27,14 +29,33 @@ import { killRun } from "@/lib/runs";
 export function ChatSurface({
   onOpenSettings,
   onOpenSubAgent,
+  takeOverRunId,
+  onHandBack,
 }: {
   onOpenSettings: () => void;
   onOpenSubAgent?: (runId: string) => void;
+  takeOverRunId?: string | null;
+  onHandBack?: () => void;
 }) {
   const [providerId, setProviderId] = useState<string>(() => readActiveProvider());
   const [provider, setProvider] = useState<ProviderMeta | null>(null);
   const [configured, setConfigured] = useState<boolean | null>(null);
-  const { messages, status, send } = useChat({ providerId });
+  const takeOverDetail = useRunDetail(takeOverRunId ?? null);
+  const takeOverPrompt = useMemo(
+    () =>
+      takeOverDetail
+        ? buildTakeOverPrompt({
+            title: takeOverDetail.title,
+            plan: takeOverDetail.plan,
+            finalResponse: takeOverDetail.finalResponse,
+          })
+        : undefined,
+    [takeOverDetail],
+  );
+  const { messages, status, send } = useChat({
+    providerId,
+    systemPrompt: takeOverPrompt,
+  });
   const rootRunId = useRootRunId();
   const subAgentTiles = useSubAgentTree(rootRunId);
 
@@ -85,6 +106,22 @@ export function ChatSurface({
         </button>
       </header>
 
+      {takeOverDetail && (
+        <div className="flex items-center justify-between gap-3 border-b border-border bg-warning/10 px-6 py-2 text-xs">
+          <div>
+            <span className="font-semibold">Took over from</span>{" "}
+            <span className="text-muted-foreground">
+              {takeOverDetail.title}
+            </span>
+          </div>
+          {onHandBack && (
+            <Button size="sm" variant="ghost" onClick={onHandBack}>
+              Hand back
+            </Button>
+          )}
+        </div>
+      )}
+
       <MessageList messages={messages} />
 
       {subAgentTiles.length > 0 && (
@@ -119,4 +156,37 @@ export function ChatSurface({
       />
     </div>
   );
+}
+
+function buildTakeOverPrompt({
+  title,
+  plan,
+  finalResponse,
+}: {
+  title: string;
+  plan: Plan | null;
+  finalResponse: string;
+}): string {
+  const lines: string[] = [
+    "You are continuing the work of a delegated sub-agent. The user has taken",
+    "over the thread; treat its history as read-only context.",
+    "",
+    `Sub-agent task: ${title}`,
+  ];
+  if (plan?.goal) {
+    lines.push(`Goal: ${plan.goal}`);
+  }
+  if (plan && plan.nodes.length > 0) {
+    lines.push("Planned steps:");
+    plan.nodes.forEach((node, index) => {
+      lines.push(`  ${index + 1}. ${node.description}`);
+    });
+  }
+  if (finalResponse.trim()) {
+    lines.push("Result so far:");
+    lines.push(finalResponse.trim());
+  } else {
+    lines.push("The sub-agent had not produced a final response when the user took over.");
+  }
+  return lines.join("\n");
 }
