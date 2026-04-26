@@ -107,8 +107,12 @@ export type RunPlanUpdateEvent = { runId: string; plan: Plan };
 export type RunActionLogEvent = { runId: string; entry: ActionLogEntry };
 export type RunApprovalRequiredEvent = {
   runId: string;
-  gateKind: "plan";
+  gateKind: "plan" | "depth" | "drift" | "budget";
   plan: Plan;
+  threshold?: string;
+  driftScore?: number;
+  reason?: string;
+  dimension?: string;
 };
 
 export type ApprovalDecision = "approve" | "edit" | "reject";

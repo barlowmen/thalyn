@@ -7,6 +7,8 @@ import type {
 import { PlanApprovalDialog } from "@/components/approval/plan-approval-dialog";
 import { useApprovalGate } from "@/components/approval/use-approval-gate";
 import { CommandPalette } from "@/components/command-palette";
+import { DriftGateBanner } from "@/components/inspector/drift-gate-banner";
+import { useDriftGate } from "@/components/inspector/use-drift-gate";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { ActivityRail } from "@/components/shell/activity-rail";
 import { InspectorPanel } from "@/components/shell/inspector-panel";
@@ -150,6 +152,7 @@ export function AppShell({
             aria-label="Main"
             className="flex h-full flex-col bg-background"
           >
+            <DriftGateLayer onReview={onOpenSubAgent} />
             {typeof main === "function" ? main({ openSettings }) : main}
           </section>
         </ResizablePanel>
@@ -196,4 +199,13 @@ function ApprovalLayer() {
       onSettled={clear}
     />
   );
+}
+
+function DriftGateLayer({
+  onReview,
+}: {
+  onReview?: (runId: string) => void;
+}) {
+  const { gate, dismiss } = useDriftGate();
+  return <DriftGateBanner gate={gate} onReview={onReview} onDismiss={dismiss} />;
 }

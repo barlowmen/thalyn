@@ -23,6 +23,10 @@ export function useApprovalGate(): {
     let unlisten: (() => void) | undefined;
     subscribeRunApprovalRequired((event) => {
       if (!active) return;
+      // The brain reuses run:approval_required for plan, drift,
+      // depth, and budget gates. Only the plan gate maps to the
+      // edit-or-approve modal; the others have their own surfaces.
+      if (event.gateKind !== "plan") return;
       setGate({ runId: event.runId, plan: event.plan });
     })
       .then((fn) => {
