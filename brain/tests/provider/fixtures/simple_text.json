@@ -1,0 +1,8 @@
+{
+  "description": "Two text deltas plus a result message — the canonical happy path.",
+  "messages": [
+    {"kind": "text", "text": "Hello, "},
+    {"kind": "text", "text": "world."},
+    {"kind": "result", "total_cost_usd": 0.0001}
+  ]
+}

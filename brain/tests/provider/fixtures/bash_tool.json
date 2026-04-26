@@ -1,0 +1,18 @@
+{
+  "description": "Tool call followed by tool result and a closing text reply.",
+  "messages": [
+    {
+      "kind": "tool_call",
+      "call_id": "call_42",
+      "name": "Bash",
+      "input": {"command": "ls"}
+    },
+    {
+      "kind": "tool_result",
+      "call_id": "call_42",
+      "output": "README.md\nbrain\nsrc-tauri\n"
+    },
+    {"kind": "text", "text": "I see the repo top-level entries."},
+    {"kind": "result"}
+  ]
+}

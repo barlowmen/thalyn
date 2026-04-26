@@ -1,0 +1,19 @@
+{
+  "description": "Tool call whose result is flagged is_error.",
+  "messages": [
+    {
+      "kind": "tool_call",
+      "call_id": "call_99",
+      "name": "Bash",
+      "input": {"command": "false"}
+    },
+    {
+      "kind": "tool_result",
+      "call_id": "call_99",
+      "output": "exit code 1",
+      "is_error": true
+    },
+    {"kind": "text", "text": "The command failed."},
+    {"kind": "result"}
+  ]
+}
