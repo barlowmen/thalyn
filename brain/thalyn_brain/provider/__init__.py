@@ -8,6 +8,8 @@ LLM-traffic implementations.
 from thalyn_brain.provider.anthropic import AnthropicProvider
 from thalyn_brain.provider.base import (
     Capability,
+    CapabilityChange,
+    CapabilityDelta,
     CapabilityProfile,
     ChatChunk,
     ChatErrorChunk,
@@ -22,6 +24,7 @@ from thalyn_brain.provider.base import (
     ProviderMeta,
     ProviderNotImplementedError,
     ReliabilityTier,
+    compare_profiles,
 )
 from thalyn_brain.provider.registry import (
     ProviderRegistry,
@@ -32,6 +35,8 @@ from thalyn_brain.provider.registry import (
 __all__ = [
     "AnthropicProvider",
     "Capability",
+    "CapabilityChange",
+    "CapabilityDelta",
     "CapabilityProfile",
     "ChatChunk",
     "ChatErrorChunk",
@@ -49,4 +54,5 @@ __all__ = [
     "ReliabilityTier",
     "build_registry",
     "builtin_providers",
+    "compare_profiles",
 ]

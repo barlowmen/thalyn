@@ -11,6 +11,7 @@ from thalyn_brain.orchestration import Runner
 from thalyn_brain.orchestration.resume import resume_unfinished_runs
 from thalyn_brain.orchestration.storage import default_data_dir
 from thalyn_brain.provider import build_registry
+from thalyn_brain.provider_rpc import register_provider_methods
 from thalyn_brain.rpc import build_default_dispatcher
 from thalyn_brain.runs import RunsStore
 from thalyn_brain.runs_rpc import register_runs_methods
@@ -34,6 +35,7 @@ def main() -> int:
     register_approval_methods(dispatcher, runner)
     register_runs_methods(dispatcher, runs_store, runner=runner)
     register_schedule_methods(dispatcher, schedules_store, registry)
+    register_provider_methods(dispatcher, registry)
 
     async def dispatch_schedule(schedule: Schedule) -> str | None:
         """Fire one schedule into the runner.

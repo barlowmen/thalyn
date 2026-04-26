@@ -65,6 +65,162 @@ class CapabilityProfile:
 
 
 @dataclass(frozen=True)
+class CapabilityChange:
+    """One dimension that differs between two capability profiles."""
+
+    dimension: str
+    before: Any
+    after: Any
+    severity: str  # "info" | "warning"
+
+    def to_wire(self) -> dict[str, Any]:
+        return {
+            "dimension": self.dimension,
+            "before": self.before,
+            "after": self.after,
+            "severity": self.severity,
+        }
+
+
+@dataclass(frozen=True)
+class CapabilityDelta:
+    """Per-dimension diff between two capability profiles.
+
+    ``changes`` lists only dimensions whose value differs; an empty
+    list means the swap is capability-equivalent. The UI renders
+    each change as a row in the capability-delta dialog.
+    """
+
+    from_provider_id: str
+    to_provider_id: str
+    changes: list[CapabilityChange]
+
+    def to_wire(self) -> dict[str, Any]:
+        return {
+            "fromProviderId": self.from_provider_id,
+            "toProviderId": self.to_provider_id,
+            "changes": [change.to_wire() for change in self.changes],
+        }
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.changes
+
+
+_RELIABILITY_RANK: dict[ReliabilityTier, int] = {
+    ReliabilityTier.UNKNOWN: 0,
+    ReliabilityTier.LOW: 1,
+    ReliabilityTier.MEDIUM: 2,
+    ReliabilityTier.HIGH: 3,
+}
+
+
+def compare_profiles(
+    *,
+    from_id: str,
+    from_profile: CapabilityProfile,
+    to_id: str,
+    to_profile: CapabilityProfile,
+) -> CapabilityDelta:
+    """Compute the per-dimension delta between two profiles.
+
+    The ``severity`` field tells the UI how to render each change:
+    ``warning`` for downgrades the user should notice (tool-use
+    reliability dropping, context shrinking, capabilities removed);
+    ``info`` for upgrades or neutral metadata changes.
+    """
+    changes: list[CapabilityChange] = []
+
+    if from_profile.max_context_tokens != to_profile.max_context_tokens:
+        severity = (
+            "warning" if to_profile.max_context_tokens < from_profile.max_context_tokens else "info"
+        )
+        changes.append(
+            CapabilityChange(
+                dimension="maxContextTokens",
+                before=from_profile.max_context_tokens,
+                after=to_profile.max_context_tokens,
+                severity=severity,
+            )
+        )
+
+    if from_profile.supports_tool_use != to_profile.supports_tool_use:
+        severity = (
+            "warning"
+            if from_profile.supports_tool_use and not to_profile.supports_tool_use
+            else "info"
+        )
+        changes.append(
+            CapabilityChange(
+                dimension="supportsToolUse",
+                before=from_profile.supports_tool_use,
+                after=to_profile.supports_tool_use,
+                severity=severity,
+            )
+        )
+
+    if from_profile.tool_use_reliability != to_profile.tool_use_reliability:
+        before_rank = _RELIABILITY_RANK[from_profile.tool_use_reliability]
+        after_rank = _RELIABILITY_RANK[to_profile.tool_use_reliability]
+        severity = "warning" if after_rank < before_rank else "info"
+        changes.append(
+            CapabilityChange(
+                dimension="toolUseReliability",
+                before=from_profile.tool_use_reliability.value,
+                after=to_profile.tool_use_reliability.value,
+                severity=severity,
+            )
+        )
+
+    if from_profile.supports_vision != to_profile.supports_vision:
+        severity = (
+            "warning" if from_profile.supports_vision and not to_profile.supports_vision else "info"
+        )
+        changes.append(
+            CapabilityChange(
+                dimension="supportsVision",
+                before=from_profile.supports_vision,
+                after=to_profile.supports_vision,
+                severity=severity,
+            )
+        )
+
+    if from_profile.supports_streaming != to_profile.supports_streaming:
+        severity = (
+            "warning"
+            if from_profile.supports_streaming and not to_profile.supports_streaming
+            else "info"
+        )
+        changes.append(
+            CapabilityChange(
+                dimension="supportsStreaming",
+                before=from_profile.supports_streaming,
+                after=to_profile.supports_streaming,
+                severity=severity,
+            )
+        )
+
+    if from_profile.local != to_profile.local:
+        # Cloud → local (or vice versa) is informational, not a
+        # downgrade — the swap usually reflects a deliberate privacy
+        # / cost preference rather than a capability loss.
+        changes.append(
+            CapabilityChange(
+                dimension="local",
+                before=from_profile.local,
+                after=to_profile.local,
+                severity="info",
+            )
+        )
+
+    return CapabilityDelta(
+        from_provider_id=from_id,
+        to_provider_id=to_id,
+        changes=changes,
+    )
+
+
+@dataclass(frozen=True)
 class ProviderMeta:
     """Wire-friendly metadata for the provider switcher."""
 
