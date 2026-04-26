@@ -26,6 +26,8 @@ from thalyn_brain.schedules import (
     SchedulesStore,
 )
 from thalyn_brain.schedules_rpc import register_schedule_methods
+from thalyn_brain.terminal_observer import TerminalObserver
+from thalyn_brain.terminal_rpc import register_terminal_methods
 from thalyn_brain.transport import serve_stdio
 
 
@@ -37,6 +39,7 @@ def main() -> int:
     schedules_store = SchedulesStore(data_dir=data_dir)
     memory_store = MemoryStore(data_dir=data_dir)
     lsp_manager = LspManager()
+    terminal_observer = TerminalObserver()
     runner = Runner(registry, runs_store=runs_store, data_dir=data_dir)
     register_chat_methods(dispatcher, registry, runner=runner)
     register_approval_methods(dispatcher, runner)
@@ -46,6 +49,7 @@ def main() -> int:
     register_memory_methods(dispatcher, memory_store)
     register_lsp_methods(dispatcher, lsp_manager)
     register_inline_methods(dispatcher, registry)
+    register_terminal_methods(dispatcher, terminal_observer)
 
     async def dispatch_schedule(schedule: Schedule) -> str | None:
         """Fire one schedule into the runner.

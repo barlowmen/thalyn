@@ -49,6 +49,7 @@ pub enum TerminalError {
 /// One frame of bytes from a terminal's output. `seq` is monotonic
 /// per session so subscribers can replay deterministically.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminalChunk {
     pub session_id: String,
     pub seq: u64,

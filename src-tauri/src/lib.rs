@@ -462,12 +462,29 @@ async fn terminal_open(
 
     let app_for_task = app.clone();
     let session_id_clone = session_id.clone();
+    let brain_for_task = state.brain.clone();
     tauri::async_runtime::spawn(async move {
         loop {
             match rx.recv().await {
                 Ok(chunk) => {
                     if let Err(err) = app_for_task.emit(TERMINAL_DATA_EVENT, &chunk) {
                         tracing::warn!(?err, "failed to forward terminal chunk");
+                    }
+                    // Also push the observation into the brain so
+                    // agents can attach to the session.
+                    let push = brain_for_task
+                        .call(
+                            "terminal.observe",
+                            json!({
+                                "sessionId": chunk.session_id,
+                                "seq": chunk.seq,
+                                "data": chunk.data,
+                            }),
+                            BRAIN_CALL_TIMEOUT,
+                        )
+                        .await;
+                    if let Err(err) = push {
+                        tracing::debug!(?err, "failed to forward terminal chunk to brain");
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -515,6 +532,15 @@ async fn terminal_close(state: State<'_, AppState>, session_id: String) -> Resul
         .close(&session_id)
         .await
         .map_err(|err| err.to_string())?;
+    // Best-effort: tell the brain to drop its observer state.
+    let _ = state
+        .brain
+        .call(
+            "terminal.forget",
+            json!({ "sessionId": session_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await;
     Ok(json!({ "closed": closed, "sessionId": session_id }))
 }
 
