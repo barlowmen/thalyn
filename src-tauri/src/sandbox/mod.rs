@@ -15,6 +15,7 @@
 
 mod manager;
 mod tier0;
+mod tier1;
 
 pub use manager::SandboxManager;
 
