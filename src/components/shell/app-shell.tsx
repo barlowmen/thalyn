@@ -9,6 +9,7 @@ import { useApprovalGate } from "@/components/approval/use-approval-gate";
 import { CommandPalette } from "@/components/command-palette";
 import { DriftGateBanner } from "@/components/inspector/drift-gate-banner";
 import { useDriftGate } from "@/components/inspector/use-drift-gate";
+import { SchedulesDialog } from "@/components/schedules/schedules-dialog";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { ActivityRail } from "@/components/shell/activity-rail";
 import { InspectorPanel } from "@/components/shell/inspector-panel";
@@ -95,6 +96,7 @@ export function AppShell({
   const [activeRail, setActiveRail] = useState<string>("chat");
   const [defaultLayout] = useState<Layout>(() => loadLayout());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [schedulesOpen, setSchedulesOpen] = useState(false);
 
   const sidebarRef = useRef<PanelImperativeHandle | null>(null);
   const inspectorRef = useRef<PanelImperativeHandle | null>(null);
@@ -106,6 +108,7 @@ export function AppShell({
   const toggleSidebar = useCallback(() => togglePanel(sidebarRef), []);
   const toggleInspector = useCallback(() => togglePanel(inspectorRef), []);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const openSchedules = useCallback(() => setSchedulesOpen(true), []);
 
   const handleRailSelect = useCallback(
     (id: string) => {
@@ -113,9 +116,13 @@ export function AppShell({
         openSettings();
         return;
       }
+      if (id === "schedules") {
+        openSchedules();
+        return;
+      }
       setActiveRail(id);
     },
-    [openSettings],
+    [openSettings, openSchedules],
   );
 
   return (
@@ -182,6 +189,11 @@ export function AppShell({
       />
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SchedulesDialog
+        open={schedulesOpen}
+        onOpenChange={setSchedulesOpen}
+        defaultProviderId={readActiveProvider()}
+      />
 
       <ApprovalLayer />
     </div>

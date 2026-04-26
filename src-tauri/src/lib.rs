@@ -193,6 +193,74 @@ async fn kill_run(
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+async fn list_schedules(state: State<'_, AppState>) -> Result<Value, String> {
+    state
+        .brain
+        .call("schedules.list", json!({}), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn create_schedule(
+    state: State<'_, AppState>,
+    title: String,
+    nl_input: Option<String>,
+    cron: Option<String>,
+    run_template: Value,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    params.insert("title".into(), Value::from(title));
+    if let Some(nl) = nl_input {
+        params.insert("nlInput".into(), Value::from(nl));
+    }
+    if let Some(c) = cron {
+        params.insert("cron".into(), Value::from(c));
+    }
+    params.insert("runTemplate".into(), run_template);
+    state
+        .brain
+        .call(
+            "schedules.create",
+            Value::Object(params),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn delete_schedule(state: State<'_, AppState>, schedule_id: String) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "schedules.delete",
+            json!({ "scheduleId": schedule_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn translate_cron(
+    state: State<'_, AppState>,
+    nl_input: String,
+    provider_id: Option<String>,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    params.insert("nlInput".into(), Value::from(nl_input));
+    if let Some(provider) = provider_id {
+        params.insert("providerId".into(), Value::from(provider));
+    }
+    state
+        .brain
+        .call("cron.translate", Value::Object(params), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// Translate a brain JSON-RPC notification into a Tauri event for the
 /// renderer. `chat.chunk` is wrapped with the session id; the run.*
 /// notifications already carry their runId in the params.
@@ -420,6 +488,10 @@ pub fn run() {
             get_run,
             get_run_tree,
             kill_run,
+            list_schedules,
+            create_schedule,
+            delete_schedule,
+            translate_cron,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

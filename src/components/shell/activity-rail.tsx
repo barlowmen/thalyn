@@ -1,4 +1,5 @@
 import {
+  CalendarClock,
   Compass,
   type LucideIcon,
   MessagesSquare,
@@ -28,6 +29,7 @@ type RailItem = {
 const ITEMS: readonly RailItem[] = [
   { id: "chat", label: "Chat", icon: MessagesSquare },
   { id: "agents", label: "Agents", icon: Compass },
+  { id: "schedules", label: "Schedules", icon: CalendarClock },
   { id: "logs", label: "Logs", icon: ScrollText },
   { id: "connectors", label: "Connectors", icon: Plug },
   { id: "settings", label: "Settings", icon: Settings },

@@ -68,6 +68,18 @@ stubbed.__TAURI_INTERNALS__ = {
     if (command === "approve_plan") {
       return { runId: "", sessionId: "", providerId: "anthropic", status: "completed", finalResponse: "", actionLogSize: 0 };
     }
+    if (command === "list_schedules") {
+      return { schedules: [] };
+    }
+    if (command === "create_schedule") {
+      return { schedule: { scheduleId: "", projectId: null, title: "", nlInput: "", cron: "* * * * *", runTemplate: { prompt: "" }, enabled: true, nextRunAtMs: null, lastRunAtMs: null, lastRunId: null, createdAtMs: 0 } };
+    }
+    if (command === "delete_schedule") {
+      return { deleted: true, scheduleId: "" };
+    }
+    if (command === "translate_cron") {
+      return { cron: "* * * * *", explanation: "", nlInput: "", valid: true, error: null };
+    }
     return null;
   },
 };
