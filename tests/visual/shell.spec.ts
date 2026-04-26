@@ -59,6 +59,9 @@ stubbed.__TAURI_INTERNALS__ = {
     if (command === "get_run") {
       return null;
     }
+    if (command === "approve_plan") {
+      return { runId: "", sessionId: "", providerId: "anthropic", status: "completed", finalResponse: "", actionLogSize: 0 };
+    }
     return null;
   },
 };

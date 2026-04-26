@@ -72,6 +72,23 @@ export type RunHeader = {
 export type RunStatusEvent = { runId: string; status: RunStatus };
 export type RunPlanUpdateEvent = { runId: string; plan: Plan };
 export type RunActionLogEvent = { runId: string; entry: ActionLogEntry };
+export type RunApprovalRequiredEvent = {
+  runId: string;
+  gateKind: "plan";
+  plan: Plan;
+};
+
+export type ApprovalDecision = "approve" | "edit" | "reject";
+
+export type ApprovalResult = {
+  runId: string;
+  sessionId: string;
+  providerId: string;
+  status: RunStatus;
+  finalResponse: string;
+  actionLogSize: number;
+  plan?: Plan;
+};
 
 export function listRuns(options?: {
   statuses?: RunStatus[];
@@ -82,6 +99,16 @@ export function listRuns(options?: {
 
 export function getRun(runId: string): Promise<RunHeader | null> {
   return invoke<RunHeader | null>("get_run", { runId });
+}
+
+export function approvePlan(args: {
+  runId: string;
+  providerId: string;
+  decision: ApprovalDecision;
+  editedPlan?: Plan;
+  sessionId?: string;
+}): Promise<ApprovalResult> {
+  return invoke<ApprovalResult>("approve_plan", args);
 }
 
 export function subscribeRunStatus(
@@ -102,6 +129,14 @@ export function subscribeRunActionLog(
   handler: (event: RunActionLogEvent) => void,
 ): Promise<UnlistenFn> {
   return listen<RunActionLogEvent>("run:action_log", (e) =>
+    handler(e.payload),
+  );
+}
+
+export function subscribeRunApprovalRequired(
+  handler: (event: RunApprovalRequiredEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<RunApprovalRequiredEvent>("run:approval_required", (e) =>
     handler(e.payload),
   );
 }

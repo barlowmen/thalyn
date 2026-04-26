@@ -4,10 +4,8 @@ import type {
   PanelImperativeHandle,
 } from "react-resizable-panels";
 
-export type ShellApi = {
-  openSettings: () => void;
-};
-
+import { PlanApprovalDialog } from "@/components/approval/plan-approval-dialog";
+import { useApprovalGate } from "@/components/approval/use-approval-gate";
 import { CommandPalette } from "@/components/command-palette";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { ActivityRail } from "@/components/shell/activity-rail";
@@ -18,6 +16,11 @@ import {
   ResizablePanel,
   ResizableSeparator,
 } from "@/components/ui/resizable";
+import { readActiveProvider } from "@/lib/active-provider";
+
+export type ShellApi = {
+  openSettings: () => void;
+};
 
 /**
  * The three-panel mosaic shell:
@@ -169,6 +172,21 @@ export function AppShell({
       />
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+
+      <ApprovalLayer />
     </div>
+  );
+}
+
+function ApprovalLayer() {
+  const { gate, clear } = useApprovalGate();
+  return (
+    <PlanApprovalDialog
+      open={gate !== null}
+      runId={gate?.runId ?? null}
+      providerId={readActiveProvider()}
+      plan={gate?.plan ?? null}
+      onSettled={clear}
+    />
   );
 }
