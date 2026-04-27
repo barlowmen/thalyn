@@ -147,6 +147,51 @@ async fn provider_configured(
 }
 
 #[tauri::command]
+async fn save_observability_secret(
+    state: State<'_, AppState>,
+    name: String,
+    value: String,
+) -> Result<(), String> {
+    if !is_observability_secret(&name) {
+        return Err(format!("unknown observability secret: {name}"));
+    }
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("value is empty".into());
+    }
+    state
+        .secrets
+        .save_secret(&name, trimmed)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn clear_observability_secret(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    if !is_observability_secret(&name) {
+        return Err(format!("unknown observability secret: {name}"));
+    }
+    state
+        .secrets
+        .delete_secret(&name)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn observability_status(state: State<'_, AppState>) -> Result<Value, String> {
+    Ok(json!({
+        "sentryDsnConfigured": state.secrets.has_secret("sentry_dsn"),
+        "otelOtlpEndpointConfigured": state.secrets.has_secret("otel_otlp_endpoint"),
+    }))
+}
+
+fn is_observability_secret(name: &str) -> bool {
+    matches!(name, "sentry_dsn" | "otel_otlp_endpoint")
+}
+
+#[tauri::command]
 async fn list_runs(
     state: State<'_, AppState>,
     statuses: Option<Vec<String>>,
@@ -807,6 +852,17 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
         // can authenticate without anything touching disk.
         config = config.with_env("ANTHROPIC_API_KEY", api_key);
     }
+    // User-supplied Sentry DSN (opt-in crash reporting per F10.3).
+    // Forwarded only when configured; without this env var the
+    // brain's init_sentry is a no-op and nothing leaves the machine.
+    if let Ok(Some(dsn)) = secrets.read_secret("sentry_dsn") {
+        config = config.with_env("THALYN_SENTRY_DSN", dsn);
+    }
+    // OTLP endpoint for the OpenTelemetry exporter — same shape;
+    // unset means "no traces leave the machine."
+    if let Ok(Some(endpoint)) = secrets.read_secret("otel_otlp_endpoint") {
+        config = config.with_env("THALYN_OTEL_OTLP_ENDPOINT", endpoint);
+    }
     tracing::info!(program = %config.program, args = ?config.args, "spawning brain sidecar");
     let supervisor = BrainSupervisor::spawn(config)
         .await
@@ -910,6 +966,9 @@ pub fn run() {
             browser_start,
             browser_stop,
             browser_status,
+            save_observability_secret,
+            clear_observability_secret,
+            observability_status,
             terminal_open,
             terminal_input,
             terminal_resize,

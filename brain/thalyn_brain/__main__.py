@@ -9,6 +9,7 @@ from thalyn_brain.approval_rpc import register_approval_methods
 from thalyn_brain.browser import BrowserManager
 from thalyn_brain.browser_rpc import register_browser_methods
 from thalyn_brain.chat import register_chat_methods
+from thalyn_brain.error_reporting import init_sentry
 from thalyn_brain.inline_rpc import register_inline_methods
 from thalyn_brain.lsp import LspManager
 from thalyn_brain.lsp_rpc import register_lsp_methods
@@ -39,6 +40,10 @@ def main() -> int:
     # the first run can fire. The default exporter is no-op (no
     # network) — set THALYN_OTEL_OTLP_ENDPOINT to ship traces.
     init_tracer()
+    # Crash reporting is opt-in via THALYN_SENTRY_DSN (the Rust
+    # core sets the env var from the OS keychain entry the user
+    # paste their own DSN into). With no DSN, this is a no-op.
+    init_sentry()
     data_dir = default_data_dir()
     dispatcher = build_default_dispatcher()
     registry = build_registry()

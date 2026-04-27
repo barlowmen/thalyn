@@ -77,6 +77,34 @@ impl SecretsManager {
         }
     }
 
+    /// Generic secret slot — used for the user-supplied Sentry DSN
+    /// and any future opt-in credentials that aren't tied to a
+    /// provider. Account naming is namespaced under ``secret.{name}``
+    /// so it cannot collide with the per-provider ``{id}.api-key``
+    /// slots.
+    pub fn save_secret(&self, name: &str, value: &str) -> Result<(), SecretError> {
+        self.store.set(SERVICE, &secret_account(name), value)
+    }
+
+    pub fn read_secret(&self, name: &str) -> Result<Option<String>, SecretError> {
+        match self.store.get(SERVICE, &secret_account(name)) {
+            Ok(value) => Ok(Some(value)),
+            Err(SecretError::NotFound) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn delete_secret(&self, name: &str) -> Result<(), SecretError> {
+        match self.store.delete(SERVICE, &secret_account(name)) {
+            Ok(()) | Err(SecretError::NotFound) => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn has_secret(&self, name: &str) -> bool {
+        self.read_secret(name).unwrap_or(None).is_some()
+    }
+
     pub fn has_api_key(&self, provider_id: &str) -> bool {
         matches!(self.read_api_key(provider_id), Ok(Some(_)))
     }
@@ -84,6 +112,10 @@ impl SecretsManager {
 
 fn api_key_account(provider_id: &str) -> String {
     format!("{provider_id}.api-key")
+}
+
+fn secret_account(name: &str) -> String {
+    format!("secret.{name}")
 }
 
 #[cfg(test)]
@@ -119,6 +151,38 @@ mod tests {
         let manager = manager();
         // No save first; delete should still succeed (idempotent).
         assert!(manager.delete_api_key("anthropic").is_ok());
+    }
+
+    #[test]
+    fn generic_secrets_round_trip() {
+        let manager = manager();
+        manager
+            .save_secret("sentry_dsn", "https://abc@example/1")
+            .unwrap();
+        assert_eq!(
+            manager.read_secret("sentry_dsn").unwrap().as_deref(),
+            Some("https://abc@example/1")
+        );
+        assert!(manager.has_secret("sentry_dsn"));
+        manager.delete_secret("sentry_dsn").unwrap();
+        assert!(!manager.has_secret("sentry_dsn"));
+    }
+
+    #[test]
+    fn generic_secrets_are_namespaced_separately_from_api_keys() {
+        let manager = manager();
+        manager.save_api_key("anthropic", "sk-test").unwrap();
+        manager.save_secret("anthropic", "fake-secret").unwrap();
+        // Same name string, different stored value — namespace prefix
+        // protects against collision.
+        assert_eq!(
+            manager.read_api_key("anthropic").unwrap().as_deref(),
+            Some("sk-test")
+        );
+        assert_eq!(
+            manager.read_secret("anthropic").unwrap().as_deref(),
+            Some("fake-secret")
+        );
     }
 
     #[test]
