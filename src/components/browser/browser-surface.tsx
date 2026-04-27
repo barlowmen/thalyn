@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 
 import { Compass, ExternalLink, Loader2, Power, Square } from "lucide-react";
 
@@ -135,7 +135,7 @@ export function BrowserView({
         {error ? (
           <div
             role="alert"
-            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-foreground"
           >
             {error}
           </div>
@@ -228,10 +228,13 @@ function DetailGrid({
 }: {
   rows: { label: string; value: string; mono?: boolean }[];
 }) {
+  // Direct dt/dd children of dl — wrapping in a <div> would break
+  // axe's `definition-list` rule. Fragment keeps the React key
+  // bookkeeping while letting the dl/dt/dd markup stay valid.
   return (
     <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-xs">
       {rows.map(({ label, value, mono }) => (
-        <div key={label} className="contents">
+        <Fragment key={label}>
           <dt className="text-muted-foreground">{label}</dt>
           <dd
             className={
@@ -242,7 +245,7 @@ function DetailGrid({
           >
             {value}
           </dd>
-        </div>
+        </Fragment>
       ))}
     </dl>
   );
