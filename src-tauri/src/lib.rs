@@ -45,10 +45,9 @@ struct AppState {
     /// Consumed by Tauri commands in subsequent commits.
     #[allow(dead_code)]
     sandboxes: Arc<SandboxManager>,
-    /// Headed-Chromium sidecar manager. Plumbed through AppState so
-    /// the renderer command surface and the brain attach flow can
-    /// land on a stable handle in subsequent commits.
-    #[allow(dead_code)]
+    /// Headed-Chromium sidecar manager. The renderer drives lifecycle
+    /// via the `browser_*` Tauri commands; the brain attaches via
+    /// JSON-RPC `browser.attach` once Chromium is up.
     browser: Arc<BrowserManager>,
     power: Arc<PowerManager>,
     /// run id → outstanding power-assertion token. Lets the
@@ -432,6 +431,50 @@ async fn lsp_list(state: State<'_, AppState>) -> Result<Value, String> {
         )
         .await
         .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn browser_start(state: State<'_, AppState>) -> Result<Value, String> {
+    let new_state = state.browser.start().await.map_err(|err| err.to_string())?;
+    if let crate::browser::BrowserState::Running { ws_url, .. } = &new_state {
+        // Tell the brain to attach to this WS URL. If the attach
+        // fails the renderer still gets back the running state — the
+        // user can retry, or the next attempt to drive an agent tool
+        // will surface the missing attachment.
+        if let Err(err) = state
+            .brain
+            .call(
+                "browser.attach",
+                json!({ "wsUrl": ws_url }),
+                BRAIN_CALL_TIMEOUT,
+            )
+            .await
+        {
+            tracing::warn!(?err, "brain failed to attach to browser session");
+        }
+    }
+    serde_json::to_value(new_state).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn browser_stop(state: State<'_, AppState>) -> Result<(), String> {
+    // Detach the brain first so its CDP socket closes cleanly before
+    // we kill Chromium under it. We swallow any detach error — if the
+    // brain is in a weird state it shouldn't block the stop path.
+    let _ = state
+        .brain
+        .call(
+            "browser.detach",
+            Value::Object(Default::default()),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await;
+    state.browser.stop().await.map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn browser_status(state: State<'_, AppState>) -> Result<Value, String> {
+    serde_json::to_value(state.browser.state()).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -864,6 +907,9 @@ pub fn run() {
             lsp_stop,
             lsp_list,
             inline_suggest,
+            browser_start,
+            browser_stop,
+            browser_status,
             terminal_open,
             terminal_input,
             terminal_resize,

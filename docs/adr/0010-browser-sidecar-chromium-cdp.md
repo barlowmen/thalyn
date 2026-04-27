@@ -59,3 +59,13 @@ The agent-tool surface mirrors the v0.12 terminal-tool shape: each verb gets its
 The brain's `BrowserManager` is single-session — one attached Chromium at a time. Multi-session and multi-target navigation (`window.open` follow flows, popups, etc.) ride a future refinement; v1's scope is "the brain drives the page the user is on."
 
 If we later need richer features (frame trees, accessibility-tree mirror for the panel overlay, network-domain auth flows) the path is layering them on top of `CdpConnection`, not migrating to Playwright/Stagehand/browser-use. We revisit that decision if the in-house surface starts duplicating non-trivial Playwright internals.
+
+### Refinement at v0.13 implementation — renderer surface
+
+The browser panel ships as the fourth main-panel surface (after chat, editor, terminal). Three details worth fixing:
+
+- **Activity-rail entry, not an inspector tile.** Earlier sketches put the browser controls in the right inspector. The implementation lives on the activity rail with its own surface in the main panel because lifecycle controls (Start / Stop), a current-URL display, and the eventual screencast preview want full-width real estate that the 320–380 px inspector can't comfortably give them.
+- **Component split.** `BrowserSurface` (connected) wraps `BrowserView` (presentational). The split exists because Storybook a11y tests run in CI without a Tauri host — driving every state transition (idle / starting / running / exited / error) from props is the only way to keep the WCAG 2.1 AA gate honest.
+- **Polling for state today; broadcast tomorrow.** The renderer polls `browser_status` every 2 s. A push-based watch over the Rust manager's `tokio::sync::watch::Receiver` is the natural next step (lands with the per-step capture commit so the screencast frame stream and state stream share a single notification surface).
+
+The take-over button (raise the real Chromium window) is **not** in this commit. The window-raise needs OS-specific code (`NSWindow.makeKeyAndOrderFront` / `SetForegroundWindow` / wlr-foreign-toplevel) and rides with the per-step capture commit so the take-over UX and the screencast preview stay in lockstep.

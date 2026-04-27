@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 
+import { BrowserSurface } from "@/components/browser/browser-surface";
 import { ChatSurface } from "@/components/chat/chat-surface";
 import { EditorSurface } from "@/components/editor/editor-surface";
 import { AppShell } from "@/components/shell/app-shell";
@@ -43,6 +44,9 @@ function App() {
         }
         if (activeRail === "terminal") {
           return <TerminalSurface />;
+        }
+        if (activeRail === "browser") {
+          return <BrowserSurface />;
         }
         return (
           <ChatSurface
