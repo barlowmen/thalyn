@@ -13,6 +13,8 @@ from thalyn_brain.error_reporting import init_sentry
 from thalyn_brain.inline_rpc import register_inline_methods
 from thalyn_brain.lsp import LspManager
 from thalyn_brain.lsp_rpc import register_lsp_methods
+from thalyn_brain.mcp import ConnectorRegistry, McpManager, builtin_catalog
+from thalyn_brain.mcp_rpc import register_mcp_methods
 from thalyn_brain.memory import MemoryStore
 from thalyn_brain.memory_rpc import register_memory_methods
 from thalyn_brain.orchestration import Runner
@@ -53,6 +55,8 @@ def main() -> int:
     lsp_manager = LspManager()
     terminal_observer = TerminalObserver()
     browser_manager = BrowserManager()
+    connector_registry = ConnectorRegistry(data_dir=data_dir)
+    mcp_manager = McpManager(registry=connector_registry, catalog=builtin_catalog())
     runner = Runner(registry, runs_store=runs_store, data_dir=data_dir)
     register_chat_methods(dispatcher, registry, runner=runner)
     register_approval_methods(dispatcher, runner)
@@ -64,6 +68,7 @@ def main() -> int:
     register_inline_methods(dispatcher, registry)
     register_terminal_methods(dispatcher, terminal_observer)
     register_browser_methods(dispatcher, browser_manager)
+    register_mcp_methods(dispatcher, mcp_manager)
 
     async def dispatch_schedule(schedule: Schedule) -> str | None:
         """Fire one schedule into the runner.
@@ -106,6 +111,7 @@ def main() -> int:
         finally:
             await scheduler.stop()
             await lsp_manager.shutdown()
+            await mcp_manager.shutdown()
 
     try:
         asyncio.run(serve())
