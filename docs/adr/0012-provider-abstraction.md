@@ -36,3 +36,41 @@ Two small departures from the sketch landed when the abstraction met working cod
 - **Rust trait is narrower than the sketch.** Live LLM traffic flows through the Python brain, so the Rust trait dropped `complete` / `stream` / `embed` and kept the metadata surface — `id`, `display_name`, `capability_profile`, `supports`, `probe`. The Rust core stays out of the IPC hot path for completion calls; capability listing and reachability stay synchronous.
 - **Python protocol uses a single `stream_chat`.** Single-turn streaming is the only call shape the brain needs for v0.3; chat history threading and embeddings stay deferred until the orchestration layer needs them. The chunk shape (`start` / `text` / `tool_call` / `tool_result` / `stop` / `error`) is the wire contract that JSON-RPC notifications carry to the renderer unchanged.
 - **`ToolCallNormalizer` deferred.** With only the Anthropic adapter live there is nothing to normalize across; the slot lands when the second adapter ships.
+
+### Refinement at v0.10 implementation
+
+v0.10 lit up the local-provider path. The single-`stream_chat`
+shape held; three implementation patterns are worth recording so
+future adapters follow the same shape:
+
+- **Lazy import for platform-specific dependencies.** `MlxProvider`
+  imports `mlx_lm` lazily inside the call path. Hosts without
+  Apple Silicon (Linux, Windows, Intel Macs) get a clean
+  `ChatErrorChunk` instead of a hard import-time crash, so the
+  same packaged binary still boots — the user just can't
+  *select* the MLX provider on those hosts. Future
+  platform-specific adapters should follow the same pattern.
+- **Per-provider tool-call reliability tier.** `CapabilityProfile`
+  carries `tool_use_reliability: ReliabilityTier`
+  (`high` / `medium` / `low` / `unknown`). The orchestrator
+  reads this when deciding whether to require provider routing
+  for tool-heavy plans — Anthropic is `high`, Ollama with
+  Qwen3-Coder-Next is `medium` (the 2026 ecosystem went through
+  several tool-call format issues that Unsloth fixed, but the
+  reliability still trails frontier-cloud models).
+- **Ollama context-window override.** Ollama defaults to a
+  4096-token context; Qwen3-Coder-Next supports up to 256 K.
+  We set the context size explicitly when spawning a model,
+  rather than relying on the Ollama default — otherwise long
+  plans truncate silently mid-stream.
+
+The Rust trait still holds the metadata-only surface; the brain
+provider registry now has five concrete adapters (Anthropic,
+Ollama, MLX) plus two placeholders (OpenAI-compatible,
+llama.cpp) that surface a clean error on selection. The
+`ToolCallNormalizer` slot is still empty — Ollama and MLX both
+return tool calls in the same normalized chunk shape because the
+adapter does the translation in `_normalize_message`. A
+dedicated normalizer module lands when a provider's tool-call
+output diverges enough that the per-adapter logic stops being
+the right home.
