@@ -1,6 +1,7 @@
 import { Inbox, Mail, RefreshCw, Send, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { SurfaceCloseButton } from "@/components/shell/surface-close";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,7 +33,7 @@ type SurfaceState = {
  * so an autonomous draft can never reach the wire without a user
  * click on this surface.
  */
-export function EmailSurface() {
+export function EmailSurface({ onClose }: { onClose?: () => void }) {
   const [state, setState] = useState<SurfaceState>({
     accounts: [],
     selectedAccountId: null,
@@ -71,12 +72,16 @@ export function EmailSurface() {
   );
 
   if (state.loadingAccounts) {
-    return <SurfaceFrame heading="Email">Loading accounts…</SurfaceFrame>;
+    return (
+      <SurfaceFrame heading="Email" onClose={onClose}>
+        Loading accounts…
+      </SurfaceFrame>
+    );
   }
 
   if (state.error) {
     return (
-      <SurfaceFrame heading="Email">
+      <SurfaceFrame heading="Email" onClose={onClose}>
         <p className="text-sm text-destructive" role="alert">
           {state.error}
         </p>
@@ -86,7 +91,7 @@ export function EmailSurface() {
 
   if (state.accounts.length === 0) {
     return (
-      <SurfaceFrame heading="Email">
+      <SurfaceFrame heading="Email" onClose={onClose}>
         <EmptyState />
       </SurfaceFrame>
     );
@@ -99,20 +104,23 @@ export function EmailSurface() {
           <Inbox aria-hidden className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-medium">Email</h2>
         </div>
-        <select
-          className="rounded-md border border-border bg-background px-2 py-1 text-sm"
-          value={state.selectedAccountId ?? ""}
-          onChange={(e) =>
-            setState((prev) => ({ ...prev, selectedAccountId: e.target.value }))
-          }
-          aria-label="Active account"
-        >
-          {state.accounts.map((account) => (
-            <option key={account.accountId} value={account.accountId}>
-              {account.label} ({account.address})
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            className="rounded-md border border-border bg-background px-2 py-1 text-sm"
+            value={state.selectedAccountId ?? ""}
+            onChange={(e) =>
+              setState((prev) => ({ ...prev, selectedAccountId: e.target.value }))
+            }
+            aria-label="Active account"
+          >
+            {state.accounts.map((account) => (
+              <option key={account.accountId} value={account.accountId}>
+                {account.label} ({account.address})
+              </option>
+            ))}
+          </select>
+          <SurfaceCloseButton onClose={onClose} />
+        </div>
       </header>
       {selectedAccount ? <AccountInbox account={selectedAccount} /> : null}
     </div>
@@ -122,15 +130,20 @@ export function EmailSurface() {
 function SurfaceFrame({
   heading,
   children,
+  onClose,
 }: {
   heading: string;
   children: React.ReactNode;
+  onClose?: () => void;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex items-center gap-2 border-b border-border bg-surface px-4 py-2">
-        <Inbox aria-hidden className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-medium">{heading}</h2>
+      <header className="flex items-center justify-between gap-2 border-b border-border bg-surface px-4 py-2">
+        <div className="flex items-center gap-2">
+          <Inbox aria-hidden className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium">{heading}</h2>
+        </div>
+        <SurfaceCloseButton onClose={onClose} />
       </header>
       <div className="flex flex-1 items-start justify-center p-6">{children}</div>
     </div>

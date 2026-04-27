@@ -1,6 +1,7 @@
 import { Filter, RefreshCw, ScrollText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { SurfaceCloseButton } from "@/components/shell/surface-close";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -55,8 +56,10 @@ const ALL_STATUSES: RunStatus[] = [
  */
 export function LogsSurface({
   onOpen,
+  onClose,
 }: {
   onOpen?: (runId: string) => void;
+  onClose?: () => void;
 }) {
   const [runs, setRuns] = useState<RunHeader[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +122,7 @@ export function LogsSurface({
       onFilterChange={setFilter}
       onRefresh={() => void refresh()}
       onOpen={onOpen}
+      onClose={onClose}
     />
   );
 }
@@ -132,6 +136,7 @@ export function LogsView({
   onFilterChange,
   onRefresh,
   onOpen,
+  onClose,
 }: {
   runs: RunHeader[];
   loading: boolean;
@@ -141,6 +146,7 @@ export function LogsView({
   onFilterChange: (next: RunStatus[]) => void;
   onRefresh: () => void;
   onOpen?: (runId: string) => void;
+  onClose?: () => void;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -149,19 +155,22 @@ export function LogsView({
           <ScrollText aria-hidden className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-medium">Logs</h2>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="Refresh logs"
-          onClick={onRefresh}
-          disabled={busy}
-        >
-          <RefreshCw
-            aria-hidden
-            className={cn("size-4", busy && "animate-spin")}
-          />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Refresh logs"
+            onClick={onRefresh}
+            disabled={busy}
+          >
+            <RefreshCw
+              aria-hidden
+              className={cn("size-4", busy && "animate-spin")}
+            />
+          </Button>
+          <SurfaceCloseButton onClose={onClose} />
+        </div>
       </header>
 
       <div className="border-b border-border bg-surface px-4 py-2">

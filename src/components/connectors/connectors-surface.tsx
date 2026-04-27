@@ -1,6 +1,7 @@
 import { Check, Plug, Power, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { SurfaceCloseButton } from "@/components/shell/surface-close";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,7 +56,7 @@ const EMPTY: ConnectorsState = {
  * state and call Tauri directly; that's fine because each card
  * scopes its busy/error to itself.
  */
-export function ConnectorsSurface() {
+export function ConnectorsSurface({ onClose }: { onClose?: () => void }) {
   const [state, setState] = useState<ConnectorsState>(EMPTY);
 
   const refresh = useCallback(async () => {
@@ -93,6 +94,7 @@ export function ConnectorsSurface() {
       error={state.error}
       onRefresh={() => void refresh()}
       onChanged={() => void refresh()}
+      onClose={onClose}
     />
   );
 }
@@ -104,6 +106,7 @@ export function ConnectorsView({
   error,
   onRefresh,
   onChanged,
+  onClose,
 }: {
   catalog: ConnectorDescriptor[];
   installed: InstalledConnector[];
@@ -111,6 +114,7 @@ export function ConnectorsView({
   error: string | null;
   onRefresh: () => void;
   onChanged: () => Promise<void> | void;
+  onClose?: () => void;
 }) {
   const installedById = useMemo(() => {
     const map = new Map<string, InstalledConnector>();
@@ -127,15 +131,18 @@ export function ConnectorsView({
           <Plug aria-hidden className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-medium">Connectors</h2>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="Refresh connectors"
-          onClick={onRefresh}
-        >
-          <RefreshCw aria-hidden className="size-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Refresh connectors"
+            onClick={onRefresh}
+          >
+            <RefreshCw aria-hidden className="size-4" />
+          </Button>
+          <SurfaceCloseButton onClose={onClose} />
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">

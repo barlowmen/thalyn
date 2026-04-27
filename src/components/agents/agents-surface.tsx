@@ -2,6 +2,7 @@ import { Bot, Compass, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { BudgetMeter } from "@/components/inspector/budget-meter";
+import { SurfaceCloseButton } from "@/components/shell/surface-close";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -57,8 +58,10 @@ const TERMINAL_STATUSES: RunStatus[] = ["completed", "errored", "killed"];
  */
 export function AgentsSurface({
   onOpen,
+  onClose,
 }: {
   onOpen?: (runId: string) => void;
+  onClose?: () => void;
 }) {
   const [runs, setRuns] = useState<RunHeader[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +121,7 @@ export function AgentsSurface({
       busy={busy}
       onRefresh={() => void refresh()}
       onOpen={onOpen}
+      onClose={onClose}
       onKill={(runId) => {
         void killRun(runId).catch(() => undefined);
       }}
@@ -132,6 +136,7 @@ export function AgentsView({
   busy,
   onRefresh,
   onOpen,
+  onClose,
   onKill,
 }: {
   runs: RunHeader[];
@@ -140,6 +145,7 @@ export function AgentsView({
   busy: boolean;
   onRefresh: () => void;
   onOpen?: (runId: string) => void;
+  onClose?: () => void;
   onKill?: (runId: string) => void;
 }) {
   const active = runs.filter((r) => ACTIVE_STATUSES.includes(r.status));
@@ -157,19 +163,22 @@ export function AgentsView({
           <Compass aria-hidden className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-medium">Agents</h2>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="Refresh agents"
-          onClick={onRefresh}
-          disabled={busy}
-        >
-          <RefreshCw
-            aria-hidden
-            className={cn("size-4", busy && "animate-spin")}
-          />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Refresh agents"
+            onClick={onRefresh}
+            disabled={busy}
+          >
+            <RefreshCw
+              aria-hidden
+              className={cn("size-4", busy && "animate-spin")}
+            />
+          </Button>
+          <SurfaceCloseButton onClose={onClose} />
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">

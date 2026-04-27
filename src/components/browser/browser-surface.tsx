@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 
 import { Compass, ExternalLink, Loader2, Power, Square } from "lucide-react";
 
+import { SurfaceCloseButton } from "@/components/shell/surface-close";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -28,7 +29,7 @@ import {
  * presentational [`BrowserView`] so Storybook can render every state
  * without touching the Tauri invoke surface.
  */
-export function BrowserSurface() {
+export function BrowserSurface({ onClose }: { onClose?: () => void }) {
   const [state, setState] = useState<BrowserState>({ kind: "idle" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +85,7 @@ export function BrowserSurface() {
       error={error}
       onStart={handleStart}
       onStop={handleStop}
+      onClose={onClose}
     />
   );
 }
@@ -99,12 +101,14 @@ export function BrowserView({
   error,
   onStart,
   onStop,
+  onClose,
 }: {
   state: BrowserState;
   busy: boolean;
   error: string | null;
   onStart: () => void;
   onStop: () => void;
+  onClose?: () => void;
 }) {
   const isRunning = state.kind === "running";
   const isStarting = state.kind === "starting" || busy;
@@ -117,9 +121,12 @@ export function BrowserView({
           <h2 className="text-sm font-semibold tracking-tight">Browser</h2>
           <Badge tone={badgeToneFor(state)}>{browserStateLabel(state)}</Badge>
         </div>
-        <p className="text-[11px] text-muted-foreground">
-          Real Chromium window · the panel is observability only
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-[11px] text-muted-foreground">
+            Real Chromium window · the panel is observability only
+          </p>
+          <SurfaceCloseButton onClose={onClose} />
+        </div>
       </header>
 
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-6">

@@ -84,7 +84,8 @@ function App() {
     <AppShell
       openSubAgentRunId={openSubAgentRunId}
       onOpenSubAgent={handleOpenSubAgent}
-      surface={({ activeRail }) => {
+      onCloseSurface={handleCloseSubAgent}
+      surface={({ activeRail, closeSurface }) => {
         // Sub-agent detail wins over the rail's surface — it's the
         // result of an explicit "open this agent" click, not a tab
         // switch.
@@ -102,49 +103,49 @@ function App() {
         if (activeRail === "editor") {
           return (
             <Suspense fallback={<SurfaceFallback label="editor" />}>
-              <EditorSurface />
+              <EditorSurface onClose={closeSurface} />
             </Suspense>
           );
         }
         if (activeRail === "terminal") {
           return (
             <Suspense fallback={<SurfaceFallback label="terminal" />}>
-              <TerminalSurface />
+              <TerminalSurface onClose={closeSurface} />
             </Suspense>
           );
         }
         if (activeRail === "browser") {
           return (
             <Suspense fallback={<SurfaceFallback label="browser" />}>
-              <BrowserSurface />
+              <BrowserSurface onClose={closeSurface} />
             </Suspense>
           );
         }
         if (activeRail === "email") {
           return (
             <Suspense fallback={<SurfaceFallback label="email" />}>
-              <EmailSurface />
+              <EmailSurface onClose={closeSurface} />
             </Suspense>
           );
         }
         if (activeRail === "agents") {
           return (
             <Suspense fallback={<SurfaceFallback label="agents" />}>
-              <AgentsSurface onOpen={handleOpenSubAgent} />
+              <AgentsSurface onOpen={handleOpenSubAgent} onClose={closeSurface} />
             </Suspense>
           );
         }
         if (activeRail === "logs") {
           return (
             <Suspense fallback={<SurfaceFallback label="logs" />}>
-              <LogsSurface onOpen={handleOpenSubAgent} />
+              <LogsSurface onOpen={handleOpenSubAgent} onClose={closeSurface} />
             </Suspense>
           );
         }
         if (activeRail === "connectors") {
           return (
             <Suspense fallback={<SurfaceFallback label="connectors" />}>
-              <ConnectorsSurface />
+              <ConnectorsSurface onClose={closeSurface} />
             </Suspense>
           );
         }

@@ -25,6 +25,13 @@ import { readActiveProvider } from "@/lib/active-provider";
 export type ShellApi = {
   openSettings: () => void;
   activeRail: string;
+  /**
+   * Collapse the surface region back to chat-only mode. Surfaces
+   * call this from a close button in their header so the user has
+   * an explicit dismiss affordance and isn't stuck guessing that
+   * the chat rail icon is the only way out.
+   */
+  closeSurface: () => void;
 };
 
 /**
@@ -161,6 +168,7 @@ export function AppShell({
   chat,
   openSubAgentRunId,
   onOpenSubAgent,
+  onCloseSurface,
 }: {
   /**
    * Renders into the surface region (left of chat). Returning ``null``
@@ -177,6 +185,12 @@ export function AppShell({
   chat: ReactNode | ((api: ShellApi) => ReactNode);
   openSubAgentRunId?: string | null;
   onOpenSubAgent?: (runId: string) => void;
+  /**
+   * Called when the user dismisses the surface from a surface-side
+   * close button. The shell uses this to clear any open sub-agent
+   * (which is the surface-displacing case the rail can't speak to).
+   */
+  onCloseSurface?: () => void;
 }) {
   const [activeRail, setActiveRail] = useState<string>("chat");
   const [defaultLayout] = useState<Layout>(() => loadLayout());
@@ -231,7 +245,12 @@ export function AppShell({
     if (!wantCollapsed && isCollapsed) handle.expand();
   }, [activeRail, openSubAgentRunId]);
 
-  const api: ShellApi = { openSettings, activeRail };
+  const closeSurface = useCallback(() => {
+    setActiveRail("chat");
+    onCloseSurface?.();
+  }, [onCloseSurface]);
+
+  const api: ShellApi = { openSettings, activeRail, closeSurface };
   const renderSurface = typeof surface === "function" ? surface(api) : surface;
   const renderChat = typeof chat === "function" ? chat(api) : chat;
 
