@@ -26,3 +26,13 @@ Spawn **headed Chromium as a sidecar process** and drive it via CDP using either
 ## Notes
 
 We document the "browser pane is a separate window in v0.x" decision visibly in user docs so it's not a surprise.
+
+### Refinement after pre-v0.13 spike (2026-04-26)
+
+The "embed as panel via screenshot+DOM mirror" line in **Consequences** was the only realistic alternative to native re-parenting; the [`webview-chromium-reparenting` spike](../spikes/2026-04-26-webview-chromium-reparenting.md) confirmed re-parenting is unviable cross-platform (Wayland blocks foreign-surface embedding outright; macOS cross-process subview embedding requires unstable Apple plumbing; `wry#650` is closed not-planned), and demolished screencast-as-primary by walking F4.3 flows (OAuth/2FA, file pickers, drag-drop, IME, downloads, DRM, extensions). The **Decision** above is unchanged — sidecar headed Chromium driven over CDP. What changes is the panel framing:
+
+- The **real Chromium window is the user-facing browser surface.** It opens visibly when the sidecar starts and stays open for the user to interact with directly (logins, file uploads, downloads, IME, drag-drop, extensions, DRM video).
+- The **in-Tauri panel is a CDP-driven observability + intervention console**, not an alternative input surface. It renders a low-cadence `Page.startScreencast` preview, an `Accessibility.getFullAXTree` snapshot per agent step, the action log, and "next planned action" highlights. **No keyboard or mouse forwarding from the panel to Chromium.**
+- **Take-over** raises the real Chromium window via OS APIs (`NSWindow.makeKeyAndOrderFront` on macOS, `SetForegroundWindow` on Windows, `wlr-foreign-toplevel` activation where available on Wayland) and pauses the agent loop. The user uses Chromium directly.
+
+`02-architecture.md` §12 risk #1 is retired by the spike; the risk register links here for the rationale.
