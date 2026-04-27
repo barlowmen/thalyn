@@ -33,6 +33,7 @@ packages = ["thalyn_brain"]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    "pytest-socket>=0.7",
     "ruff>=0.7",
     "mypy>=1.13",
 ]
