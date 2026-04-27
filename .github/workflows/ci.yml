@@ -44,6 +44,12 @@ jobs:
   frontend:
     name: frontend
     runs-on: ubuntu-latest
+    env:
+      # Vite + Monaco + the lazy-loaded editor chunk (~4 MB minified)
+      # push memory pressure past Node's 2 GB default during the
+      # production build. 4 GB is well within the 7 GB the
+      # ubuntu-latest runners ship with.
+      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -58,6 +64,8 @@ jobs:
   storybook:
     name: storybook a11y
     runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -78,6 +86,8 @@ jobs:
   visual:
     name: visual regression smoke
     runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
