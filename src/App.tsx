@@ -1,12 +1,49 @@
-import { useCallback, useState } from "react";
+import { Suspense, lazy, useCallback, useState } from "react";
 
-import { BrowserSurface } from "@/components/browser/browser-surface";
 import { ChatSurface } from "@/components/chat/chat-surface";
-import { EditorSurface } from "@/components/editor/editor-surface";
-import { EmailSurface } from "@/components/email/email-surface";
 import { AppShell } from "@/components/shell/app-shell";
-import { SubAgentDetail } from "@/components/subagent/subagent-detail";
-import { TerminalSurface } from "@/components/terminal/terminal-surface";
+
+// Heavy surfaces are split out of the initial chat bundle so the
+// cold-start path stays inside the NFR1 budget. Each lazy import
+// becomes its own chunk; the Suspense fallback covers the brief
+// load while the chunk hydrates.
+const EditorSurface = lazy(() =>
+  import("@/components/editor/editor-surface").then((m) => ({
+    default: m.EditorSurface,
+  })),
+);
+const TerminalSurface = lazy(() =>
+  import("@/components/terminal/terminal-surface").then((m) => ({
+    default: m.TerminalSurface,
+  })),
+);
+const BrowserSurface = lazy(() =>
+  import("@/components/browser/browser-surface").then((m) => ({
+    default: m.BrowserSurface,
+  })),
+);
+const EmailSurface = lazy(() =>
+  import("@/components/email/email-surface").then((m) => ({
+    default: m.EmailSurface,
+  })),
+);
+const SubAgentDetail = lazy(() =>
+  import("@/components/subagent/subagent-detail").then((m) => ({
+    default: m.SubAgentDetail,
+  })),
+);
+
+function SurfaceFallback({ label }: { label: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex h-full items-center justify-center text-sm text-muted-foreground"
+    >
+      Loading {label}…
+    </div>
+  );
+}
 
 function App() {
   const [openSubAgentRunId, setOpenSubAgentRunId] = useState<string | null>(null);
@@ -33,24 +70,42 @@ function App() {
       main={({ openSettings, activeRail }) => {
         if (openSubAgentRunId) {
           return (
-            <SubAgentDetail
-              runId={openSubAgentRunId}
-              onClose={handleCloseSubAgent}
-              onTakeOver={handleTakeOver}
-            />
+            <Suspense fallback={<SurfaceFallback label="sub-agent" />}>
+              <SubAgentDetail
+                runId={openSubAgentRunId}
+                onClose={handleCloseSubAgent}
+                onTakeOver={handleTakeOver}
+              />
+            </Suspense>
           );
         }
         if (activeRail === "editor") {
-          return <EditorSurface />;
+          return (
+            <Suspense fallback={<SurfaceFallback label="editor" />}>
+              <EditorSurface />
+            </Suspense>
+          );
         }
         if (activeRail === "terminal") {
-          return <TerminalSurface />;
+          return (
+            <Suspense fallback={<SurfaceFallback label="terminal" />}>
+              <TerminalSurface />
+            </Suspense>
+          );
         }
         if (activeRail === "browser") {
-          return <BrowserSurface />;
+          return (
+            <Suspense fallback={<SurfaceFallback label="browser" />}>
+              <BrowserSurface />
+            </Suspense>
+          );
         }
         if (activeRail === "email") {
-          return <EmailSurface />;
+          return (
+            <Suspense fallback={<SurfaceFallback label="email" />}>
+              <EmailSurface />
+            </Suspense>
+          );
         }
         return (
           <ChatSurface

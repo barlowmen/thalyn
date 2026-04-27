@@ -57,6 +57,18 @@ coordinated-disclosure flow.
 - No telemetry leaves the machine by default. Optional crash
   reporting is supported via a user-supplied Sentry DSN; if unset,
   nothing is sent.
+- **Connectors and email** add new attack surface that the user opts
+  into explicitly:
+  - MCP connectors run as subprocesses or HTTP clients the user
+    installs. The first-party catalog lists the upstream vendor and
+    homepage; community connectors install only when the user
+    pastes a descriptor. Per-connector tool grants gate every tool
+    invocation — sensitive tools default to revoked.
+  - Email accounts use OAuth refresh tokens minted from the user's
+    own Google Cloud / Microsoft Entra app. Tokens stay in the OS
+    keychain and are forwarded inline to the brain only at the
+    moment they're needed. Send is double-gated (renderer modal +
+    brain refusal) so unattended schedules cannot deliver mail.
 
 If you find a behaviour that contradicts any of the above, please
 report it.

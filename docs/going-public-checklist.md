@@ -18,8 +18,9 @@ Each item links to the requirement / ADR it overrides or extends.
 
 ### Threat model
 - [ ] **Re-confirm threat model.** Run a STRIDE pass with the broader audience in mind. Update `01-requirements.md` §10.1 OQ-2 and ADR-0011 (sandbox tiers) accordingly.
-- [ ] **Audit network egress defaults** for connectors and MCP servers — anything overly permissive must be tightened.
+- [ ] **Audit network egress defaults** for connectors and MCP servers — anything overly permissive must be tightened. (MCP connectors today inherit the user's network; the marketplace surfaces vendor + homepage so the user can audit before installing, but there is no per-connector egress allowlist yet.)
 - [ ] **Prompt-injection sanitizer review.** v1 ships a light defense (F7.5); a targeted-attacker model warrants a heavier review.
+- [ ] **Email send-gate audit.** The double-gate (renderer modal + brain refusal) covers honest mistakes and unattended schedules; before going public, audit that no other code path can issue `email.approve_draft` without a user click.
 
 ### Distribution & signing
 - [ ] **Apple Developer Program enrollment** ($99/yr) for Developer ID + notarization on macOS.
@@ -31,7 +32,7 @@ Each item links to the requirement / ADR it overrides or extends.
 ### Supply chain
 - [ ] **Dependency pinning by hash** in `Cargo.lock`, `pnpm-lock.yaml`, and the Python sidecar's lockfile (already in v0.x).
 - [ ] **Dependency-update policy** (Renovate / Dependabot config), with a human-review gate before merge.
-- [ ] **Vendored MCP servers** — first-party connectors are vendored or version-pinned by hash; community connectors are gated behind explicit user installation.
+- [ ] **Vendored MCP servers** — first-party connectors are vendored or version-pinned by hash; community connectors are gated behind explicit user installation. (Today the first-party Slack / Office / Calendar descriptors point at `npx @modelcontextprotocol/server-*` invocations; vendoring or hash-pinning those packages is still pending.)
 
 ### Disclosure & community
 - [ ] **`SECURITY.md`** — coordinated-disclosure policy, private contact channel, 90-day public-disclosure default.

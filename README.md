@@ -9,10 +9,15 @@ goal: editor, terminal, browser, email, productivity connectors, and the
 agent control plane in one self-contained desktop app, with sandboxing
 and drift monitoring that make unattended runs defensible.
 
-> **Status:** pre-alpha. The repository currently builds the walking
-> skeleton — a Tauri shell, a React renderer, and a Python sidecar that
-> answers JSON-RPC `ping`. The agent surfaces and provider abstraction
-> come online over the next iterations.
+> **Status:** pre-alpha, single-developer scope. The desktop app
+> builds and runs end-to-end on macOS today: chat with Claude (or a
+> local model via Ollama) flows through a LangGraph orchestrator with
+> plan approval, drift monitoring, and sub-agents; an embedded Monaco
+> editor, an xterm.js terminal, a sidecar Chromium for browser-use,
+> a connector marketplace for MCP servers, and an inbox surface for
+> Gmail / Microsoft Graph all sit beside the chat. The `docs/going-public-checklist.md`
+> enumerates what still has to land before this is safe to install for
+> anyone other than its developer.
 
 ## What this is, in one paragraph
 
