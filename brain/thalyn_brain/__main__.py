@@ -6,6 +6,8 @@ import asyncio
 import sys
 
 from thalyn_brain.approval_rpc import register_approval_methods
+from thalyn_brain.browser import BrowserManager
+from thalyn_brain.browser_rpc import register_browser_methods
 from thalyn_brain.chat import register_chat_methods
 from thalyn_brain.inline_rpc import register_inline_methods
 from thalyn_brain.lsp import LspManager
@@ -40,6 +42,7 @@ def main() -> int:
     memory_store = MemoryStore(data_dir=data_dir)
     lsp_manager = LspManager()
     terminal_observer = TerminalObserver()
+    browser_manager = BrowserManager()
     runner = Runner(registry, runs_store=runs_store, data_dir=data_dir)
     register_chat_methods(dispatcher, registry, runner=runner)
     register_approval_methods(dispatcher, runner)
@@ -50,6 +53,7 @@ def main() -> int:
     register_lsp_methods(dispatcher, lsp_manager)
     register_inline_methods(dispatcher, registry)
     register_terminal_methods(dispatcher, terminal_observer)
+    register_browser_methods(dispatcher, browser_manager)
 
     async def dispatch_schedule(schedule: Schedule) -> str | None:
         """Fire one schedule into the runner.
