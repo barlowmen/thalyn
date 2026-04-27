@@ -1,3 +1,4 @@
+import { ObservabilitySection } from "@/components/settings/observability-section";
 import { ProviderSection } from "@/components/settings/provider-section";
 import {
   Dialog,
@@ -19,13 +20,15 @@ export function SettingsDialog({
         <header className="space-y-1">
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            API keys, providers, and the like. v0.3 ships a single
-            section; more panels arrive as the surfaces come online.
+            Providers, API keys, and the user-controlled telemetry
+            destinations. Anything the brain ever sends out the
+            network leaves through one of these settings.
           </DialogDescription>
         </header>
 
-        <div className="mt-2 max-h-[60vh] overflow-y-auto pr-1">
+        <div className="mt-2 max-h-[60vh] space-y-6 overflow-y-auto pr-1">
           <ProviderSection />
+          <ObservabilitySection />
         </div>
       </DialogContent>
     </Dialog>
