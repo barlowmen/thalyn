@@ -70,30 +70,74 @@ untouched.
 The repo *must* be a git repo for Tier 1 to start. Non-git
 workspaces fall through to Tier 0.
 
-## Tier 2 — microVM (opt-in, deferred)
+## Tier 2 — microVM (opt-in)
 
 Reserved for tasks that execute generated code, run untrusted
 dependencies, or that the user has explicitly tagged higher-risk.
-Implementation per ADR-0011:
+Two backends share one trait:
 
-- **Linux:** Firecracker.
-- **macOS:** Apple Containerization (generally available since
-  macOS Tahoe, September 2025); Lima as a transitional bridge for
-  older macOS releases or environments where the Apple framework
-  isn't a fit.
-- **Windows:** TBD — no v1 commitment.
+- **Linux: Firecracker.** Started via the `firecracker` CLI; workspace
+  is mounted via virtio-fs; networking uses a tap device with the same
+  default-deny posture as Tier 1.
+- **macOS: Lima.** Bridge until macOS 26 Tahoe ships Apple
+  Containerization (per ADR-0011). Started via `limactl`; workspace
+  is mounted via reverse-sshfs.
+- **Windows:** no v1 commitment.
 
-Scheduled to land in **phase v0.15**. Today, requesting Tier 2
-returns a clear "not implemented" error from the Rust core's
-sandbox manager.
+The trait surface, detection, and per-backend error mapping all
+ship in v0.15. The actual VM image lifecycle (kernel + rootfs
+provisioning, virtio-fs share, tap-device networking) is the
+v0.15.x follow-up — there's no clean user-facing image-management
+story to commit to in v0.15 that doesn't lock in long-term
+decisions about where images live, which kernels we ship, and how
+the user provisions a fresh sandbox.
 
-## Tier 3 — cloud sandbox (opt-in, deferred)
+Until image management lands, **`Tier2Sandbox::start` surfaces a
+typed `ImageProvisioningPending` error**. The escalation policy
+treats this as fall-back-to-Tier-1 with a warning, so a request
+for Tier 2 isolation never silently runs without isolation: the
+agent stays in Tier 1 (still confined; still default-deny network)
+and the action log carries the `Requested tier_2 but it is not
+available on this host; falling back to tier_1` warning.
+
+## Tier 3 — cloud sandbox (opt-in)
 
 Off-laptop execution via E2B or Daytona for compute-heavy or
 GPU-bound work. Opt-in with the user's own API key — Thalyn never
 proxies through a Thalyn-operated server.
 
-Scheduled to land in **phase v0.15** alongside Tier 2.
+The user pastes their key in Settings → Observability (the panel is
+named for the cluster of opt-in cloud features rather than the
+strict telemetry meaning); the Rust core forwards it to the brain
+via env var. Detection reads `THALYN_E2B_API_KEY` /
+`THALYN_DAYTONA_API_KEY` at runtime, with E2B taking precedence
+when both are set.
+
+The HTTP integration to either provider is the v0.15.x follow-up;
+the trait shape, detection, and escalation fall-back are stable
+today.
+
+## Escalation policy
+
+The planner annotates each plan node with an optional
+`sandbox_tier` hint. The brain's escalation module
+(`thalyn_brain.orchestration.escalation`) resolves the *effective*
+tier through three lenses:
+
+1. **Auto-escalation.** A plan node whose description or rationale
+   contains one of the high-risk hints — "execute generated code,"
+   "untrusted dependencies," "install from URL," etc. — gets bumped
+   to Tier 2 even if the planner asked for Tier 1.
+2. **User override.** A persisted setting can set a floor ("at
+   least Tier 1"), a ceiling ("never Tier 3"), or an absolute
+   override. Applied after auto-escalation so the human always wins.
+3. **Availability fallback.** If the resolved tier isn't installed
+   (no Firecracker, no API key, image provisioning still pending),
+   the policy falls **down** to the strongest available tier at or
+   below the request, with a warning that surfaces in the action
+   log. We never silently *strengthen* isolation past the user's
+   request — stronger isolation can break tools the agent expected
+   to have.
 
 ## Selection guidance
 
@@ -103,12 +147,14 @@ Scheduled to land in **phase v0.15** alongside Tier 2.
 | "Edit a file in the repo" | Tier 1 (default) |
 | "Run the test suite" | Tier 1 |
 | "Browse the web for context" | Tier 1 + egress allowlist |
-| "Execute model-generated code" | Tier 2 (when available) |
-| "Train a model" | Tier 3 (when available) |
+| "Execute model-generated code" | Tier 2 (auto-escalated; falls back to Tier 1 with a warning until image management lands) |
+| "Run a long benchmark" | Tier 3 (with API key) |
+| "Train a model" | Tier 3 (with API key) |
 
-The user can override the planner's tier per task or per project.
-The override surface is part of the v0.x.y settings UX work that
-follows once Tier 2/3 land.
+The user can override the planner's tier per task or per project
+via `EscalationInput.user_override` / `user_floor` / `user_ceiling`.
+The settings-panel surface for these knobs is the v0.x.y work that
+rides into the next polish phase.
 
 ## Restricted shell
 
