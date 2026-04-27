@@ -129,6 +129,7 @@ tmp/
 .claude/settings.local.json
 .claude/agents/
 .claude/.local/
+.claude/scheduled_tasks.lock
 
 # Thalyn runtime data (created at runtime; never committed)
 runs/

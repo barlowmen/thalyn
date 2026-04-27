@@ -156,7 +156,7 @@ export function AppShell({
           <SidebarPanel />
         </ResizablePanel>
 
-        <ResizableSeparator />
+        <ResizableSeparator withHandle aria-label="Resize sidebar" />
 
         <ResizablePanel
           id="main"
@@ -174,7 +174,7 @@ export function AppShell({
           </section>
         </ResizablePanel>
 
-        <ResizableSeparator />
+        <ResizableSeparator withHandle aria-label="Resize inspector" />
 
         <ResizablePanel
           id="inspector"
