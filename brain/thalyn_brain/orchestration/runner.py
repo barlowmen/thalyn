@@ -31,6 +31,7 @@ from thalyn_brain.orchestration.storage import open_run_checkpointer
 from thalyn_brain.orchestration.subagent import SubAgentSpawner
 from thalyn_brain.provider import ProviderRegistry
 from thalyn_brain.runs import RunHeader, RunsStore, RunUpdate
+from thalyn_brain.tracing import THALYN_RUN_STATUS, run_span
 
 RUN_APPROVAL_REQUIRED = "run.approval_required"
 DEFAULT_DEPTH_CAP = 2
@@ -188,105 +189,115 @@ class Runner:
         provider = self._registry.get(provider_id)
 
         run_id = run_id or _new_run_id()
-        started_at = int(time.time() * 1000)
-        title = _title_from(prompt)
-        budget_wire = budget.to_wire() if budget is not None else None
-        consumed = BudgetConsumption(started_at_ms=started_at)
-
-        audit = self._audit_for(run_id)
-        notify = wrap_notifier(notify, audit)
-
-        await notify(
-            RUN_STATUS,
-            {
-                "runId": run_id,
-                "status": RunStatus.PENDING.value,
-                "parentRunId": parent_run_id,
-            },
-        )
-
-        if self._runs_store is not None:
-            await self._runs_store.insert(
-                RunHeader(
-                    run_id=run_id,
-                    project_id=None,
-                    parent_run_id=parent_run_id,
-                    status=RunStatus.PLANNING.value,
-                    title=title,
-                    provider_id=provider_id,
-                    started_at_ms=started_at,
-                    completed_at_ms=None,
-                    drift_score=0.0,
-                    final_response="",
-                    budget=budget_wire,
-                    budget_consumed=consumed.to_wire(),
-                )
-            )
-
-        spawner = self._spawner_for(
-            session_id=session_id,
-            provider_id=provider_id,
-            parent_notify=notify,
-        )
-
-        async with self._checkpointer_context(run_id) as checkpointer:
-            graph = build_graph(
-                provider,
-                notify,
-                checkpointer=checkpointer,
-                spawn_subagent=spawner,
-            )
-
-            initial: GraphState = {
-                "run_id": run_id,
-                "session_id": session_id,
-                "provider_id": provider_id,
-                "parent_run_id": parent_run_id,
-                "depth": depth,
-                "user_message": prompt,
-                "plan": None,
-                "action_log": [],
-                "status": RunStatus.PENDING.value,
-                "final_response": "",
-                "error": None,
-                "subagent_results": [],
-                "budget": budget_wire,
-                "budget_consumed": consumed.to_wire(),
-                "critic_thresholds_hit": [],
-                "drift_score": 0.0,
-                "system_prompt": system_prompt,
-            }
-            config = {"configurable": {"thread_id": run_id}}
-
-            final_state = await graph.ainvoke(initial, config=config)
-
-            # If a node halted on a budget gate the state is already
-            # terminal — fall through to finalisation rather than
-            # surfacing the plan-approval interrupt that would
-            # otherwise have fired next.
-            if final_state.get("status") not in {
-                RunStatus.KILLED.value,
-                RunStatus.ERRORED.value,
-            }:
-                # If the graph paused at the plan-approval interrupt, surface
-                # that status to the caller and notify the renderer so the
-                # approval modal can open. The run continues async via a
-                # subsequent approve_plan call.
-                if checkpointer is not None and await _paused_at_interrupt(graph, config):
-                    return await self._handle_interrupt(
-                        run_id=run_id,
-                        session_id=session_id,
-                        provider_id=provider_id,
-                        final_state=final_state,
-                        notify=notify,
-                    )
-
-        return await self._finalize(
+        with run_span(
             run_id=run_id,
+            parent_run_id=parent_run_id,
             provider_id=provider_id,
             session_id=session_id,
-            final_state=final_state,
-        )
+        ) as span:
+            started_at = int(time.time() * 1000)
+            title = _title_from(prompt)
+            budget_wire = budget.to_wire() if budget is not None else None
+            consumed = BudgetConsumption(started_at_ms=started_at)
+
+            audit = self._audit_for(run_id)
+            notify = wrap_notifier(notify, audit)
+
+            await notify(
+                RUN_STATUS,
+                {
+                    "runId": run_id,
+                    "status": RunStatus.PENDING.value,
+                    "parentRunId": parent_run_id,
+                },
+            )
+
+            if self._runs_store is not None:
+                await self._runs_store.insert(
+                    RunHeader(
+                        run_id=run_id,
+                        project_id=None,
+                        parent_run_id=parent_run_id,
+                        status=RunStatus.PLANNING.value,
+                        title=title,
+                        provider_id=provider_id,
+                        started_at_ms=started_at,
+                        completed_at_ms=None,
+                        drift_score=0.0,
+                        final_response="",
+                        budget=budget_wire,
+                        budget_consumed=consumed.to_wire(),
+                    )
+                )
+
+            spawner = self._spawner_for(
+                session_id=session_id,
+                provider_id=provider_id,
+                parent_notify=notify,
+            )
+
+            async with self._checkpointer_context(run_id) as checkpointer:
+                graph = build_graph(
+                    provider,
+                    notify,
+                    checkpointer=checkpointer,
+                    spawn_subagent=spawner,
+                )
+
+                initial: GraphState = {
+                    "run_id": run_id,
+                    "session_id": session_id,
+                    "provider_id": provider_id,
+                    "parent_run_id": parent_run_id,
+                    "depth": depth,
+                    "user_message": prompt,
+                    "plan": None,
+                    "action_log": [],
+                    "status": RunStatus.PENDING.value,
+                    "final_response": "",
+                    "error": None,
+                    "subagent_results": [],
+                    "budget": budget_wire,
+                    "budget_consumed": consumed.to_wire(),
+                    "critic_thresholds_hit": [],
+                    "drift_score": 0.0,
+                    "system_prompt": system_prompt,
+                }
+                config = {"configurable": {"thread_id": run_id}}
+
+                final_state = await graph.ainvoke(initial, config=config)
+
+                # If a node halted on a budget gate the state is already
+                # terminal — fall through to finalisation rather than
+                # surfacing the plan-approval interrupt that would
+                # otherwise have fired next.
+                if final_state.get("status") not in {
+                    RunStatus.KILLED.value,
+                    RunStatus.ERRORED.value,
+                }:
+                    # If the graph paused at the plan-approval interrupt, surface
+                    # that status to the caller and notify the renderer so the
+                    # approval modal can open. The run continues async via a
+                    # subsequent approve_plan call.
+                    if checkpointer is not None and await _paused_at_interrupt(graph, config):
+                        result = await self._handle_interrupt(
+                            run_id=run_id,
+                            session_id=session_id,
+                            provider_id=provider_id,
+                            final_state=final_state,
+                            notify=notify,
+                        )
+                        span.set_attribute(THALYN_RUN_STATUS, result.status)
+                        return result
+
+            result = await self._finalize(
+                run_id=run_id,
+                provider_id=provider_id,
+                session_id=session_id,
+                final_state=final_state,
+            )
+            span.set_attribute(THALYN_RUN_STATUS, result.status)
+            return result
 
     async def approve_plan(
         self,

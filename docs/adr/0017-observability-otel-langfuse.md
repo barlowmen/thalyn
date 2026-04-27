@@ -29,3 +29,13 @@ Long-running agent runs need observability — token spend, tool-call sequences,
 ## Notes
 
 A v0.12 (observability) phase task is to validate the user-facing onboarding: how do we make starting Langfuse a one-click affair from the settings panel?
+
+### Refinement at v0.14 implementation — instrumentation surface
+
+The first observability commit ships the SDK init plus the high-value spans. Three details worth pinning:
+
+- **Default exporter is no-op, not OTLP.** Spans are recorded inside the SDK so the orchestration code path never branches on "is observability on" — but with no `THALYN_OTEL_OTLP_ENDPOINT` set, no exporter is attached, and nothing leaves the machine. Setting the env var to a Langfuse OTLP endpoint flips the OTLP/HTTP exporter on.
+- **Three span shapes, not one per concern.** `agent.run` (run-level), `<provider>.<operation>` (LLM call, e.g. `anthropic.chat`), `tool.<name>` (agent tool call), and `node.<name>` (orchestration node) are the four contexts. Sub-agent spawns nest naturally because each spawned LangGraph run gets its own `agent.run` span as a child of the parent's.
+- **`set_tracer_provider` is once-only.** OTel's runtime only respects the first call. Tests attach an in-memory exporter via `add_span_processor` on the live provider rather than rebuilding it; the helper is shipped publicly so future test files can do the same.
+
+Sub-agent run-id propagation through to OTel context happens automatically — the parent's `agent.run` span is current when `Runner.run` opens the child's, so the child's span inherits the trace id without any extra wiring.

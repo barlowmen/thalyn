@@ -30,10 +30,15 @@ from thalyn_brain.schedules import (
 from thalyn_brain.schedules_rpc import register_schedule_methods
 from thalyn_brain.terminal_observer import TerminalObserver
 from thalyn_brain.terminal_rpc import register_terminal_methods
+from thalyn_brain.tracing import init_tracer
 from thalyn_brain.transport import serve_stdio
 
 
 def main() -> int:
+    # Init tracing as early as possible so the SDK is ready before
+    # the first run can fire. The default exporter is no-op (no
+    # network) — set THALYN_OTEL_OTLP_ENDPOINT to ship traces.
+    init_tracer()
     data_dir = default_data_dir()
     dispatcher = build_default_dispatcher()
     registry = build_registry()

@@ -114,27 +114,37 @@ async def _stream(
     model: str,
 ) -> AsyncIterator[ChatChunk]:
     """Drive the SDK and yield normalized chunks."""
+    from thalyn_brain.tracing import annotate_llm_response, llm_call_span
+
     yield ChatStartChunk(model=model)
-    try:
-        async with cast(Any, factory(options)) as client:
-            await client.query(prompt)
-            async for message in client.receive_response():
-                for chunk in _normalize_message(message):
-                    yield chunk
-                if isinstance(message, ResultMessage):
-                    yield ChatStopChunk(
-                        reason="end_turn",
-                        total_cost_usd=getattr(message, "total_cost_usd", None),
-                    )
-                    return
-    except ProviderError as exc:
-        yield ChatErrorChunk(message=str(exc))
-    except Exception as exc:
-        # SDK failures arrive as a wide variety of shapes; we route the
-        # message and class name to the renderer so the user sees
-        # something actionable rather than letting the error escape the
-        # async generator.
-        yield ChatErrorChunk(message=str(exc), code=type(exc).__name__)
+    with llm_call_span(provider_id="anthropic", model=model) as span:
+        try:
+            async with cast(Any, factory(options)) as client:
+                await client.query(prompt)
+                async for message in client.receive_response():
+                    for chunk in _normalize_message(message):
+                        yield chunk
+                    if isinstance(message, ResultMessage):
+                        annotate_llm_response(
+                            span,
+                            finish_reason="end_turn",
+                            response_model=model,
+                        )
+                        yield ChatStopChunk(
+                            reason="end_turn",
+                            total_cost_usd=getattr(message, "total_cost_usd", None),
+                        )
+                        return
+        except ProviderError as exc:
+            annotate_llm_response(span, finish_reason="error")
+            yield ChatErrorChunk(message=str(exc))
+        except Exception as exc:
+            # SDK failures arrive as a wide variety of shapes; we route the
+            # message and class name to the renderer so the user sees
+            # something actionable rather than letting the error escape the
+            # async generator.
+            annotate_llm_response(span, finish_reason="error")
+            yield ChatErrorChunk(message=str(exc), code=type(exc).__name__)
 
 
 def _normalize_message(message: object) -> list[ChatChunk]:
