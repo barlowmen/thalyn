@@ -46,6 +46,27 @@ const DEFAULT_LAYOUT: Layout = {
   inspector: 25,
 };
 
+// Sanity bounds so a stuck-tiny layout from a prior buggy build
+// can't trap the user at sub-min sizes after upgrade.
+const SIDEBAR_BOUNDS = { min: 14, max: 30 } as const;
+const INSPECTOR_BOUNDS = { min: 18, max: 36 } as const;
+
+function clampLayout(layout: Layout): Layout {
+  const sidebar = Math.min(
+    SIDEBAR_BOUNDS.max,
+    Math.max(SIDEBAR_BOUNDS.min, Number(layout.sidebar) || DEFAULT_LAYOUT.sidebar),
+  );
+  const inspector = Math.min(
+    INSPECTOR_BOUNDS.max,
+    Math.max(
+      INSPECTOR_BOUNDS.min,
+      Number(layout.inspector) || DEFAULT_LAYOUT.inspector,
+    ),
+  );
+  const main = Math.max(30, 100 - sidebar - inspector);
+  return { sidebar, main, inspector };
+}
+
 function loadLayout(): Layout {
   if (typeof window === "undefined") return DEFAULT_LAYOUT;
   const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -59,7 +80,7 @@ function loadLayout(): Layout {
       "main" in parsed &&
       "inspector" in parsed
     ) {
-      return parsed as Layout;
+      return clampLayout(parsed as Layout);
     }
   } catch {
     // fall through to default
@@ -142,7 +163,11 @@ export function AppShell({
         orientation="horizontal"
         defaultLayout={defaultLayout}
         onLayoutChange={onLayoutChange}
-        className="flex-1"
+        // min-w-0 lets the group shrink below its content's intrinsic
+        // width inside the AppShell flex parent. Without this, the
+        // panels' contents lock the group at content-size and resize
+        // works in one direction only.
+        className="min-w-0 flex-1"
       >
         <ResizablePanel
           id="sidebar"
@@ -152,6 +177,12 @@ export function AppShell({
           maxSize={30}
           collapsible
           collapsedSize={0}
+          // min-w-0 + overflow-hidden on the Panel's content wrapper
+          // prevents the panel's children from pushing it wider than
+          // its flex allocation. Without this, drag-to-grow can't
+          // shrink the opposing panel below its content's intrinsic
+          // width and so feels one-directional.
+          className="min-w-0 overflow-hidden"
         >
           <SidebarPanel />
         </ResizablePanel>
@@ -162,6 +193,7 @@ export function AppShell({
           id="main"
           defaultSize={defaultLayout.main}
           minSize={30}
+          className="min-w-0 overflow-hidden"
         >
           <section
             aria-label="Main"
@@ -184,6 +216,7 @@ export function AppShell({
           maxSize={36}
           collapsible
           collapsedSize={0}
+          className="min-w-0 overflow-hidden"
         >
           <InspectorPanel
             onOpenSubAgent={onOpenSubAgent}
