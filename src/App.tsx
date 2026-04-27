@@ -27,6 +27,16 @@ const EmailSurface = lazy(() =>
     default: m.EmailSurface,
   })),
 );
+const AgentsSurface = lazy(() =>
+  import("@/components/agents/agents-surface").then((m) => ({
+    default: m.AgentsSurface,
+  })),
+);
+const LogsSurface = lazy(() =>
+  import("@/components/logs/logs-surface").then((m) => ({
+    default: m.LogsSurface,
+  })),
+);
 const SubAgentDetail = lazy(() =>
   import("@/components/subagent/subagent-detail").then((m) => ({
     default: m.SubAgentDetail,
@@ -104,6 +114,20 @@ function App() {
           return (
             <Suspense fallback={<SurfaceFallback label="email" />}>
               <EmailSurface />
+            </Suspense>
+          );
+        }
+        if (activeRail === "agents") {
+          return (
+            <Suspense fallback={<SurfaceFallback label="agents" />}>
+              <AgentsSurface onOpen={handleOpenSubAgent} />
+            </Suspense>
+          );
+        }
+        if (activeRail === "logs") {
+          return (
+            <Suspense fallback={<SurfaceFallback label="logs" />}>
+              <LogsSurface onOpen={handleOpenSubAgent} />
             </Suspense>
           );
         }

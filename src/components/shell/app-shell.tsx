@@ -149,6 +149,13 @@ export function AppShell({
         openMemory();
         return;
       }
+      // Connectors live inside the settings dialog (the marketplace +
+      // grants UI). The rail icon is a shortcut into that section
+      // rather than its own surface.
+      if (id === "connectors") {
+        openSettings();
+        return;
+      }
       setActiveRail(id);
     },
     [openSettings, openSchedules, openMemory],
