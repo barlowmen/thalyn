@@ -69,3 +69,13 @@ The browser panel ships as the fourth main-panel surface (after chat, editor, te
 - **Polling for state today; broadcast tomorrow.** The renderer polls `browser_status` every 2 s. A push-based watch over the Rust manager's `tokio::sync::watch::Receiver` is the natural next step (lands with the per-step capture commit so the screencast frame stream and state stream share a single notification surface).
 
 The take-over button (raise the real Chromium window) is **not** in this commit. The window-raise needs OS-specific code (`NSWindow.makeKeyAndOrderFront` / `SetForegroundWindow` / wlr-foreign-toplevel) and rides with the per-step capture commit so the take-over UX and the screencast preview stay in lockstep.
+
+### Refinement at v0.13 implementation — per-step capture
+
+Action-log replay needs the rendered HTML and a screenshot frozen at the moment each agent tool ran. Three implementation choices worth pinning down:
+
+- **Auto-capture, not request-driven.** The runner calls `browser.set_capture_dir({runId, baseDir})` once, and every subsequent navigate / click / type / get_text writes a DOM dump and PNG to `<baseDir>/<seq>.{html,png}`. Manually calling `browser.capture` after every tool would couple the capture concern to every tool callsite; better for the manager to own it.
+- **Best-effort, never user-blocking.** A capture failure (disk full, page in a weird state mid-navigation, target detached) is swallowed — the tool call result still flows back to the agent. The action log notes the gap when the file isn't there.
+- **Per-run subdirectory.** Captures live under `runs/{run_id}/browser/<seq>.{html,png}`; the runner picks the path and the manager doesn't need to know the run's storage layout. `set_capture_dir` resets the step counter when the `run_id` changes, so successive runs reusing the same attached Chromium don't collide.
+
+The take-over button is still not in this commit — building it cleanly needs a small Rust window-raise helper per OS (cocoa NSRunningApplication on macOS, FindWindow + SetForegroundWindow on Windows, `xdotool windowactivate` / `wmctrl -a` as a fallback on Linux). It rides into the integration-smoke commit alongside the brain↔core run-id wiring.

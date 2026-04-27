@@ -99,6 +99,32 @@ def register_browser_methods(dispatcher: Dispatcher, manager: BrowserManager) ->
             raise RpcError(code=INTERNAL_ERROR, message=str(exc)) from exc
         return result.to_wire()
 
+    async def browser_set_capture_dir(params: RpcParams) -> JsonValue:
+        run_id = _require_str(params, "runId")
+        base_dir = _require_str(params, "baseDir")
+        manager.set_capture_dir(run_id, base_dir)
+        run, path, seq = manager.capture_state()
+        return {
+            "runId": run,
+            "baseDir": str(path) if path else None,
+            "stepSeq": seq,
+        }
+
+    async def browser_clear_capture_dir(_: RpcParams) -> JsonValue:
+        manager.clear_capture_dir()
+        return {"cleared": True}
+
+    async def browser_capture(_: RpcParams) -> JsonValue:
+        try:
+            result = await manager.capture()
+        except BrowserNotAttachedError as exc:
+            raise RpcError(code=INVALID_PARAMS, message=str(exc)) from exc
+        except BrowserError as exc:
+            raise RpcError(code=INTERNAL_ERROR, message=str(exc)) from exc
+        if result is None:
+            return {"captured": False}
+        return {"captured": True, **result.to_wire()}
+
     dispatcher.register("browser.attach", browser_attach)
     dispatcher.register("browser.detach", browser_detach)
     dispatcher.register("browser.status", browser_status)
@@ -107,6 +133,9 @@ def register_browser_methods(dispatcher: Dispatcher, manager: BrowserManager) ->
     dispatcher.register("browser.click", browser_click)
     dispatcher.register("browser.type", browser_type)
     dispatcher.register("browser.screenshot", browser_screenshot)
+    dispatcher.register("browser.set_capture_dir", browser_set_capture_dir)
+    dispatcher.register("browser.clear_capture_dir", browser_clear_capture_dir)
+    dispatcher.register("browser.capture", browser_capture)
 
 
 def _require_str(params: RpcParams, key: str, *, allow_empty: bool = False) -> str:

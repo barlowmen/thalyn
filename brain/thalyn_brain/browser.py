@@ -16,9 +16,11 @@ session. v0.13 ships single-page semantics; multi-target navigation
 from __future__ import annotations
 
 import asyncio
+import base64
 import time
 from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from thalyn_brain.browser_cdp import (
@@ -111,6 +113,26 @@ class ScreenshotResult:
 
     def to_wire(self) -> dict[str, JsonValue]:
         return {"targetId": self.target_id, "pngBase64": self.png_base64}
+
+
+@dataclass(frozen=True)
+class CaptureResult:
+    """A point-in-time DOM + screenshot saved to disk for action-log replay."""
+
+    target_id: str
+    step_seq: int
+    dom_path: str
+    screenshot_path: str
+    captured_at_ms: int
+
+    def to_wire(self) -> dict[str, JsonValue]:
+        return {
+            "targetId": self.target_id,
+            "stepSeq": self.step_seq,
+            "domPath": self.dom_path,
+            "screenshotPath": self.screenshot_path,
+            "capturedAtMs": self.captured_at_ms,
+        }
 
 
 class _Session:
@@ -206,6 +228,20 @@ class _Session:
             raise BrowserError("captureScreenshot returned no data")
         return ScreenshotResult(target_id=self.target_id, png_base64=data)
 
+    async def dom_html(self) -> str:
+        """Return the rendered HTML of the active page."""
+        result = await self.connection.send(
+            "Runtime.evaluate",
+            {
+                "expression": "document.documentElement.outerHTML",
+                "returnByValue": True,
+                "awaitPromise": False,
+            },
+            session_id=self.session_id,
+        )
+        value = result.get("result", {}).get("value")
+        return value if isinstance(value, str) else ""
+
     async def _element_center(self, selector: str) -> tuple[float, float]:
         import json as _json
 
@@ -275,6 +311,15 @@ class BrowserManager:
        ``sessionId``.
     4. Agent tools read the current session via ``manager.session()``.
     5. Renderer (or core) calls ``manager.detach()`` to close.
+
+    Per-step capture:
+
+    When the runner starts a browser-using agent it calls
+    ``set_capture_dir(run_id, base_dir)``. The manager then snapshots
+    the rendered DOM and a PNG screenshot after every successful
+    navigate / click / type / get_text — written to
+    ``<base_dir>/<step_seq>.{html,png}`` so the action log can
+    replay an agent's browser run after the fact.
     """
 
     def __init__(self) -> None:
@@ -283,6 +328,11 @@ class BrowserManager:
         # Connector is injectable so tests can substitute a fake
         # without touching real websockets.
         self._connector = _default_connector
+        # Per-step capture state — set by the runner via
+        # ``set_capture_dir`` and torn down on detach.
+        self._capture_dir: Path | None = None
+        self._capture_run_id: str | None = None
+        self._step_seq = 0
 
     def set_connector(self, connector: _Connector) -> None:
         """Replace the connection factory; intended for tests."""
@@ -290,6 +340,29 @@ class BrowserManager:
 
     def is_attached(self) -> bool:
         return self._session is not None
+
+    def set_capture_dir(self, run_id: str, base_dir: Path | str) -> None:
+        """Enable per-step capture for the active session.
+
+        Subsequent tool calls will write a DOM dump + PNG screenshot
+        to ``<base_dir>/<seq>.{html,png}``. Calling again with a
+        different ``run_id`` resets the step counter.
+        """
+        path = Path(base_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        if run_id != self._capture_run_id:
+            self._step_seq = 0
+        self._capture_dir = path
+        self._capture_run_id = run_id
+
+    def clear_capture_dir(self) -> None:
+        self._capture_dir = None
+        self._capture_run_id = None
+        self._step_seq = 0
+
+    def capture_state(self) -> tuple[str | None, Path | None, int]:
+        """Snapshot of the capture configuration; for tests + RPC."""
+        return self._capture_run_id, self._capture_dir, self._step_seq
 
     async def attach(self, ws_url: str) -> AttachInfo:
         async with self._lock:
@@ -326,6 +399,7 @@ class BrowserManager:
             if session is None:
                 return False
             self._session = None
+            self.clear_capture_dir()
             with suppress(Exception):
                 await session.connection.close()
             return True
@@ -351,22 +425,66 @@ class BrowserManager:
     # These thin wrappers exist so callers (RPC handlers, tool
     # entries) don't have to navigate through ``session()`` for the
     # common path. They also enforce the "must be attached" precondition
-    # in one place.
+    # in one place. Each successful action triggers a capture if a
+    # capture dir is set, so the action log can reference the on-disk
+    # snapshot without the caller having to manage step counters.
 
     async def navigate(self, url: str) -> NavigateResult:
-        return await self.session().navigate(url)
+        result = await self.session().navigate(url)
+        await self._maybe_capture()
+        return result
 
     async def get_text(self, selector: str | None = None) -> GetTextResult:
-        return await self.session().get_text(selector)
+        result = await self.session().get_text(selector)
+        await self._maybe_capture()
+        return result
 
     async def click(self, selector: str) -> ClickResult:
-        return await self.session().click(selector)
+        result = await self.session().click(selector)
+        await self._maybe_capture()
+        return result
 
     async def type_text(self, selector: str, text: str) -> TypeResult:
-        return await self.session().type_text(selector, text)
+        result = await self.session().type_text(selector, text)
+        await self._maybe_capture()
+        return result
+
+    async def _maybe_capture(self) -> None:
+        if self._capture_dir is None:
+            return
+        try:
+            await self.capture()
+        except Exception:
+            # Capture must never break the agent — best-effort only.
+            return
 
     async def screenshot(self) -> ScreenshotResult:
         return await self.session().screenshot()
+
+    async def capture(self) -> CaptureResult | None:
+        """Capture DOM + PNG to the configured capture dir.
+
+        No-ops with ``None`` if no capture dir has been set — the
+        common path for ad-hoc tool invocations outside a run.
+        """
+        if self._capture_dir is None or self._capture_run_id is None:
+            return None
+        sess = self.session()
+        seq = self._step_seq
+        self._step_seq += 1
+        # Capture in parallel; both are read-only CDP calls.
+        dom_html, shot = await asyncio.gather(sess.dom_html(), sess.screenshot())
+        dom_path = self._capture_dir / f"{seq:04d}.html"
+        png_path = self._capture_dir / f"{seq:04d}.png"
+        dom_path.write_text(dom_html, encoding="utf-8")
+        png_path.write_bytes(base64.b64decode(shot.png_base64))
+        return CaptureResult(
+            target_id=sess.target_id,
+            step_seq=seq,
+            dom_path=str(dom_path),
+            screenshot_path=str(png_path),
+            captured_at_ms=int(time.time() * 1000),
+        )
 
 
 _Connector = Any  # Async callable: (ws_url: str) -> CdpConnection
