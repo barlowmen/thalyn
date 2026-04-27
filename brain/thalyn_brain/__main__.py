@@ -9,6 +9,9 @@ from thalyn_brain.approval_rpc import register_approval_methods
 from thalyn_brain.browser import BrowserManager
 from thalyn_brain.browser_rpc import register_browser_methods
 from thalyn_brain.chat import register_chat_methods
+from thalyn_brain.email import EmailAccountStore, EmailManager
+from thalyn_brain.email.credentials import EmailCredentialsCache
+from thalyn_brain.email_rpc import register_email_methods
 from thalyn_brain.error_reporting import init_sentry
 from thalyn_brain.inline_rpc import register_inline_methods
 from thalyn_brain.lsp import LspManager
@@ -57,6 +60,9 @@ def main() -> int:
     browser_manager = BrowserManager()
     connector_registry = ConnectorRegistry(data_dir=data_dir)
     mcp_manager = McpManager(registry=connector_registry, catalog=builtin_catalog())
+    email_store = EmailAccountStore(data_dir=data_dir)
+    email_credentials = EmailCredentialsCache()
+    email_manager = EmailManager(store=email_store, token_source=email_credentials.token_source)
     runner = Runner(registry, runs_store=runs_store, data_dir=data_dir)
     register_chat_methods(dispatcher, registry, runner=runner)
     register_approval_methods(dispatcher, runner)
@@ -69,6 +75,7 @@ def main() -> int:
     register_terminal_methods(dispatcher, terminal_observer)
     register_browser_methods(dispatcher, browser_manager)
     register_mcp_methods(dispatcher, mcp_manager)
+    register_email_methods(dispatcher, email_manager, credentials=email_credentials)
 
     async def dispatch_schedule(schedule: Schedule) -> str | None:
         """Fire one schedule into the runner.
@@ -112,6 +119,7 @@ def main() -> int:
             await scheduler.stop()
             await lsp_manager.shutdown()
             await mcp_manager.shutdown()
+            await email_manager.shutdown()
 
     try:
         asyncio.run(serve())
