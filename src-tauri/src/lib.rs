@@ -1,4 +1,5 @@
 mod brain;
+mod browser;
 mod power;
 mod provider;
 mod sandbox;
@@ -15,6 +16,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::brain::{BrainSupervisor, SpawnConfig};
+use crate::browser::BrowserManager;
 use crate::power::{AssertionToken, PowerManager};
 use crate::provider::{builtin_providers, ProviderMeta, ProviderRegistry};
 use crate::sandbox::SandboxManager;
@@ -43,6 +45,11 @@ struct AppState {
     /// Consumed by Tauri commands in subsequent commits.
     #[allow(dead_code)]
     sandboxes: Arc<SandboxManager>,
+    /// Headed-Chromium sidecar manager. Plumbed through AppState so
+    /// the renderer command surface and the brain attach flow can
+    /// land on a stable handle in subsequent commits.
+    #[allow(dead_code)]
+    browser: Arc<BrowserManager>,
     power: Arc<PowerManager>,
     /// run id → outstanding power-assertion token. Lets the
     /// notification forwarder release a previously-acquired
@@ -765,11 +772,17 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
     let supervisor = Arc::new(supervisor);
     spawn_global_notification_forwarder(app.clone(), supervisor.clone());
 
+    let profile_root = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir().join("thalyn"));
+
     app.manage(AppState {
         brain: supervisor,
         providers: RwLock::new(registry),
         secrets,
         sandboxes: Arc::new(SandboxManager::new()),
+        browser: Arc::new(BrowserManager::new(profile_root)),
         power: Arc::new(PowerManager::new()),
         assertions: Arc::new(Mutex::new(HashMap::new())),
         terminals: Arc::new(TerminalManager::new()),
