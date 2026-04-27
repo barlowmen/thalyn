@@ -13,8 +13,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use super::{
-    tier0::Tier0Sandbox, tier1::Tier1Sandbox, ExecOutput, Sandbox, SandboxError, SandboxSpec,
-    SandboxTier,
+    tier0::Tier0Sandbox, tier1::Tier1Sandbox, tier2::Tier2Sandbox, ExecOutput, Sandbox,
+    SandboxError, SandboxSpec, SandboxTier,
 };
 
 #[derive(Default)]
@@ -38,7 +38,8 @@ impl SandboxManager {
         let sandbox: Box<dyn Sandbox> = match tier {
             SandboxTier::Tier0 => Box::new(Tier0Sandbox::from_spec(spec)?),
             SandboxTier::Tier1 => Box::new(Tier1Sandbox::start(spec).await?),
-            SandboxTier::Tier2 | SandboxTier::Tier3 => {
+            SandboxTier::Tier2 => Box::new(Tier2Sandbox::start(spec).await?),
+            SandboxTier::Tier3 => {
                 return Err(SandboxError::Start(format!(
                     "{} not implemented",
                     tier.wire_name()
