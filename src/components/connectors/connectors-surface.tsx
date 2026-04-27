@@ -1,6 +1,7 @@
 import { Check, Plug, Power, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,7 +22,6 @@ import {
   stopConnector,
   uninstallConnector,
 } from "@/lib/mcp";
-import { cn } from "@/lib/utils";
 
 type ConnectorsState = {
   catalog: ConnectorDescriptor[];
@@ -38,16 +38,24 @@ const EMPTY: ConnectorsState = {
 };
 
 /**
- * Connector marketplace + per-connector grants. Lists every
- * descriptor from the brain catalog, marks the installed ones, and
- * lets the user paste secrets, grant or revoke individual tools,
- * and start or stop the underlying MCP session.
+ * Connector marketplace + per-connector grants — main-panel surface.
+ * Lists every descriptor from the brain catalog, marks the installed
+ * ones, and lets the user paste secrets, grant or revoke individual
+ * tools, and start or stop the underlying MCP session.
  *
  * Grants gate every tool call before it reaches the wire so a
  * sensitive tool ("post a Slack message") stays revoked until the
  * user explicitly toggles it on.
+ *
+ * The surface is split into a connected wrapper (this) and a
+ * presentational [`ConnectorsView`] so Storybook can render every
+ * outer state — loading, empty catalog, populated, error — without
+ * touching the Tauri invoke surface. The per-card sub-components
+ * (install / configure / grant / start) own their own per-card
+ * state and call Tauri directly; that's fine because each card
+ * scopes its busy/error to itself.
  */
-export function ConnectorsSection() {
+export function ConnectorsSurface() {
   const [state, setState] = useState<ConnectorsState>(EMPTY);
 
   const refresh = useCallback(async () => {
@@ -77,60 +85,108 @@ export function ConnectorsSection() {
     void refresh();
   }, [refresh]);
 
+  return (
+    <ConnectorsView
+      catalog={state.catalog}
+      installed={state.installed}
+      loading={state.loading}
+      error={state.error}
+      onRefresh={() => void refresh()}
+      onChanged={() => void refresh()}
+    />
+  );
+}
+
+export function ConnectorsView({
+  catalog,
+  installed,
+  loading,
+  error,
+  onRefresh,
+  onChanged,
+}: {
+  catalog: ConnectorDescriptor[];
+  installed: InstalledConnector[];
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+  onChanged: () => Promise<void> | void;
+}) {
   const installedById = useMemo(() => {
     const map = new Map<string, InstalledConnector>();
-    for (const item of state.installed) {
+    for (const item of installed) {
       map.set(item.connectorId, item);
     }
     return map;
-  }, [state.installed]);
+  }, [installed]);
 
   return (
-    <section className="space-y-4">
-      <header className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Connectors
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            MCP connectors the brain can call. Sensitive tools stay
-            revoked by default — flip them on when you want the agent
-            to use them.
-          </p>
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="flex items-center justify-between gap-3 border-b border-border bg-surface px-4 py-2">
+        <div className="flex items-center gap-2">
+          <Plug aria-hidden className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium">Connectors</h2>
         </div>
         <Button
           type="button"
           variant="ghost"
           size="icon"
           aria-label="Refresh connectors"
-          onClick={() => void refresh()}
+          onClick={onRefresh}
         >
-          <RefreshCw aria-hidden />
+          <RefreshCw aria-hidden className="size-4" />
         </Button>
       </header>
 
-      {state.error ? (
-        <p className="text-sm text-destructive" role="alert">
-          {state.error}
+      <div className="flex-1 overflow-y-auto px-4 py-4">
+        <p className="mb-4 max-w-2xl text-xs text-muted-foreground">
+          MCP connectors the brain can call. Install one, paste its
+          credentials, and grant individual tools. Sensitive tools
+          (post a message, create an event, send an action) stay
+          revoked by default.
         </p>
-      ) : null}
 
-      {state.loading ? (
-        <p className="text-sm text-muted-foreground">Loading connectors…</p>
-      ) : (
-        <ul className="space-y-3">
-          {state.catalog.map((descriptor) => (
-            <li key={descriptor.connectorId}>
-              <ConnectorCard
-                descriptor={descriptor}
-                installed={installedById.get(descriptor.connectorId) ?? null}
-                onChanged={() => void refresh()}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+        {error ? (
+          <p
+            role="alert"
+            className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-foreground"
+          >
+            {error}
+          </p>
+        ) : null}
+
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading connectors…</p>
+        ) : catalog.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <ul className="space-y-3">
+            {catalog.map((descriptor) => (
+              <li key={descriptor.connectorId}>
+                <ConnectorCard
+                  descriptor={descriptor}
+                  installed={installedById.get(descriptor.connectorId) ?? null}
+                  onChanged={onChanged}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="mx-auto flex max-w-md flex-col items-center gap-3 rounded-md border border-dashed border-border px-6 py-12 text-center">
+      <Plug aria-hidden className="size-8 text-muted-foreground" />
+      <h3 className="text-sm font-medium">No connectors available</h3>
+      <p className="text-xs text-muted-foreground">
+        The brain reported an empty catalog. Confirm the brain sidecar
+        is running, then refresh.
+      </p>
+    </div>
   );
 }
 
@@ -176,7 +232,7 @@ function ConnectorCard({
     <article className="rounded-lg border border-border bg-card p-4 space-y-4">
       <header className="flex items-start justify-between gap-3">
         <div className="space-y-1">
-          <h4 className="flex items-center gap-2 text-sm font-medium">
+          <h3 className="flex items-center gap-2 text-sm font-medium">
             <Plug aria-hidden className="size-4 text-muted-foreground" />
             {descriptor.displayName}
             {descriptor.firstParty ? (
@@ -184,7 +240,7 @@ function ConnectorCard({
                 First-party
               </span>
             ) : null}
-          </h4>
+          </h3>
           <p className="text-sm text-muted-foreground">{descriptor.summary}</p>
           {descriptor.homepage ? (
             <p className="text-xs text-muted-foreground">
@@ -226,11 +282,7 @@ function ConnectorCard({
         </div>
       </header>
 
-      {error ? (
-        <p className="text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      ) : null}
+      {error ? <InlineError message={error} /> : null}
 
       {installed ? (
         <InstalledDetails
@@ -256,7 +308,9 @@ function CatalogPreview({ descriptor }: { descriptor: ConnectorDescriptor }) {
           <li key={tool.name} className="flex items-baseline gap-1.5">
             <span className="font-mono text-[11px]">{tool.name}</span>
             {tool.sensitive ? (
-              <span className="text-[10px] uppercase text-warning">sensitive</span>
+              <span className="rounded bg-warning/15 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wider text-foreground">
+                sensitive
+              </span>
             ) : null}
           </li>
         ))}
@@ -288,9 +342,7 @@ function InstalledDetails({
       />
       <SessionBlock installed={installed} onChanged={onChanged} />
       {installed.lastError ? (
-        <p className="text-xs text-destructive" role="alert">
-          Last error: {installed.lastError}
-        </p>
+        <InlineError message={`Last error: ${installed.lastError}`} />
       ) : null}
     </div>
   );
@@ -439,11 +491,7 @@ function SecretField({
           </Button>
         ) : null}
       </div>
-      {error ? (
-        <p className="text-xs text-destructive" role="alert">
-          {error}
-        </p>
-      ) : null}
+      {error ? <InlineError message={error} /> : null}
     </div>
   );
 }
@@ -469,7 +517,8 @@ function GrantsBlock({
       );
       return installed.liveTools.map((tool) => ({
         name: tool.name,
-        description: tool.description || advertised.get(tool.name)?.description || "",
+        description:
+          tool.description || advertised.get(tool.name)?.description || "",
         sensitive: advertised.get(tool.name)?.sensitive ?? false,
       }));
     }
@@ -512,7 +561,7 @@ function GrantsBlock({
                 <div className="flex items-center gap-1.5 text-sm">
                   <span className="font-mono text-xs">{tool.name}</span>
                   {tool.sensitive ? (
-                    <span className="rounded bg-warning/15 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wider text-warning">
+                    <span className="rounded bg-warning/15 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wider text-foreground">
                       sensitive
                     </span>
                   ) : null}
@@ -625,23 +674,39 @@ function SessionBlock({
       >
         {installed.enabled ? "Disable" : "Enable"}
       </Button>
-      <span
-        className={cn(
-          "ml-auto text-xs",
-          installed.running ? "text-success" : "text-muted-foreground",
-        )}
+      <Badge
+        tone={installed.running ? "success" : "muted"}
+        className="ml-auto"
       >
         {installed.running
           ? "Running"
           : installed.enabled
             ? "Stopped"
             : "Disabled"}
-      </span>
+      </Badge>
       {error ? (
-        <p className="basis-full text-xs text-destructive" role="alert">
-          {error}
-        </p>
+        <div className="basis-full">
+          <InlineError message={error} />
+        </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Tinted-container error banner used for inline + block alerts so
+ * the destructive colour stays as the visual cue (border + bg) but
+ * the text uses the high-contrast foreground token. Matches the
+ * pattern already used in the browser surface and the agents/logs
+ * surfaces.
+ */
+function InlineError({ message }: { message: string }) {
+  return (
+    <p
+      role="alert"
+      className="rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs text-foreground"
+    >
+      {message}
+    </p>
   );
 }

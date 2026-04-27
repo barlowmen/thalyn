@@ -37,6 +37,11 @@ const LogsSurface = lazy(() =>
     default: m.LogsSurface,
   })),
 );
+const ConnectorsSurface = lazy(() =>
+  import("@/components/connectors/connectors-surface").then((m) => ({
+    default: m.ConnectorsSurface,
+  })),
+);
 const SubAgentDetail = lazy(() =>
   import("@/components/subagent/subagent-detail").then((m) => ({
     default: m.SubAgentDetail,
@@ -128,6 +133,13 @@ function App() {
           return (
             <Suspense fallback={<SurfaceFallback label="logs" />}>
               <LogsSurface onOpen={handleOpenSubAgent} />
+            </Suspense>
+          );
+        }
+        if (activeRail === "connectors") {
+          return (
+            <Suspense fallback={<SurfaceFallback label="connectors" />}>
+              <ConnectorsSurface />
             </Suspense>
           );
         }

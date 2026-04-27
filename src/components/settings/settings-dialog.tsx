@@ -1,4 +1,3 @@
-import { ConnectorsSection } from "@/components/settings/connectors-section";
 import { EmailSection } from "@/components/settings/email-section";
 import { ObservabilitySection } from "@/components/settings/observability-section";
 import { ProviderSection } from "@/components/settings/provider-section";
@@ -30,7 +29,6 @@ export function SettingsDialog({
 
         <div className="mt-2 max-h-[60vh] space-y-6 overflow-y-auto pr-1">
           <ProviderSection />
-          <ConnectorsSection />
           <EmailSection />
           <ObservabilitySection />
         </div>
