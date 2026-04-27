@@ -13,8 +13,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use super::{
-    tier0::Tier0Sandbox, tier1::Tier1Sandbox, tier2::Tier2Sandbox, ExecOutput, Sandbox,
-    SandboxError, SandboxSpec, SandboxTier,
+    tier0::Tier0Sandbox, tier1::Tier1Sandbox, tier2::Tier2Sandbox, tier3::Tier3Sandbox, ExecOutput,
+    Sandbox, SandboxError, SandboxSpec, SandboxTier,
 };
 
 #[derive(Default)]
@@ -39,12 +39,7 @@ impl SandboxManager {
             SandboxTier::Tier0 => Box::new(Tier0Sandbox::from_spec(spec)?),
             SandboxTier::Tier1 => Box::new(Tier1Sandbox::start(spec).await?),
             SandboxTier::Tier2 => Box::new(Tier2Sandbox::start(spec).await?),
-            SandboxTier::Tier3 => {
-                return Err(SandboxError::Start(format!(
-                    "{} not implemented",
-                    tier.wire_name()
-                )));
-            }
+            SandboxTier::Tier3 => Box::new(Tier3Sandbox::start(spec).await?),
         };
         let mut inner = self.inner.write().await;
         if inner.contains_key(&run_id) {
@@ -157,14 +152,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn higher_tiers_not_yet_implemented() {
-        let workspace = temp_workspace("higher");
+    async fn tier2_surfaces_typed_pending_error() {
+        let workspace = temp_workspace("tier2");
         let manager = SandboxManager::new();
         let err = manager
             .start(
                 SandboxTier::Tier2,
                 SandboxSpec {
-                    run_id: "r_c".into(),
+                    run_id: "r_t2".into(),
+                    workspace: workspace.clone(),
+                    egress_allowlist: vec![],
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, SandboxError::Start(_)));
+        let _ = std::fs::remove_dir_all(&workspace);
+    }
+
+    #[tokio::test]
+    async fn tier3_without_key_returns_no_api_key_error() {
+        let workspace = temp_workspace("tier3");
+        let manager = SandboxManager::new();
+        // Belt-and-braces — the tier3 module's tests serialize on
+        // these env vars; remove them so this test isn't order-
+        // dependent.
+        std::env::remove_var("THALYN_E2B_API_KEY");
+        std::env::remove_var("THALYN_DAYTONA_API_KEY");
+        let err = manager
+            .start(
+                SandboxTier::Tier3,
+                SandboxSpec {
+                    run_id: "r_t3".into(),
                     workspace: workspace.clone(),
                     egress_allowlist: vec![],
                 },
