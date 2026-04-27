@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type {
   Layout,
   PanelImperativeHandle,
@@ -28,43 +28,92 @@ export type ShellApi = {
 };
 
 /**
- * The three-panel mosaic shell:
+ * The four-panel mosaic shell:
  *
- *   ┌──────┬─────────────┬─────────────────────────┬──────────────┐
- *   │ rail │  sidebar    │  main                   │  inspector   │
- *   │ 56px │ 200–360 px  │  fluid                  │  280–480 px  │
- *   └──────┴─────────────┴─────────────────────────┴──────────────┘
+ *   ┌──────┬──────────┬──────────┬──────────┬──────────┐
+ *   │ rail │ sidebar  │ surface  │  chat    │inspector │
+ *   │ 56px │ 14–30%   │ 0–60%    │ 22–60%   │ 18–36%   │
+ *   └──────┴──────────┴──────────┴──────────┴──────────┘
  *
- * Sidebar and inspector are collapsible — by drag-to-edge or via the
- * command palette. Layout is persisted per shell instance to
- * localStorage; a per-project key lands when projects come online.
+ * The brain chat is permanent (never collapsible) so the user
+ * always has the brain reachable, no matter what surface is in
+ * focus. The surface region holds whatever rail item is selected
+ * (editor / terminal / browser / email / agents / logs /
+ * connectors / sub-agent detail) and collapses to nothing when the
+ * user clicks the chat rail icon — that's the dedicated
+ * full-conversation mode.
+ *
+ * Sidebar and inspector are independently collapsible. Layout is
+ * persisted per shell instance to localStorage.
  */
 const STORAGE_KEY = "thalyn:layout:default";
+const LAYOUT_VERSION = 2;
 const DEFAULT_LAYOUT: Layout = {
-  sidebar: 20,
-  main: 55,
-  inspector: 25,
+  sidebar: 18,
+  surface: 32,
+  chat: 30,
+  inspector: 20,
 };
 
-// Sanity bounds so a stuck-tiny layout from a prior buggy build
-// can't trap the user at sub-min sizes after upgrade.
 const SIDEBAR_BOUNDS = { min: 14, max: 30 } as const;
 const INSPECTOR_BOUNDS = { min: 18, max: 36 } as const;
+const SURFACE_BOUNDS = { min: 22, max: 60 } as const;
+const CHAT_BOUNDS = { min: 22, max: 60 } as const;
+
+type StoredLayout = Layout & { _v?: number };
 
 function clampLayout(layout: Layout): Layout {
-  const sidebar = Math.min(
+  const sidebar = clamp(
+    Number(layout.sidebar) || DEFAULT_LAYOUT.sidebar,
+    SIDEBAR_BOUNDS.min,
     SIDEBAR_BOUNDS.max,
-    Math.max(SIDEBAR_BOUNDS.min, Number(layout.sidebar) || DEFAULT_LAYOUT.sidebar),
   );
-  const inspector = Math.min(
+  const inspector = clamp(
+    Number(layout.inspector) || DEFAULT_LAYOUT.inspector,
+    INSPECTOR_BOUNDS.min,
     INSPECTOR_BOUNDS.max,
-    Math.max(
-      INSPECTOR_BOUNDS.min,
-      Number(layout.inspector) || DEFAULT_LAYOUT.inspector,
-    ),
   );
-  const main = Math.max(30, 100 - sidebar - inspector);
-  return { sidebar, main, inspector };
+
+  // Surface may be 0 (collapsed). Chat must be > 0 (the brain
+  // is always reachable). When the inputs don't add up cleanly
+  // (e.g. migrating from the prior 3-key layout), fall back to
+  // the proportional defaults for the surface + chat split.
+  const remainder = Math.max(0, 100 - sidebar - inspector);
+  const requestedSurface = Number(layout.surface);
+  const requestedChat = Number(layout.chat);
+
+  let surface: number;
+  let chat: number;
+  if (Number.isFinite(requestedSurface) && Number.isFinite(requestedChat)) {
+    surface = clamp(requestedSurface, 0, SURFACE_BOUNDS.max);
+    chat = clamp(requestedChat, CHAT_BOUNDS.min, CHAT_BOUNDS.max);
+    const total = surface + chat;
+    if (total === 0) {
+      chat = remainder;
+      surface = 0;
+    } else {
+      // Scale so the pair fills the remainder exactly.
+      const scale = remainder / total;
+      surface = surface * scale;
+      chat = chat * scale;
+    }
+  } else {
+    // Migrating from a 3-key layout — keep chat at default share,
+    // hand the rest to the surface.
+    chat = clamp(
+      (DEFAULT_LAYOUT.chat / (DEFAULT_LAYOUT.surface + DEFAULT_LAYOUT.chat)) *
+        remainder,
+      CHAT_BOUNDS.min,
+      CHAT_BOUNDS.max,
+    );
+    surface = Math.max(0, remainder - chat);
+  }
+
+  return { sidebar, surface, chat, inspector };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function loadLayout(): Layout {
@@ -72,12 +121,11 @@ function loadLayout(): Layout {
   const raw = window.localStorage.getItem(STORAGE_KEY);
   if (!raw) return DEFAULT_LAYOUT;
   try {
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed = JSON.parse(raw) as Partial<StoredLayout> | null;
     if (
+      parsed &&
       typeof parsed === "object" &&
-      parsed !== null &&
       "sidebar" in parsed &&
-      "main" in parsed &&
       "inspector" in parsed
     ) {
       return clampLayout(parsed as Layout);
@@ -91,7 +139,8 @@ function loadLayout(): Layout {
 function saveLayout(layout: Layout): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+    const stored: StoredLayout = { ...layout, _v: LAYOUT_VERSION };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
   } catch {
     // best-effort — storage may be full or disabled
   }
@@ -108,11 +157,24 @@ function togglePanel(ref: React.RefObject<PanelImperativeHandle | null>) {
 }
 
 export function AppShell({
-  main,
+  surface,
+  chat,
   openSubAgentRunId,
   onOpenSubAgent,
 }: {
-  main: ReactNode | ((api: ShellApi) => ReactNode);
+  /**
+   * Renders into the surface region (left of chat). Returning ``null``
+   * is allowed — the shell will collapse the surface panel for you,
+   * which is also what happens when the user clicks the chat rail
+   * icon.
+   */
+  surface: ReactNode | ((api: ShellApi) => ReactNode);
+  /**
+   * Renders into the chat region (right of surface). Always shown —
+   * this is the persistent brain panel. Receives the same shell API
+   * so chat-side dialogs (settings, etc.) work the same.
+   */
+  chat: ReactNode | ((api: ShellApi) => ReactNode);
   openSubAgentRunId?: string | null;
   onOpenSubAgent?: (runId: string) => void;
 }) {
@@ -123,6 +185,7 @@ export function AppShell({
   const [memoryOpen, setMemoryOpen] = useState(false);
 
   const sidebarRef = useRef<PanelImperativeHandle | null>(null);
+  const surfaceRef = useRef<PanelImperativeHandle | null>(null);
   const inspectorRef = useRef<PanelImperativeHandle | null>(null);
 
   const onLayoutChange = useCallback((layout: Layout) => {
@@ -154,6 +217,24 @@ export function AppShell({
     [openSettings, openSchedules, openMemory],
   );
 
+  // Collapse the surface region when the user is in chat-only mode,
+  // expand it whenever they pick a real surface OR open a sub-agent
+  // (which renders its detail into the surface). Imperative because
+  // react-resizable-panels owns the live size; we drive it via the
+  // panel ref to keep persistence + collapse animation correct.
+  useEffect(() => {
+    const handle = surfaceRef.current;
+    if (!handle) return;
+    const wantCollapsed = activeRail === "chat" && !openSubAgentRunId;
+    const isCollapsed = handle.isCollapsed();
+    if (wantCollapsed && !isCollapsed) handle.collapse();
+    if (!wantCollapsed && isCollapsed) handle.expand();
+  }, [activeRail, openSubAgentRunId]);
+
+  const api: ShellApi = { openSettings, activeRail };
+  const renderSurface = typeof surface === "function" ? surface(api) : surface;
+  const renderChat = typeof chat === "function" ? chat(api) : chat;
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <ActivityRail active={activeRail} onSelect={handleRailSelect} />
@@ -164,25 +245,17 @@ export function AppShell({
         defaultLayout={defaultLayout}
         onLayoutChange={onLayoutChange}
         // min-w-0 lets the group shrink below its content's intrinsic
-        // width inside the AppShell flex parent. Without this, the
-        // panels' contents lock the group at content-size and resize
-        // works in one direction only.
+        // width inside the AppShell flex parent.
         className="min-w-0 flex-1"
       >
         <ResizablePanel
           id="sidebar"
           panelRef={sidebarRef}
-          // Bare numbers are read as pixels by react-resizable-panels;
-          // pass percentage strings ("14%", not 14) so the constraints
-          // mean what we say they mean.
           defaultSize={`${defaultLayout.sidebar}%`}
-          minSize="14%"
-          maxSize="30%"
+          minSize={`${SIDEBAR_BOUNDS.min}%`}
+          maxSize={`${SIDEBAR_BOUNDS.max}%`}
           collapsible
           collapsedSize="0%"
-          // min-w-0 + overflow-hidden on the Panel's content wrapper
-          // keeps the panel from being pushed wider than its flex
-          // allocation by its own children.
           className="min-w-0 overflow-hidden"
         >
           <SidebarPanel />
@@ -191,19 +264,42 @@ export function AppShell({
         <ResizableSeparator withHandle aria-label="Resize sidebar" />
 
         <ResizablePanel
-          id="main"
-          defaultSize={`${defaultLayout.main}%`}
-          minSize="30%"
+          id="surface"
+          panelRef={surfaceRef}
+          defaultSize={`${defaultLayout.surface}%`}
+          // The chat-only mode collapses this panel to 0; otherwise
+          // the surface holds whatever the active rail item renders.
+          minSize={`${SURFACE_BOUNDS.min}%`}
+          maxSize={`${SURFACE_BOUNDS.max}%`}
+          collapsible
+          collapsedSize="0%"
           className="min-w-0 overflow-hidden"
         >
           <section
-            aria-label="Main"
+            aria-label="Surface"
             className="flex h-full flex-col bg-background"
           >
             <DriftGateLayer onReview={onOpenSubAgent} />
-            {typeof main === "function"
-              ? main({ openSettings, activeRail })
-              : main}
+            {renderSurface}
+          </section>
+        </ResizablePanel>
+
+        <ResizableSeparator withHandle aria-label="Resize surface" />
+
+        <ResizablePanel
+          id="chat"
+          // Chat is intentionally NOT collapsible. The brain is the
+          // focal point of the app; it never goes away.
+          defaultSize={`${defaultLayout.chat}%`}
+          minSize={`${CHAT_BOUNDS.min}%`}
+          maxSize={`${CHAT_BOUNDS.max}%`}
+          className="min-w-0 overflow-hidden"
+        >
+          <section
+            aria-label="Chat"
+            className="flex h-full flex-col bg-background"
+          >
+            {renderChat}
           </section>
         </ResizablePanel>
 
@@ -213,8 +309,8 @@ export function AppShell({
           id="inspector"
           panelRef={inspectorRef}
           defaultSize={`${defaultLayout.inspector}%`}
-          minSize="18%"
-          maxSize="36%"
+          minSize={`${INSPECTOR_BOUNDS.min}%`}
+          maxSize={`${INSPECTOR_BOUNDS.max}%`}
           collapsible
           collapsedSize="0%"
           className="min-w-0 overflow-hidden"

@@ -70,9 +70,11 @@ function App() {
   const handleCloseSubAgent = useCallback(() => {
     setOpenSubAgentRunId(null);
   }, []);
+  // Take-over keeps the sub-agent detail open in the surface region
+  // alongside the take-over chat in the chat region — that side-by-side
+  // is the whole point of having two regions.
   const handleTakeOver = useCallback((runId: string) => {
     setTakeOverRunId(runId);
-    setOpenSubAgentRunId(null);
   }, []);
   const handleHandBack = useCallback(() => {
     setTakeOverRunId(null);
@@ -82,7 +84,10 @@ function App() {
     <AppShell
       openSubAgentRunId={openSubAgentRunId}
       onOpenSubAgent={handleOpenSubAgent}
-      main={({ openSettings, activeRail }) => {
+      surface={({ activeRail }) => {
+        // Sub-agent detail wins over the rail's surface — it's the
+        // result of an explicit "open this agent" click, not a tab
+        // switch.
         if (openSubAgentRunId) {
           return (
             <Suspense fallback={<SurfaceFallback label="sub-agent" />}>
@@ -143,18 +148,21 @@ function App() {
             </Suspense>
           );
         }
-        return (
-          <ChatSurface
-            // Remount on takeover so the chat session, message list,
-            // and system prompt all reset cleanly.
-            key={takeOverRunId ?? "main"}
-            onOpenSettings={openSettings}
-            onOpenSubAgent={handleOpenSubAgent}
-            takeOverRunId={takeOverRunId}
-            onHandBack={handleHandBack}
-          />
-        );
+        // activeRail === "chat" — nothing to render; the shell will
+        // collapse the surface panel on its own.
+        return null;
       }}
+      chat={({ openSettings }) => (
+        <ChatSurface
+          // Remount on takeover so the chat session, message list,
+          // and system prompt all reset cleanly.
+          key={takeOverRunId ?? "main"}
+          onOpenSettings={openSettings}
+          onOpenSubAgent={handleOpenSubAgent}
+          takeOverRunId={takeOverRunId}
+          onHandBack={handleHandBack}
+        />
+      )}
     />
   );
 }
