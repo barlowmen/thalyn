@@ -172,16 +172,17 @@ export function AppShell({
         <ResizablePanel
           id="sidebar"
           panelRef={sidebarRef}
-          defaultSize={defaultLayout.sidebar}
-          minSize={14}
-          maxSize={30}
+          // Bare numbers are read as pixels by react-resizable-panels;
+          // pass percentage strings ("14%", not 14) so the constraints
+          // mean what we say they mean.
+          defaultSize={`${defaultLayout.sidebar}%`}
+          minSize="14%"
+          maxSize="30%"
           collapsible
-          collapsedSize={0}
+          collapsedSize="0%"
           // min-w-0 + overflow-hidden on the Panel's content wrapper
-          // prevents the panel's children from pushing it wider than
-          // its flex allocation. Without this, drag-to-grow can't
-          // shrink the opposing panel below its content's intrinsic
-          // width and so feels one-directional.
+          // keeps the panel from being pushed wider than its flex
+          // allocation by its own children.
           className="min-w-0 overflow-hidden"
         >
           <SidebarPanel />
@@ -191,8 +192,8 @@ export function AppShell({
 
         <ResizablePanel
           id="main"
-          defaultSize={defaultLayout.main}
-          minSize={30}
+          defaultSize={`${defaultLayout.main}%`}
+          minSize="30%"
           className="min-w-0 overflow-hidden"
         >
           <section
@@ -211,11 +212,11 @@ export function AppShell({
         <ResizablePanel
           id="inspector"
           panelRef={inspectorRef}
-          defaultSize={defaultLayout.inspector}
-          minSize={18}
-          maxSize={36}
+          defaultSize={`${defaultLayout.inspector}%`}
+          minSize="18%"
+          maxSize="36%"
           collapsible
-          collapsedSize={0}
+          collapsedSize="0%"
           className="min-w-0 overflow-hidden"
         >
           <InspectorPanel
