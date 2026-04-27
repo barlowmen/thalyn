@@ -644,6 +644,258 @@ async fn terminal_list(state: State<'_, AppState>) -> Result<Value, String> {
     Ok(json!({ "sessions": state.terminals.list().await }))
 }
 
+// ---------------------------------------------------------------------------
+// MCP connectors
+// ---------------------------------------------------------------------------
+
+fn mcp_secret_key(connector_id: &str, secret_key: &str) -> String {
+    format!("mcp:{connector_id}:{secret_key}")
+}
+
+fn ensure_safe_id(value: &str, label: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err(format!("{label} is empty"));
+    }
+    if !value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(format!("{label} must be alphanumeric, '_' or '-'"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn mcp_catalog(state: State<'_, AppState>) -> Result<Value, String> {
+    state
+        .brain
+        .call("mcp.catalog", json!({}), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn mcp_list(state: State<'_, AppState>) -> Result<Value, String> {
+    state
+        .brain
+        .call("mcp.list", json!({}), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn mcp_install(
+    state: State<'_, AppState>,
+    connector_id: String,
+    granted_tools: Option<Vec<String>>,
+) -> Result<Value, String> {
+    ensure_safe_id(&connector_id, "connectorId")?;
+    let mut params = serde_json::Map::new();
+    params.insert("connectorId".into(), Value::from(connector_id));
+    if let Some(grants) = granted_tools {
+        params.insert("grantedTools".into(), Value::from(grants));
+    }
+    state
+        .brain
+        .call("mcp.install", Value::Object(params), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn mcp_uninstall(state: State<'_, AppState>, connector_id: String) -> Result<Value, String> {
+    ensure_safe_id(&connector_id, "connectorId")?;
+    state
+        .brain
+        .call(
+            "mcp.uninstall",
+            json!({ "connectorId": connector_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn mcp_set_grants(
+    state: State<'_, AppState>,
+    connector_id: String,
+    granted_tools: Vec<String>,
+) -> Result<Value, String> {
+    ensure_safe_id(&connector_id, "connectorId")?;
+    state
+        .brain
+        .call(
+            "mcp.set_grants",
+            json!({ "connectorId": connector_id, "grantedTools": granted_tools }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn mcp_set_enabled(
+    state: State<'_, AppState>,
+    connector_id: String,
+    enabled: bool,
+) -> Result<Value, String> {
+    ensure_safe_id(&connector_id, "connectorId")?;
+    state
+        .brain
+        .call(
+            "mcp.set_enabled",
+            json!({ "connectorId": connector_id, "enabled": enabled }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn mcp_save_secret(
+    state: State<'_, AppState>,
+    connector_id: String,
+    secret_key: String,
+    value: String,
+) -> Result<(), String> {
+    ensure_safe_id(&connector_id, "connectorId")?;
+    ensure_safe_id(&secret_key, "secretKey")?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("secret value is empty".into());
+    }
+    state
+        .secrets
+        .save_secret(&mcp_secret_key(&connector_id, &secret_key), trimmed)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn mcp_clear_secret(
+    state: State<'_, AppState>,
+    connector_id: String,
+    secret_key: String,
+) -> Result<(), String> {
+    ensure_safe_id(&connector_id, "connectorId")?;
+    ensure_safe_id(&secret_key, "secretKey")?;
+    state
+        .secrets
+        .delete_secret(&mcp_secret_key(&connector_id, &secret_key))
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn mcp_secret_status(
+    state: State<'_, AppState>,
+    connector_id: String,
+    secret_keys: Vec<String>,
+) -> Result<Value, String> {
+    ensure_safe_id(&connector_id, "connectorId")?;
+    let mut entries = serde_json::Map::new();
+    for key in secret_keys {
+        ensure_safe_id(&key, "secretKey")?;
+        let configured = state
+            .secrets
+            .has_secret(&mcp_secret_key(&connector_id, &key));
+        entries.insert(key, Value::from(configured));
+    }
+    Ok(Value::Object(entries))
+}
+
+#[tauri::command]
+async fn mcp_start(
+    state: State<'_, AppState>,
+    connector_id: String,
+    secret_keys: Vec<String>,
+) -> Result<Value, String> {
+    ensure_safe_id(&connector_id, "connectorId")?;
+    let mut secrets = serde_json::Map::new();
+    for key in &secret_keys {
+        ensure_safe_id(key, "secretKey")?;
+        match state
+            .secrets
+            .read_secret(&mcp_secret_key(&connector_id, key))
+        {
+            Ok(Some(value)) => {
+                secrets.insert(key.clone(), Value::from(value));
+            }
+            Ok(None) => {
+                return Err(format!(
+                    "secret '{key}' is not configured for connector '{connector_id}'"
+                ));
+            }
+            Err(err) => return Err(err.to_string()),
+        }
+    }
+    state
+        .brain
+        .call(
+            "mcp.start",
+            json!({ "connectorId": connector_id, "secrets": Value::Object(secrets) }),
+            // Spawning an MCP server (npx download, etc.) can be
+            // slow on first run. Give it a generous deadline.
+            Duration::from_secs(120),
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn mcp_stop(state: State<'_, AppState>, connector_id: String) -> Result<Value, String> {
+    ensure_safe_id(&connector_id, "connectorId")?;
+    state
+        .brain
+        .call(
+            "mcp.stop",
+            json!({ "connectorId": connector_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn mcp_list_tools(state: State<'_, AppState>, connector_id: String) -> Result<Value, String> {
+    ensure_safe_id(&connector_id, "connectorId")?;
+    state
+        .brain
+        .call(
+            "mcp.list_tools",
+            json!({ "connectorId": connector_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn mcp_call_tool(
+    state: State<'_, AppState>,
+    connector_id: String,
+    tool_name: String,
+    arguments: Option<Value>,
+) -> Result<Value, String> {
+    ensure_safe_id(&connector_id, "connectorId")?;
+    if tool_name.trim().is_empty() {
+        return Err("toolName is empty".into());
+    }
+    state
+        .brain
+        .call(
+            "mcp.call_tool",
+            json!({
+                "connectorId": connector_id,
+                "toolName": tool_name,
+                "arguments": arguments.unwrap_or_else(|| json!({})),
+            }),
+            // Tool calls can be slow (network calls to upstream APIs).
+            Duration::from_secs(120),
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
 #[tauri::command]
 async fn inline_suggest(
     state: State<'_, AppState>,
@@ -974,6 +1226,19 @@ pub fn run() {
             terminal_resize,
             terminal_close,
             terminal_list,
+            mcp_catalog,
+            mcp_list,
+            mcp_install,
+            mcp_uninstall,
+            mcp_set_grants,
+            mcp_set_enabled,
+            mcp_save_secret,
+            mcp_clear_secret,
+            mcp_secret_status,
+            mcp_start,
+            mcp_stop,
+            mcp_list_tools,
+            mcp_call_tool,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
