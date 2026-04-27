@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { BrowserSurface } from "@/components/browser/browser-surface";
 import { ChatSurface } from "@/components/chat/chat-surface";
 import { EditorSurface } from "@/components/editor/editor-surface";
+import { EmailSurface } from "@/components/email/email-surface";
 import { AppShell } from "@/components/shell/app-shell";
 import { SubAgentDetail } from "@/components/subagent/subagent-detail";
 import { TerminalSurface } from "@/components/terminal/terminal-surface";
@@ -47,6 +48,9 @@ function App() {
         }
         if (activeRail === "browser") {
           return <BrowserSurface />;
+        }
+        if (activeRail === "email") {
+          return <EmailSurface />;
         }
         return (
           <ChatSurface

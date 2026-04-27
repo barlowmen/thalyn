@@ -645,6 +645,316 @@ async fn terminal_list(state: State<'_, AppState>) -> Result<Value, String> {
 }
 
 // ---------------------------------------------------------------------------
+// Email accounts
+// ---------------------------------------------------------------------------
+
+fn email_secret_key(account_id: &str, slot: &str) -> String {
+    format!("email:{account_id}:{slot}")
+}
+
+async fn forward_email_credentials(state: &AppState, account_id: &str) -> Result<(), String> {
+    let refresh = state
+        .secrets
+        .read_secret(&email_secret_key(account_id, "refresh_token"))
+        .map_err(|err| err.to_string())?
+        .unwrap_or_default();
+    let client_id = state
+        .secrets
+        .read_secret(&email_secret_key(account_id, "client_id"))
+        .map_err(|err| err.to_string())?
+        .unwrap_or_default();
+    let client_secret = state
+        .secrets
+        .read_secret(&email_secret_key(account_id, "client_secret"))
+        .map_err(|err| err.to_string())?
+        .unwrap_or_default();
+    state
+        .brain
+        .call(
+            "email.set_credentials",
+            json!({
+                "accountId": account_id,
+                "refreshToken": refresh,
+                "clientId": client_id,
+                "clientSecret": client_secret,
+            }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn email_list_accounts(state: State<'_, AppState>) -> Result<Value, String> {
+    state
+        .brain
+        .call("email.list_accounts", json!({}), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn email_add_account(
+    state: State<'_, AppState>,
+    provider: String,
+    label: String,
+    address: String,
+) -> Result<Value, String> {
+    if !matches!(provider.as_str(), "gmail" | "microsoft") {
+        return Err(format!("unsupported provider: {provider}"));
+    }
+    state
+        .brain
+        .call(
+            "email.add_account",
+            json!({
+                "provider": provider,
+                "label": label,
+                "address": address,
+            }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn email_remove_account(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<Value, String> {
+    let _ = state
+        .secrets
+        .delete_secret(&email_secret_key(&account_id, "refresh_token"));
+    let _ = state
+        .secrets
+        .delete_secret(&email_secret_key(&account_id, "client_id"));
+    let _ = state
+        .secrets
+        .delete_secret(&email_secret_key(&account_id, "client_secret"));
+    let _ = state
+        .brain
+        .call(
+            "email.clear_credentials",
+            json!({ "accountId": account_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await;
+    state
+        .brain
+        .call(
+            "email.remove_account",
+            json!({ "accountId": account_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn email_save_credentials(
+    state: State<'_, AppState>,
+    account_id: String,
+    refresh_token: Option<String>,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+) -> Result<(), String> {
+    if let Some(value) = refresh_token.as_ref().filter(|v| !v.trim().is_empty()) {
+        state
+            .secrets
+            .save_secret(
+                &email_secret_key(&account_id, "refresh_token"),
+                value.trim(),
+            )
+            .map_err(|err| err.to_string())?;
+    }
+    if let Some(value) = client_id.as_ref().filter(|v| !v.trim().is_empty()) {
+        state
+            .secrets
+            .save_secret(&email_secret_key(&account_id, "client_id"), value.trim())
+            .map_err(|err| err.to_string())?;
+    }
+    if let Some(value) = client_secret.as_ref() {
+        // Allow empty client_secret (public OAuth clients) but clear
+        // it when the user passes "" to avoid stale values lingering.
+        if value.trim().is_empty() {
+            let _ = state
+                .secrets
+                .delete_secret(&email_secret_key(&account_id, "client_secret"));
+        } else {
+            state
+                .secrets
+                .save_secret(
+                    &email_secret_key(&account_id, "client_secret"),
+                    value.trim(),
+                )
+                .map_err(|err| err.to_string())?;
+        }
+    }
+    forward_email_credentials(&state, &account_id).await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn email_credentials_status(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<Value, String> {
+    Ok(json!({
+        "refreshTokenConfigured": state
+            .secrets
+            .has_secret(&email_secret_key(&account_id, "refresh_token")),
+        "clientIdConfigured": state
+            .secrets
+            .has_secret(&email_secret_key(&account_id, "client_id")),
+        "clientSecretConfigured": state
+            .secrets
+            .has_secret(&email_secret_key(&account_id, "client_secret")),
+    }))
+}
+
+#[tauri::command]
+async fn email_list_messages(
+    state: State<'_, AppState>,
+    account_id: String,
+    query: Option<String>,
+    page_token: Option<String>,
+    max_results: Option<u32>,
+) -> Result<Value, String> {
+    forward_email_credentials(&state, &account_id).await?;
+    let mut params = serde_json::Map::new();
+    params.insert("accountId".into(), Value::from(account_id));
+    if let Some(q) = query {
+        params.insert("query".into(), Value::from(q));
+    }
+    if let Some(pt) = page_token {
+        params.insert("pageToken".into(), Value::from(pt));
+    }
+    if let Some(mr) = max_results {
+        params.insert("maxResults".into(), Value::from(mr));
+    }
+    state
+        .brain
+        .call(
+            "email.list_messages",
+            Value::Object(params),
+            Duration::from_secs(60),
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn email_get_message(
+    state: State<'_, AppState>,
+    account_id: String,
+    message_id: String,
+) -> Result<Value, String> {
+    forward_email_credentials(&state, &account_id).await?;
+    state
+        .brain
+        .call(
+            "email.get_message",
+            json!({ "accountId": account_id, "messageId": message_id }),
+            Duration::from_secs(60),
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn email_create_draft(
+    state: State<'_, AppState>,
+    account_id: String,
+    to: Vec<String>,
+    cc: Option<Vec<String>>,
+    bcc: Option<Vec<String>>,
+    subject: String,
+    body: String,
+    in_reply_to: Option<String>,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    params.insert("accountId".into(), Value::from(account_id));
+    params.insert("to".into(), Value::from(to));
+    params.insert("cc".into(), Value::from(cc.unwrap_or_default()));
+    params.insert("bcc".into(), Value::from(bcc.unwrap_or_default()));
+    params.insert("subject".into(), Value::from(subject));
+    params.insert("body".into(), Value::from(body));
+    if let Some(reply) = in_reply_to {
+        params.insert("inReplyTo".into(), Value::from(reply));
+    }
+    state
+        .brain
+        .call(
+            "email.create_draft",
+            Value::Object(params),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn email_list_drafts(state: State<'_, AppState>) -> Result<Value, String> {
+    state
+        .brain
+        .call("email.list_drafts", json!({}), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn email_discard_draft(
+    state: State<'_, AppState>,
+    draft_id: String,
+) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "email.discard_draft",
+            json!({ "draftId": draft_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn email_approve_draft(
+    state: State<'_, AppState>,
+    draft_id: String,
+) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "email.approve_draft",
+            json!({ "draftId": draft_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn email_send_draft(state: State<'_, AppState>, draft_id: String) -> Result<Value, String> {
+    // The brain enforces the hard gate, but the renderer must
+    // surface it as a confirm modal first; this command is the
+    // only path to send and is documented as user-driven only.
+    state
+        .brain
+        .call(
+            "email.send_draft",
+            json!({ "draftId": draft_id }),
+            Duration::from_secs(60),
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+// ---------------------------------------------------------------------------
 // MCP connectors
 // ---------------------------------------------------------------------------
 
@@ -1239,6 +1549,18 @@ pub fn run() {
             mcp_stop,
             mcp_list_tools,
             mcp_call_tool,
+            email_list_accounts,
+            email_add_account,
+            email_remove_account,
+            email_save_credentials,
+            email_credentials_status,
+            email_list_messages,
+            email_get_message,
+            email_create_draft,
+            email_list_drafts,
+            email_discard_draft,
+            email_approve_draft,
+            email_send_draft,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
