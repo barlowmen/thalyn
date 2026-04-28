@@ -58,7 +58,7 @@ export function EmailSection() {
             Email accounts
           </h3>
           <p className="text-sm text-muted-foreground">
-            Gmail and Microsoft inboxes the brain can read and draft to.
+            Gmail and Microsoft inboxes Thalyn can read and draft to.
             Bring your own OAuth client; refresh tokens stay on your
             machine.
           </p>

@@ -40,7 +40,7 @@ export function ProviderSection() {
           Providers
         </h3>
         <p className="text-sm text-muted-foreground">
-          Pick where the brain runs. v0.3 ships the Anthropic adapter;
+          Pick where Thalyn runs. The Anthropic adapter is live today;
           the OpenAI-compatible / Ollama / llama.cpp / MLX rows arrive
           in subsequent iterations.
         </p>

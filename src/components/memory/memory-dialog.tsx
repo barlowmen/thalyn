@@ -77,8 +77,8 @@ export function MemoryDialog({
         <header className="space-y-1">
           <DialogTitle>Memory</DialogTitle>
           <DialogDescription>
-            Persistent context the agent and you share. Edits and
-            deletions take effect on the next agent turn.
+            Persistent context Thalyn and you share. Edits and
+            deletions take effect on the next turn.
           </DialogDescription>
         </header>
 
@@ -95,7 +95,7 @@ export function MemoryDialog({
             {error && <p className="text-xs text-destructive">{error}</p>}
             {!loading && entries.length === 0 && (
               <p className="text-xs text-muted-foreground">
-                None yet — add one above, or let the agent remember
+                None yet — add one above, or let Thalyn remember
                 something for you.
               </p>
             )}

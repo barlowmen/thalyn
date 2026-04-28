@@ -27,8 +27,8 @@ export function MessageList({ messages }: Props) {
     return (
       <div className="flex flex-1 items-center justify-center text-center text-muted-foreground">
         <p className="max-w-md text-sm">
-          Talk to the brain. v0.3 is single-turn against Anthropic; chat
-          history threads through in subsequent iterations.
+          Say hello to Thalyn — the conversation never resets, so
+          anything you start here picks up where it left off next time.
         </p>
       </div>
     );

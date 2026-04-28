@@ -22,7 +22,7 @@ export function SettingsDialog({
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
             Providers, API keys, and the user-controlled telemetry
-            destinations. Anything the brain ever sends out the
+            destinations. Anything Thalyn ever sends out the
             network leaves through one of these settings.
           </DialogDescription>
         </header>

@@ -41,6 +41,15 @@ jobs:
           fi
           scripts/scan-leakage.sh
 
+  identity-strings-scan:
+    name: identity strings scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Scan user-facing strings for Thalyn identity
+        shell: bash
+        run: scripts/scan-identity-strings.sh
+
   frontend:
     name: frontend
     runs-on: ubuntu-latest

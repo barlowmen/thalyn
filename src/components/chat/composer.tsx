@@ -41,7 +41,7 @@ export function Composer({ disabled, placeholder, onSubmit }: Props) {
       }}
     >
       <label htmlFor="chat-composer" className="sr-only">
-        Message the brain
+        Message Thalyn
       </label>
       <textarea
         id="chat-composer"
@@ -50,7 +50,7 @@ export function Composer({ disabled, placeholder, onSubmit }: Props) {
         onKeyDown={onKeyDown}
         disabled={disabled}
         rows={1}
-        placeholder={placeholder ?? "Talk to the brain…"}
+        placeholder={placeholder ?? "Message Thalyn…"}
         className={cn(
           "min-h-[40px] max-h-48 flex-1 resize-y rounded-md border border-border bg-card px-3 py-2 text-sm",
           "placeholder:text-muted-foreground",

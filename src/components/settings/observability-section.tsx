@@ -62,7 +62,7 @@ export function ObservabilitySection() {
       <div className="space-y-3 rounded-lg border border-border bg-card p-4">
         <h4 className="text-sm font-medium">Trace destination (OTLP)</h4>
         <p className="text-xs text-muted-foreground">
-          Where the brain ships OpenTelemetry GenAI spans. Point at a
+          Where Thalyn ships OpenTelemetry GenAI spans. Point at a
           local Langfuse via{" "}
           <code className="font-mono">http://localhost:3000/api/public/otel</code>
           {" "}— the bundled <code className="font-mono">observability/docker-compose.yml</code>
@@ -96,8 +96,8 @@ export function ObservabilitySection() {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Restart Thalyn after changing either field — the brain reads
-        these from environment variables at startup.
+        Restart Thalyn after changing either field — these are read
+        from environment variables at startup.
       </p>
     </section>
   );
@@ -194,7 +194,7 @@ function SecretField({
           ) : null}
         </div>
         <p className="text-xs text-muted-foreground">
-          Stored in the OS keychain. Forwarded to the brain as an
+          Stored in the OS keychain. Forwarded to Thalyn as an
           environment variable on next launch.
         </p>
       </div>

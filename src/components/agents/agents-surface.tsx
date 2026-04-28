@@ -221,7 +221,7 @@ function EmptyState() {
       <Bot aria-hidden className="size-8 text-muted-foreground" />
       <h3 className="text-sm font-medium">No sub-agents yet</h3>
       <p className="text-xs text-muted-foreground">
-        Sub-agents appear here when the brain delegates work. Every
+        Sub-agents appear here when Thalyn delegates work. Every
         delegated task gets its own status, plan, and action log.
       </p>
     </div>

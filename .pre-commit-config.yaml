@@ -23,6 +23,13 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      - id: identity-strings-scan
+        name: Brain identity strings scan
+        entry: scripts/scan-identity-strings.sh
+        language: script
+        pass_filenames: false
+        stages: [pre-commit]
+
       - id: commitlint
         name: Conventional Commits validation
         entry: pnpm exec commitlint --edit

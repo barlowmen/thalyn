@@ -147,7 +147,7 @@ export function ConnectorsView({
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         <p className="mb-4 max-w-2xl text-xs text-muted-foreground">
-          MCP connectors the brain can call. Install one, paste its
+          MCP connectors Thalyn can call. Install one, paste its
           credentials, and grant individual tools. Sensitive tools
           (post a message, create an event, send an action) stay
           revoked by default.
@@ -190,8 +190,8 @@ function EmptyState() {
       <Plug aria-hidden className="size-8 text-muted-foreground" />
       <h3 className="text-sm font-medium">No connectors available</h3>
       <p className="text-xs text-muted-foreground">
-        The brain reported an empty catalog. Confirm the brain sidecar
-        is running, then refresh.
+        Thalyn reported an empty catalog. Confirm the sidecar is
+        running, then refresh.
       </p>
     </div>
   );
