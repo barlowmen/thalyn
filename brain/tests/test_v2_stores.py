@@ -115,11 +115,18 @@ async def test_agent_records_crud_round_trip(tmp_path: Path) -> None:
 
 async def test_agent_records_filter_by_kind_and_project(tmp_path: Path) -> None:
     store = AgentRecordsStore(data_dir=tmp_path)
-    await store.insert(_agent(kind="brain", display_name="Thalyn"))
+    await store.insert(_agent(kind="brain", display_name="Thalyn-Test"))
     await store.insert(_agent(kind="lead", display_name="Lead-A"))
     await store.insert(_agent(kind="lead", display_name="Lead-B"))
+    # Migration 004 seeds a default brain ("Thalyn") and a default
+    # lead ("Lead-Default"); the filter must return them alongside the
+    # test's inserts.
     leads = await store.list_all(kind="lead")
-    assert {r.display_name for r in leads} == {"Lead-A", "Lead-B"}
+    lead_names = {r.display_name for r in leads}
+    assert {"Lead-A", "Lead-B"} <= lead_names
+    brains = await store.list_all(kind="brain")
+    brain_names = {r.display_name for r in brains}
+    assert {"Thalyn-Test"} <= brain_names
 
 
 async def test_agent_records_update_status(tmp_path: Path) -> None:

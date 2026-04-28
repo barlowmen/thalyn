@@ -164,3 +164,103 @@ def test_v2_migration_is_idempotent_on_existing_app_db(tmp_path: Path) -> None:
         agent_run_cols = _columns(conn, "agent_runs")
         # Each column should appear exactly once.
         assert len([c for c in agent_run_cols if c == "agent_id"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# v1 → v2 data fold (migration 004)
+# ---------------------------------------------------------------------------
+
+
+def test_v1_to_v2_seed_creates_default_entities(tmp_path: Path) -> None:
+    apply_pending_migrations(data_dir=tmp_path)
+    db_path = tmp_path / "app.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        project = conn.execute("SELECT * FROM projects WHERE slug = 'thalyn-default'").fetchone()
+        assert project is not None
+        assert project["name"] == "Default"
+        assert project["lead_agent_id"] == "agent_lead_default"
+
+        brain = conn.execute(
+            "SELECT * FROM agent_records WHERE agent_id = 'agent_brain'"
+        ).fetchone()
+        assert brain is not None
+        assert brain["kind"] == "brain"
+        assert brain["display_name"] == "Thalyn"
+
+        lead = conn.execute(
+            "SELECT * FROM agent_records WHERE agent_id = 'agent_lead_default'"
+        ).fetchone()
+        assert lead is not None
+        assert lead["kind"] == "lead"
+        assert lead["project_id"] == "proj_default"
+
+        thread = conn.execute("SELECT * FROM threads WHERE thread_id = 'thread_self'").fetchone()
+        assert thread is not None
+        assert thread["user_scope"] == "self"
+
+
+def test_v1_to_v2_seed_rekeys_existing_runs(tmp_path: Path) -> None:
+    """Existing v1 agent_runs rows get parent_lead_id set to the
+    default lead so the v2 hierarchy has a consistent root."""
+    db_path = tmp_path / "app.db"
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        # Pre-seed a v1-shaped agent_runs table with a row that has no
+        # parent_lead_id (the column doesn't even exist in v0 / v1
+        # databases — migrations 001-003 will add it). For this test we
+        # mimic v1 by writing the v1 baseline and inserting a row first.
+        conn.executescript(
+            """
+            CREATE TABLE agent_runs (
+                run_id TEXT PRIMARY KEY,
+                project_id TEXT,
+                parent_run_id TEXT,
+                status TEXT NOT NULL,
+                title TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                started_at_ms INTEGER NOT NULL,
+                completed_at_ms INTEGER,
+                drift_score REAL NOT NULL DEFAULT 0,
+                final_response TEXT NOT NULL DEFAULT '',
+                plan_json TEXT,
+                sandbox_tier TEXT,
+                budget_json TEXT,
+                budget_consumed_json TEXT
+            );
+            INSERT INTO agent_runs
+                (run_id, status, title, provider_id, started_at_ms)
+            VALUES
+                ('run_old_1', 'completed', 'old run', 'anthropic', 0);
+            """
+        )
+    apply_pending_migrations(data_dir=tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT parent_lead_id FROM agent_runs WHERE run_id = 'run_old_1'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "agent_lead_default"
+
+
+def test_v1_to_v2_seed_is_idempotent(tmp_path: Path) -> None:
+    apply_pending_migrations(data_dir=tmp_path)
+    from thalyn_brain.orchestration.storage import _applied_db_paths
+
+    _applied_db_paths.clear()
+    apply_pending_migrations(data_dir=tmp_path)
+    db_path = tmp_path / "app.db"
+    with sqlite3.connect(db_path) as conn:
+        # Exactly one default project, one brain, one default lead.
+        (project_count,) = conn.execute(
+            "SELECT COUNT(*) FROM projects WHERE slug = 'thalyn-default'"
+        ).fetchone()
+        assert project_count == 1
+        (brain_count,) = conn.execute(
+            "SELECT COUNT(*) FROM agent_records WHERE kind = 'brain'"
+        ).fetchone()
+        assert brain_count == 1
+        (lead_count,) = conn.execute(
+            "SELECT COUNT(*) FROM agent_records WHERE kind = 'lead' AND project_id = 'proj_default'"
+        ).fetchone()
+        assert lead_count == 1
