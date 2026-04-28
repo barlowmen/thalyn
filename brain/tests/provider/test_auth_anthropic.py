@@ -292,7 +292,7 @@ def test_api_auth_does_not_leak_module_state_between_instances() -> None:
     # Sources are instance-scoped; one backend's source should not
     # accidentally bleed into another via shared mutable state.
     assert a is not b
-    assert a._source != b._source  # type: ignore[attr-defined]
+    assert a._source != b._source
 
 
 @pytest.mark.parametrize(
