@@ -141,3 +141,6 @@ runs/
 
 # In-progress agent state (transient; never committed)
 STUCK.md
+
+# Local working notebook (per-developer; never committed)
+PROGRESS.md
