@@ -37,6 +37,13 @@ METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 
+# Application-defined error code (JSON-RPC reserves -32099 to -32000
+# for server-defined errors). Used for v2 IPC methods that are
+# registered as scaffolding but not yet implemented; the caller can
+# distinguish "not implemented" from "method not found" or
+# "internal error" without parsing the message string.
+NOT_IMPLEMENTED = -32001
+
 
 @dataclass(frozen=True)
 class RpcError(Exception):

@@ -41,6 +41,7 @@ from thalyn_brain.terminal_observer import TerminalObserver
 from thalyn_brain.terminal_rpc import register_terminal_methods
 from thalyn_brain.tracing import init_tracer
 from thalyn_brain.transport import serve_stdio
+from thalyn_brain.v2_stubs_rpc import register_v2_stubs
 
 
 def main() -> int:
@@ -80,6 +81,9 @@ def main() -> int:
     register_browser_methods(dispatcher, browser_manager)
     register_mcp_methods(dispatcher, mcp_manager)
     register_email_methods(dispatcher, email_manager, credentials=email_credentials)
+    # Stubs for the v2 IPC surface; real handlers replace these as
+    # subsequent stages land per ADR-0021 / 02-architecture.md §6.
+    register_v2_stubs(dispatcher)
 
     async def dispatch_schedule(schedule: Schedule) -> str | None:
         """Fire one schedule into the runner.
