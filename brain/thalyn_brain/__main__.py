@@ -6,6 +6,8 @@ import asyncio
 import sys
 
 from thalyn_brain.approval_rpc import register_approval_methods
+from thalyn_brain.auth_registry import AuthBackendRegistry
+from thalyn_brain.auth_rpc import register_auth_methods
 from thalyn_brain.browser import BrowserManager
 from thalyn_brain.browser_rpc import register_browser_methods
 from thalyn_brain.chat import register_chat_methods
@@ -94,6 +96,12 @@ def main() -> int:
         threads_store=threads_store,
         registry=registry,
     )
+    # Auth-backend surface (ADR-0020). Real handlers replace the v2
+    # ``auth.*`` stubs; subsequent commits hook the active selection
+    # back into the AnthropicProvider so a swap takes effect on the
+    # next chat turn.
+    auth_registry = AuthBackendRegistry()
+    register_auth_methods(dispatcher, auth_registry)
     # Stubs for the v2 IPC surface; real handlers replace these as
     # subsequent stages land per ADR-0021 / 02-architecture.md §6.
     register_v2_stubs(dispatcher)
