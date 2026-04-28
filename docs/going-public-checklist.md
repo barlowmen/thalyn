@@ -45,6 +45,10 @@ Each item links to the requirement / ADR it overrides or extends.
 ### Audit logs
 - [ ] **Hash-chained / signed audit logs** (currently F7.6 ships unsigned NDJSON). Upgrade to a tamper-evident format.
 
+### Eternal-thread durability
+- [ ] **30-min duration-based soak gate.** The per-push CI gate runs the randomized-kill soak count-bounded (default 200 iterations, ~30s); a public release needs the same harness scheduled nightly with `THALYN_SOAK_DURATION_SECS=1800` so the 30-minute exposure window the v2 build plan calls for is exercised continuously. (ADR-0022's "Alternatives considered" section captures the trade-off.)
+- [ ] **Power-cut-grade durability test.** The current soak asserts SQLite-transaction atomicity at the application layer. A public-release-grade gate needs an OS-level kill (real `kill -9` between SQLite's commit and the disk's fsync barrier) before claiming the class-A correctness invariant under hardware failure modes.
+
 ### Telemetry & error reporting
 - [ ] **One-click Sentry OAuth** UX (currently paste-your-own-DSN per OQ-13). Polish.
 
