@@ -84,7 +84,7 @@ def main() -> int:
     register_approval_methods(dispatcher, runner)
     register_runs_methods(dispatcher, runs_store, runner=runner)
     register_schedule_methods(dispatcher, schedules_store, registry)
-    register_provider_methods(dispatcher, registry)
+    register_provider_methods(dispatcher, registry, auth_registry=auth_registry)
     register_memory_methods(dispatcher, memory_store)
     register_lsp_methods(dispatcher, lsp_manager)
     register_inline_methods(dispatcher, registry)

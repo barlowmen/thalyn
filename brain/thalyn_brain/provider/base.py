@@ -121,6 +121,8 @@ def compare_profiles(
     from_profile: CapabilityProfile,
     to_id: str,
     to_profile: CapabilityProfile,
+    from_auth_kind: str | None = None,
+    to_auth_kind: str | None = None,
 ) -> CapabilityDelta:
     """Compute the per-dimension delta between two profiles.
 
@@ -128,6 +130,12 @@ def compare_profiles(
     ``warning`` for downgrades the user should notice (tool-use
     reliability dropping, context shrinking, capabilities removed);
     ``info`` for upgrades or neutral metadata changes.
+
+    ``from_auth_kind`` / ``to_auth_kind`` are optional auth-backend
+    identifiers (matching ``AuthBackendKind`` values). When supplied
+    and they differ, an ``authBackend`` row joins the diff so the
+    capability-delta dialog also surfaces credential-source changes
+    per ADR-0020.
     """
     changes: list[CapabilityChange] = []
 
@@ -209,6 +217,21 @@ def compare_profiles(
                 dimension="local",
                 before=from_profile.local,
                 after=to_profile.local,
+                severity="info",
+            )
+        )
+
+    if from_auth_kind is not None and to_auth_kind is not None and from_auth_kind != to_auth_kind:
+        # Credential-source changes are informational by default — the
+        # capability profile is what tells the user whether it's a
+        # downgrade. The dialog surfaces this row so a user picking a
+        # provider with a different auth substrate sees what they're
+        # signing up for (e.g. subscription → API key).
+        changes.append(
+            CapabilityChange(
+                dimension="authBackend",
+                before=from_auth_kind,
+                after=to_auth_kind,
                 severity="info",
             )
         )

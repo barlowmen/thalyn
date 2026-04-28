@@ -28,6 +28,19 @@ const DIMENSION_LABEL: Record<string, string> = {
   supportsVision: "Vision",
   supportsStreaming: "Streaming",
   local: "Runs locally",
+  authBackend: "Auth backend",
+};
+
+// Human-readable names for AuthBackendKind values; mirrors the
+// brain's ``_DISPLAY_NAMES`` mapping in ``auth_registry.py`` so the
+// dialog speaks the same language as the wizard.
+const AUTH_BACKEND_LABEL: Record<string, string> = {
+  claude_subscription: "Claude subscription",
+  anthropic_api: "Anthropic API key",
+  openai_compat: "OpenAI-compatible endpoint",
+  ollama: "Ollama (local)",
+  llama_cpp: "llama.cpp (local)",
+  mlx: "MLX (Apple Silicon)",
 };
 
 /**
@@ -130,8 +143,8 @@ export function CapabilityDeltaDialog({
                     {DIMENSION_LABEL[change.dimension] ?? change.dimension}
                   </p>
                   <p className="text-[11px] text-muted-foreground">
-                    {formatValue(change.before)} →{" "}
-                    {formatValue(change.after)}
+                    {formatValue(change.before, change.dimension)} →{" "}
+                    {formatValue(change.after, change.dimension)}
                   </p>
                 </div>
               </li>
@@ -157,7 +170,10 @@ export function CapabilityDeltaDialog({
   );
 }
 
-function formatValue(value: unknown): string {
+function formatValue(value: unknown, dimension?: string): string {
+  if (dimension === "authBackend" && typeof value === "string") {
+    return AUTH_BACKEND_LABEL[value] ?? value;
+  }
   if (value === true) return "Yes";
   if (value === false) return "No";
   if (typeof value === "number") return value.toLocaleString();
