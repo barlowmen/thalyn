@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useState } from "react";
 
 import { ChatSurface } from "@/components/chat/chat-surface";
+import { FirstRunWizard } from "@/components/onboarding/first-run-wizard";
 import { AppShell } from "@/components/shell/app-shell";
 
 // Heavy surfaces are split out of the initial chat bundle so the
@@ -81,7 +82,9 @@ function App() {
   }, []);
 
   return (
-    <AppShell
+    <>
+      <FirstRunWizard />
+      <AppShell
       openSubAgentRunId={openSubAgentRunId}
       onOpenSubAgent={handleOpenSubAgent}
       onCloseSurface={handleCloseSubAgent}
@@ -165,6 +168,7 @@ function App() {
         />
       )}
     />
+    </>
   );
 }
 

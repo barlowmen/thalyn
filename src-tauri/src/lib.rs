@@ -278,6 +278,33 @@ async fn provider_delta(
 }
 
 #[tauri::command]
+async fn auth_list(state: State<'_, AppState>) -> Result<Value, String> {
+    state
+        .brain
+        .call("auth.list", json!({}), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn auth_probe(state: State<'_, AppState>, kind: String) -> Result<Value, String> {
+    state
+        .brain
+        .call("auth.probe", json!({ "kind": kind }), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn auth_set(state: State<'_, AppState>, kind: String) -> Result<Value, String> {
+    state
+        .brain
+        .call("auth.set", json!({ "kind": kind }), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 async fn create_schedule(
     state: State<'_, AppState>,
     title: String,
@@ -1525,6 +1552,9 @@ pub fn run() {
             delete_schedule,
             translate_cron,
             provider_delta,
+            auth_list,
+            auth_probe,
+            auth_set,
             list_memory,
             add_memory,
             update_memory,
