@@ -35,6 +35,9 @@ stubbed.__TAURI_INTERNALS__ = {
 };
 window.localStorage.setItem("thalyn:theme", "dark");
 window.localStorage.removeItem("thalyn:layout:default");
+// Skip the first-run wizard so the editor click isn't intercepted
+// by the welcome overlay.
+window.localStorage.setItem("thalyn:first-run-completed", "true");
 `;
 
 test.beforeEach(async ({ page }) => {

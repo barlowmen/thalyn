@@ -140,6 +140,9 @@ stubbed.__TAURI_INTERNALS__ = {
 const seedStorage = (theme: "dark" | "light" | "system") => `
 window.localStorage.setItem("thalyn:theme", ${JSON.stringify(theme)});
 window.localStorage.removeItem("thalyn:layout:default");
+// Skip the first-run wizard so the shell renders without the welcome
+// overlay covering it; visual snapshots target the steady-state UI.
+window.localStorage.setItem("thalyn:first-run-completed", "true");
 `;
 
 test.beforeEach(async ({ page }) => {
