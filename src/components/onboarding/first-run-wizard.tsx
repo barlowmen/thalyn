@@ -70,6 +70,10 @@ export function FirstRunWizard({
   const [open, setOpen] = useState<boolean>(() => {
     if (typeof forceOpen === "boolean") return forceOpen;
     if (typeof window === "undefined") return false;
+    // Visual-regression / e2e harnesses set ``navigator.webdriver`` and
+    // can't drive the wizard's brain calls; skip the overlay so they
+    // exercise the steady-state UI directly.
+    if (typeof navigator !== "undefined" && navigator.webdriver) return false;
     return window.localStorage.getItem(STORAGE_KEY) !== "true";
   });
   const [step, setStep] = useState<"select" | "configure">("select");
