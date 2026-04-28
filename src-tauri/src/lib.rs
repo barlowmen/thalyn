@@ -1,5 +1,6 @@
 mod brain;
 mod browser;
+mod data_dir;
 mod power;
 mod provider;
 mod sandbox;
@@ -1409,6 +1410,12 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
     let registry = ProviderRegistry::new(builtin_providers(secrets.has_api_key("anthropic")));
 
     let mut config = SpawnConfig::dev_default();
+    // Forward the canonical data directory so the brain and the Rust
+    // core agree on where state lives. Per ADR-0028, the brain owns
+    // every SQLite store; this env var is the single knob both
+    // processes consult.
+    let data_dir = data_dir::resolve();
+    config = config.with_env("THALYN_DATA_DIR", data_dir.to_string_lossy().to_string());
     if let Ok(Some(api_key)) = secrets.read_api_key("anthropic") {
         // Forward the key into the spawn env so the Claude Agent SDK
         // can authenticate without anything touching disk.
