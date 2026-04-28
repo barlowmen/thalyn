@@ -6,6 +6,14 @@ LLM-traffic implementations.
 """
 
 from thalyn_brain.provider.anthropic import AnthropicProvider
+from thalyn_brain.provider.auth import (
+    AuthBackend,
+    AuthBackendError,
+    AuthBackendKind,
+    AuthBackendNotAuthenticatedError,
+    AuthBackendNotDetectedError,
+    AuthProbeResult,
+)
 from thalyn_brain.provider.base import (
     Capability,
     CapabilityChange,
@@ -34,6 +42,12 @@ from thalyn_brain.provider.registry import (
 
 __all__ = [
     "AnthropicProvider",
+    "AuthBackend",
+    "AuthBackendError",
+    "AuthBackendKind",
+    "AuthBackendNotAuthenticatedError",
+    "AuthBackendNotDetectedError",
+    "AuthProbeResult",
     "Capability",
     "CapabilityChange",
     "CapabilityDelta",

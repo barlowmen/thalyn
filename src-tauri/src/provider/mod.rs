@@ -16,9 +16,12 @@
 
 #![allow(dead_code)]
 
+mod auth;
 mod capability;
 mod registry;
 
+#[allow(unused_imports)]
+pub use auth::{AuthBackend, AuthBackendError, AuthBackendKind, AuthProbeResult};
 pub use capability::{Capability, CapabilityProfile, ProviderKind, ProviderMeta, ReliabilityTier};
 pub use registry::{builtin_providers, ProviderRegistry};
 

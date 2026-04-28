@@ -30,7 +30,7 @@ from thalyn_brain.approvals import (
     new_approval_id,
 )
 from thalyn_brain.auth_backends import (
-    AuthBackend,
+    AuthBackendRecord,
     AuthBackendsStore,
     new_auth_backend_id,
 )
@@ -303,13 +303,13 @@ async def test_session_digest_round_trip(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# AuthBackend
+# AuthBackendRecord
 # ---------------------------------------------------------------------------
 
 
 async def test_auth_backends_crud_round_trip(tmp_path: Path) -> None:
     store = AuthBackendsStore(data_dir=tmp_path)
-    backend = AuthBackend(
+    backend = AuthBackendRecord(
         auth_backend_id=new_auth_backend_id(),
         kind="claude_subscription",
         config={"keychain_entry": "claude_cli_token"},
@@ -325,7 +325,7 @@ async def test_auth_backends_rejects_invalid_kind(tmp_path: Path) -> None:
     store = AuthBackendsStore(data_dir=tmp_path)
     with pytest.raises(ValueError):
         await store.insert(
-            AuthBackend(
+            AuthBackendRecord(
                 auth_backend_id=new_auth_backend_id(),
                 kind="not-a-real-kind",
                 config={},

@@ -74,3 +74,15 @@ adapter does the translation in `_normalize_message`. A
 dedicated normalizer module lands when a provider's tool-call
 output diverges enough that the per-adapter logic stops being
 the right home.
+
+### Refinement: auth-backend split (see ADR-0020)
+
+The provider abstraction is split into two composed traits: the
+existing `LlmProvider` (capability + streaming) and a new
+`AuthBackend` (probe + ensure-ready + `token()`). A single
+`AnthropicProvider` class composes either `ClaudeSubscriptionAuth`
+or `AnthropicApiAuth` and chooses what (if anything) to put in the
+SDK's spawn env at call time. The auth backend dimension is
+distinct from the model dimension per `02-architecture.md` §7.1,
+and the v1 default flips from API-key paste to Claude subscription.
+Detail in ADR-0020; spike in `docs/spikes/2026-04-28-claude-cli-auth.md`.

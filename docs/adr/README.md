@@ -31,3 +31,4 @@ This directory contains Thalyn's ADRs — one decision per file, in [MADR](https
 | [0016](0016-license-mit.md) | License: MIT (revisit before public) | Accepted (provisional) |
 | [0017](0017-observability-otel-langfuse.md) | Observability: OpenTelemetry GenAI + self-hosted Langfuse | Accepted (provisional) |
 | [0018](0018-python-sidecar-packaging-pyinstaller.md) | Python sidecar packaging: PyInstaller (uv-managed venv during early phases) | Proposed |
+| [0020](0020-brain-auth-backend-split.md) | Brain auth-backend split: Claude subscription default, API-key secondary | Proposed |

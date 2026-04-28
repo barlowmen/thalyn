@@ -1,10 +1,14 @@
 """Auth-backend store — separates auth from model in the provider abstraction.
 
-Per ADR-0012 (refined for v2) and ``02-architecture.md`` §7, an auth
-backend is a credential source: ``claude_subscription``,
+Per ADR-0012 (refined for v2), ADR-0020, and ``02-architecture.md`` §7,
+an auth backend is a credential source: ``claude_subscription``,
 ``anthropic_api``, ``openai_compat``, ``ollama``, ``llama_cpp``,
-``mlx``. The model dimension is independent. v0.20 lands the storage;
-the auth-backend trait + lifecycle land in the auth-split stage.
+``mlx``. The model dimension is independent.
+
+This module owns the *persistence record* (``AuthBackendRecord``) and
+its store. The *runtime protocol* (``AuthBackend``, the trait the
+provider composes when it talks to the SDK) lives in
+``thalyn_brain.provider.auth``.
 
 ``config_json`` holds secrets-adapter pointers (keychain entry names),
 not plaintext secrets. Secrets remain Rust-side per ADR-0028.
@@ -42,7 +46,7 @@ def new_auth_backend_id() -> str:
 
 
 @dataclass
-class AuthBackend:
+class AuthBackendRecord:
     auth_backend_id: str
     kind: str
     config: dict[str, Any]
@@ -69,24 +73,24 @@ class AuthBackendsStore:
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
-    async def insert(self, backend: AuthBackend) -> None:
+    async def insert(self, backend: AuthBackendRecord) -> None:
         if backend.kind not in AUTH_BACKEND_KINDS:
             raise ValueError(f"invalid auth backend kind: {backend.kind}")
         async with self._lock:
             await asyncio.to_thread(self._insert_sync, backend)
 
-    def _insert_sync(self, backend: AuthBackend) -> None:
+    def _insert_sync(self, backend: AuthBackendRecord) -> None:
         with self._open() as conn:
             conn.execute(
                 "INSERT INTO auth_backends (auth_backend_id, kind, config_json) VALUES (?, ?, ?)",
                 (backend.auth_backend_id, backend.kind, json.dumps(backend.config)),
             )
 
-    async def get(self, auth_backend_id: str) -> AuthBackend | None:
+    async def get(self, auth_backend_id: str) -> AuthBackendRecord | None:
         async with self._lock:
             return await asyncio.to_thread(self._get_sync, auth_backend_id)
 
-    def _get_sync(self, auth_backend_id: str) -> AuthBackend | None:
+    def _get_sync(self, auth_backend_id: str) -> AuthBackendRecord | None:
         with self._open() as conn:
             row = conn.execute(
                 "SELECT * FROM auth_backends WHERE auth_backend_id = ?",
@@ -94,11 +98,11 @@ class AuthBackendsStore:
             ).fetchone()
             return self._from_row(row) if row else None
 
-    async def list_all(self, *, kind: str | None = None) -> list[AuthBackend]:
+    async def list_all(self, *, kind: str | None = None) -> list[AuthBackendRecord]:
         async with self._lock:
             return await asyncio.to_thread(self._list_sync, kind)
 
-    def _list_sync(self, kind: str | None) -> list[AuthBackend]:
+    def _list_sync(self, kind: str | None) -> list[AuthBackendRecord]:
         with self._open() as conn:
             if kind is not None:
                 rows = conn.execute(
@@ -124,8 +128,8 @@ class AuthBackendsStore:
             return cur.rowcount > 0
 
     @staticmethod
-    def _from_row(row: sqlite3.Row) -> AuthBackend:
-        return AuthBackend(
+    def _from_row(row: sqlite3.Row) -> AuthBackendRecord:
+        return AuthBackendRecord(
             auth_backend_id=row["auth_backend_id"],
             kind=row["kind"],
             config=json.loads(row["config_json"]),
