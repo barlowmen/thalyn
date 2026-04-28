@@ -460,6 +460,92 @@ async def test_thread_send_folds_digest_and_recent_into_system_prompt(tmp_path: 
     assert "still earlier" in sys_prompt
 
 
+async def test_thread_send_injects_default_thalyn_identity_when_no_system_prompt(
+    tmp_path: Path,
+) -> None:
+    """When the renderer doesn't pass a systemPrompt, the brain still
+    composes an identity-bearing prompt for the SDK call (per F1.2)."""
+    from thalyn_brain.identity import THALYN_NAME, THALYN_SYSTEM_PROMPT
+
+    fake, factory = factory_for([text_message("hi"), result_message()])
+    provider = AnthropicProvider(client_factory=factory)
+    registry = _registry_with(provider)
+    store = ThreadsStore(data_dir=tmp_path)
+    dispatcher = Dispatcher()
+    register_thread_send_methods(
+        dispatcher,
+        threads_store=store,
+        registry=registry,
+    )
+
+    thread = await _seed_thread(store)
+
+    _, notify = _captured_notifier()
+    await dispatcher.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "thread.send",
+            "params": {
+                "threadId": thread.thread_id,
+                "providerId": "anthropic",
+                "prompt": "kickoff",
+                # NB: no systemPrompt — the brain owns the default.
+            },
+        },
+        notify,
+    )
+
+    sys_prompt = fake.options.system_prompt if fake.options is not None else ""
+    assert isinstance(sys_prompt, str)
+    # The Thalyn identity is the first thing in the assembled prompt.
+    assert THALYN_NAME in sys_prompt
+    assert sys_prompt.startswith(THALYN_SYSTEM_PROMPT.rstrip())
+
+
+async def test_thread_send_caller_can_override_thalyn_identity(tmp_path: Path) -> None:
+    """A caller-supplied systemPrompt fully replaces the Thalyn default
+    so renderer-side personalization can land later without code change."""
+    from thalyn_brain.identity import THALYN_SYSTEM_PROMPT
+
+    fake, factory = factory_for([text_message("hi"), result_message()])
+    provider = AnthropicProvider(client_factory=factory)
+    registry = _registry_with(provider)
+    store = ThreadsStore(data_dir=tmp_path)
+    dispatcher = Dispatcher()
+    register_thread_send_methods(
+        dispatcher,
+        threads_store=store,
+        registry=registry,
+    )
+
+    thread = await _seed_thread(store)
+
+    _, notify = _captured_notifier()
+    await dispatcher.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "thread.send",
+            "params": {
+                "threadId": thread.thread_id,
+                "providerId": "anthropic",
+                "prompt": "kickoff",
+                "systemPrompt": "You are Thalyn (custom override).",
+            },
+        },
+        notify,
+    )
+
+    sys_prompt = fake.options.system_prompt if fake.options is not None else ""
+    assert sys_prompt is not None
+    assert "You are Thalyn (custom override)." in sys_prompt
+    # The default body doesn't appear when an override is supplied.
+    assert "How to be Thalyn" not in sys_prompt
+    # Just to be safe — guard against reintroducing both.
+    assert THALYN_SYSTEM_PROMPT.split("\n", 1)[0] not in sys_prompt
+
+
 async def test_thread_send_returns_context_summary(tmp_path: Path) -> None:
     dispatcher, store, _ = await _build_dispatcher(
         tmp_path,

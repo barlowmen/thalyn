@@ -33,6 +33,7 @@ from thalyn_brain.digest_runner import (
     maybe_run_idle_digest,
     run_digest,
 )
+from thalyn_brain.identity import THALYN_SYSTEM_PROMPT
 from thalyn_brain.provider import (
     ChatChunk,
     ChatErrorChunk,
@@ -111,8 +112,13 @@ async def _handle_thread_send(
     project_id_value = params.get("projectId")
     project_id: str | None = project_id_value if isinstance(project_id_value, str) else None
     base_system_prompt_value = params.get("systemPrompt")
-    base_system_prompt: str | None = (
-        base_system_prompt_value if isinstance(base_system_prompt_value, str) else None
+    # Default to Thalyn's identity prompt when the caller doesn't supply
+    # one. Per F1.2 the brain has a stable identity across every turn;
+    # the renderer can override but the brain owns the default.
+    base_system_prompt: str = (
+        base_system_prompt_value
+        if isinstance(base_system_prompt_value, str) and base_system_prompt_value
+        else THALYN_SYSTEM_PROMPT
     )
 
     # 1. Verify the thread row exists. The default ``thread_self`` is
