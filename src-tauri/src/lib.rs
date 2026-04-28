@@ -1440,10 +1440,12 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
     let supervisor = Arc::new(supervisor);
     spawn_global_notification_forwarder(app.clone(), supervisor.clone());
 
-    let profile_root = app
-        .path()
-        .app_data_dir()
-        .unwrap_or_else(|_| std::env::temp_dir().join("thalyn"));
+    // CEF profile lives under the same canonical root as the brain's
+    // SQLite stores so all on-disk state shares one directory (per
+    // ADR-0028). `data_dir` was resolved above and forwarded to the
+    // brain via `THALYN_DATA_DIR`; before this change the profile
+    // sat under Tauri's bundle-id'd `app_data_dir()`, one level up.
+    let profile_root = data_dir.join("cef-profile");
 
     app.manage(AppState {
         brain: supervisor,
