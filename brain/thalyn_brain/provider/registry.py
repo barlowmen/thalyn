@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from thalyn_brain.provider.anthropic import DEFAULT_MODEL, AnthropicProvider
+from thalyn_brain.provider.auth import AuthBackend
 from thalyn_brain.provider.base import (
     Capability,
     CapabilityProfile,
@@ -90,9 +91,9 @@ async def _placeholder_stream(provider_id: str) -> AsyncIterator[ChatChunk]:
     yield ChatErrorChunk(message="unreachable")  # type: ignore[unreachable]
 
 
-def builtin_providers() -> list[LlmProvider]:
+def builtin_providers(*, anthropic_auth: AuthBackend | None = None) -> list[LlmProvider]:
     return [
-        AnthropicProvider(),
+        AnthropicProvider(auth_backend=anthropic_auth),
         _PlaceholderProvider(
             "openai_compat",
             "OpenAI-compatible endpoint",
@@ -145,8 +146,8 @@ class ProviderRegistry:
             raise ProviderNotImplementedError(f"unknown provider: {provider_id}") from exc
 
 
-def build_registry() -> ProviderRegistry:
-    return ProviderRegistry()
+def build_registry(*, anthropic_auth: AuthBackend | None = None) -> ProviderRegistry:
+    return ProviderRegistry(builtin_providers(anthropic_auth=anthropic_auth))
 
 
 def _kind_for(provider_id: str) -> ProviderKind:

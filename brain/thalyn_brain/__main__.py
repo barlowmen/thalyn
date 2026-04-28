@@ -28,7 +28,8 @@ from thalyn_brain.orchestration.storage import (
     apply_pending_migrations,
     default_data_dir,
 )
-from thalyn_brain.provider import build_registry
+from thalyn_brain.provider import AnthropicProvider, build_registry
+from thalyn_brain.provider.auth import AuthBackend
 from thalyn_brain.provider_rpc import register_provider_methods
 from thalyn_brain.rpc import build_default_dispatcher
 from thalyn_brain.runs import RunsStore
@@ -61,7 +62,11 @@ def main() -> int:
     data_dir = default_data_dir()
     apply_pending_migrations(data_dir=data_dir)
     dispatcher = build_default_dispatcher()
-    registry = build_registry()
+    # Auth-backend registry composes the AnthropicProvider's initial
+    # auth at startup; ``auth.set`` notifies it so subsequent chat turns
+    # use the user's chosen backend (per ADR-0020).
+    auth_registry = AuthBackendRegistry()
+    registry = build_registry(anthropic_auth=auth_registry.active())
     runs_store = RunsStore(data_dir=data_dir)
     schedules_store = SchedulesStore(data_dir=data_dir)
     memory_store = MemoryStore(data_dir=data_dir)
@@ -96,12 +101,21 @@ def main() -> int:
         threads_store=threads_store,
         registry=registry,
     )
+
     # Auth-backend surface (ADR-0020). Real handlers replace the v2
-    # ``auth.*`` stubs; subsequent commits hook the active selection
-    # back into the AnthropicProvider so a swap takes effect on the
-    # next chat turn.
-    auth_registry = AuthBackendRegistry()
-    register_auth_methods(dispatcher, auth_registry)
+    # ``auth.*`` stubs; the on-active-changed callback hot-swaps the
+    # AnthropicProvider's auth backend so the next chat turn picks up
+    # the user's selection without a brain restart.
+    def _hot_swap_anthropic_auth(backend: AuthBackend) -> None:
+        anthropic = registry.get("anthropic")
+        if isinstance(anthropic, AnthropicProvider):
+            anthropic.set_auth_backend(backend)
+
+    register_auth_methods(
+        dispatcher,
+        auth_registry,
+        on_active_changed=_hot_swap_anthropic_auth,
+    )
     # Stubs for the v2 IPC surface; real handlers replace these as
     # subsequent stages land per ADR-0021 / 02-architecture.md §6.
     register_v2_stubs(dispatcher)

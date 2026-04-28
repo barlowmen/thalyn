@@ -338,3 +338,52 @@ async def test_auth_set_with_unknown_kind_returns_invalid_params() -> None:
     error = response["error"]
     assert isinstance(error, dict)
     assert error["code"] == INVALID_PARAMS
+
+
+async def test_auth_set_invokes_on_active_changed_callback() -> None:
+    registry, fakes = _registry_with_fakes(active_kind=AuthBackendKind.CLAUDE_SUBSCRIPTION)
+    dispatcher = Dispatcher()
+    received: list[AuthBackendKind] = []
+
+    def callback(backend: Any) -> None:
+        received.append(backend.kind)
+
+    register_auth_methods(dispatcher, registry, on_active_changed=callback)
+
+    response = await dispatcher.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "auth.set",
+            "params": {"kind": "anthropic_api"},
+        },
+        notify=_drop_notify,
+    )
+
+    assert response is not None
+    assert "result" in response
+    # Callback received the *new* active backend (the one fakes uses
+    # for ANTHROPIC_API), not the prior one.
+    assert received == [AuthBackendKind.ANTHROPIC_API]
+    assert received[0] == fakes[AuthBackendKind.ANTHROPIC_API].kind
+
+
+async def test_auth_set_does_not_invoke_callback_when_unset() -> None:
+    """Default registration without a callback should still work."""
+    registry, _ = _registry_with_fakes()
+    dispatcher = Dispatcher()
+    register_auth_methods(dispatcher, registry)  # no on_active_changed
+
+    response = await dispatcher.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "auth.set",
+            "params": {"kind": "ollama"},
+        },
+        notify=_drop_notify,
+    )
+
+    assert response is not None
+    assert "result" in response
+    assert registry.active_kind == AuthBackendKind.OLLAMA

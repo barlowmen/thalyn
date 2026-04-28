@@ -110,6 +110,13 @@ class AnthropicProvider:
     def auth_backend(self) -> AuthBackend:
         return self._auth_backend
 
+    def set_auth_backend(self, backend: AuthBackend) -> None:
+        """Hot-swap the auth backend. The next ``stream_chat`` call sees
+        the new credential resolution; in-flight calls keep their
+        original backend (the closure captures the instance, not the
+        attribute)."""
+        self._auth_backend = backend
+
     def supports(self, capability: Capability) -> bool:
         return _PROFILE.supports(capability)
 

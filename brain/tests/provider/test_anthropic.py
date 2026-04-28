@@ -184,3 +184,27 @@ async def test_subscription_auth_preserves_system_prompt() -> None:
     assert fake.options.system_prompt == "You are Thalyn."
     env = dict(fake.options.env or {})
     assert "ANTHROPIC_API_KEY" not in env
+
+
+async def test_set_auth_backend_swaps_credential_for_next_call() -> None:
+    """The hot-swap path exercised by ``auth.set``: rotating the
+    backend updates the credential resolution on the very next call."""
+    api_auth = AnthropicApiAuth(source="sk-first")
+    fake1, factory1 = factory_for([text_message("ok"), result_message()])
+    provider = AnthropicProvider(client_factory=factory1, auth_backend=api_auth)
+    await _drain(provider, "hi-1")
+    assert fake1.options is not None
+    env_before = dict(fake1.options.env or {})
+    assert env_before.get("ANTHROPIC_API_KEY") == "sk-first"
+
+    # Hot-swap to subscription auth.
+    provider.set_auth_backend(ClaudeSubscriptionAuth(cli_locator=lambda: None))
+    assert provider.auth_backend.kind == AuthBackendKind.CLAUDE_SUBSCRIPTION
+
+    # Next call uses the new backend; ANTHROPIC_API_KEY is no longer set.
+    fake2, factory2 = factory_for([text_message("ok"), result_message()])
+    provider._client_factory = factory2  # rotate factory between calls
+    await _drain(provider, "hi-2")
+    assert fake2.options is not None
+    env_after = dict(fake2.options.env or {})
+    assert "ANTHROPIC_API_KEY" not in env_after

@@ -14,10 +14,11 @@ match the rest of the brain's IPC contract.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from thalyn_brain.auth_registry import AuthBackendRegistry
-from thalyn_brain.provider.auth import AuthBackendError, AuthBackendKind
+from thalyn_brain.provider.auth import AuthBackend, AuthBackendError, AuthBackendKind
 from thalyn_brain.rpc import (
     INVALID_PARAMS,
     Dispatcher,
@@ -30,6 +31,8 @@ from thalyn_brain.rpc import (
 def register_auth_methods(
     dispatcher: Dispatcher,
     registry: AuthBackendRegistry,
+    *,
+    on_active_changed: Callable[[AuthBackend], None] | None = None,
 ) -> None:
     """Wire ``auth.list`` / ``auth.probe`` / ``auth.set`` onto
     ``dispatcher``."""
@@ -56,6 +59,10 @@ def register_auth_methods(
             registry.set_active(kind)
         except AuthBackendError as exc:
             raise RpcError(code=INVALID_PARAMS, message=str(exc)) from exc
+        # Notify any subscriber (typically the AnthropicProvider) so the
+        # next chat turn uses the new credential.
+        if on_active_changed is not None:
+            on_active_changed(registry.active())
         # Surface the fresh probe so the renderer can decide whether to
         # warn the user about a not-yet-authenticated active selection.
         result = await registry.probe(kind)
