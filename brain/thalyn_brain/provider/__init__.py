@@ -19,6 +19,12 @@ from thalyn_brain.provider.auth_anthropic import (
     ClaudeSubscriptionAuth,
     find_claude_cli,
 )
+from thalyn_brain.provider.auth_local import (
+    LlamaCppAuth,
+    MlxAuth,
+    OllamaAuth,
+)
+from thalyn_brain.provider.auth_openai_compat import OpenAICompatAuth
 from thalyn_brain.provider.base import (
     Capability,
     CapabilityChange,
@@ -66,7 +72,11 @@ __all__ = [
     "ChatToolCallChunk",
     "ChatToolResultChunk",
     "ClaudeSubscriptionAuth",
+    "LlamaCppAuth",
     "LlmProvider",
+    "MlxAuth",
+    "OllamaAuth",
+    "OpenAICompatAuth",
     "ProviderError",
     "ProviderKind",
     "ProviderMeta",
