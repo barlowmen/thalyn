@@ -264,3 +264,86 @@ def test_v1_to_v2_seed_is_idempotent(tmp_path: Path) -> None:
             "SELECT COUNT(*) FROM agent_records WHERE kind = 'lead' AND project_id = 'proj_default'"
         ).fetchone()
         assert lead_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Eternal-thread durability surface (migration 005)
+# ---------------------------------------------------------------------------
+
+
+def test_thread_turns_status_column_present_after_apply(tmp_path: Path) -> None:
+    apply_pending_migrations(data_dir=tmp_path)
+    db_path = tmp_path / "app.db"
+    with sqlite3.connect(db_path) as conn:
+        cols = _columns(conn, "thread_turns")
+        assert "status" in cols
+
+
+def test_thread_turns_status_defaults_to_completed(tmp_path: Path) -> None:
+    """Inserting a row without an explicit status fills 'completed' so
+    historical (pre-migration) data round-trips cleanly."""
+    apply_pending_migrations(data_dir=tmp_path)
+    db_path = tmp_path / "app.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(
+            "INSERT INTO thread_turns "
+            "(turn_id, thread_id, role, body, at_ms) "
+            "VALUES (?, 'thread_self', 'user', 'hi', 1)",
+            ("turn_default_status",),
+        )
+        row = conn.execute(
+            "SELECT status FROM thread_turns WHERE turn_id = ?",
+            ("turn_default_status",),
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "completed"
+
+
+def test_thread_turn_index_fts5_vtable_present(tmp_path: Path) -> None:
+    apply_pending_migrations(data_dir=tmp_path)
+    db_path = tmp_path / "app.db"
+    with sqlite3.connect(db_path) as conn:
+        # FTS5 vtables register a base table plus a few shadow tables;
+        # the master entry tells us the vtable was created.
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='thread_turn_index'"
+        ).fetchone()
+        assert row is not None
+        assert "fts5" in row[0].lower()
+
+
+def test_thread_turn_index_indexes_and_searches(tmp_path: Path) -> None:
+    apply_pending_migrations(data_dir=tmp_path)
+    db_path = tmp_path / "app.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(
+            "INSERT INTO thread_turn_index (turn_id, body, role) VALUES (?, ?, ?)",
+            ("turn_fts_1", "the auth refactor shipped overnight", "user"),
+        )
+        conn.execute(
+            "INSERT INTO thread_turn_index (turn_id, body, role) VALUES (?, ?, ?)",
+            ("turn_fts_2", "tagged the milestone for the release", "brain"),
+        )
+        rows = conn.execute(
+            "SELECT turn_id FROM thread_turn_index WHERE thread_turn_index MATCH ? ORDER BY rank",
+            ("auth refactor",),
+        ).fetchall()
+        ids = [row[0] for row in rows]
+        assert ids[:1] == ["turn_fts_1"]
+
+
+def test_migration_005_is_idempotent_on_existing_app_db(tmp_path: Path) -> None:
+    """Re-applying after a cache flush must not re-add the status
+    column or recreate the FTS5 vtable."""
+    apply_pending_migrations(data_dir=tmp_path)
+    from thalyn_brain.orchestration.storage import _applied_db_paths
+
+    _applied_db_paths.clear()
+    apply_pending_migrations(data_dir=tmp_path)
+    db_path = tmp_path / "app.db"
+    with sqlite3.connect(db_path) as conn:
+        cols = _columns(conn, "thread_turns")
+        # `status` exists exactly once (no duplicate ALTER errors).
+        assert len([c for c in cols if c == "status"]) == 1
