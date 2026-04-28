@@ -39,6 +39,8 @@ from thalyn_brain.schedules import (
 from thalyn_brain.schedules_rpc import register_schedule_methods
 from thalyn_brain.terminal_observer import TerminalObserver
 from thalyn_brain.terminal_rpc import register_terminal_methods
+from thalyn_brain.threads import ThreadsStore
+from thalyn_brain.threads_rpc import register_thread_methods
 from thalyn_brain.tracing import init_tracer
 from thalyn_brain.transport import serve_stdio
 from thalyn_brain.v2_stubs_rpc import register_v2_stubs
@@ -60,6 +62,7 @@ def main() -> int:
     runs_store = RunsStore(data_dir=data_dir)
     schedules_store = SchedulesStore(data_dir=data_dir)
     memory_store = MemoryStore(data_dir=data_dir)
+    threads_store = ThreadsStore(data_dir=data_dir)
     lsp_manager = LspManager()
     terminal_observer = TerminalObserver()
     browser_manager = BrowserManager()
@@ -81,6 +84,9 @@ def main() -> int:
     register_browser_methods(dispatcher, browser_manager)
     register_mcp_methods(dispatcher, mcp_manager)
     register_email_methods(dispatcher, email_manager, credentials=email_credentials)
+    # Eternal-thread read surface (ADR-0022). thread.send + digest.run
+    # land alongside the orchestration changes that produce them.
+    register_thread_methods(dispatcher, threads_store)
     # Stubs for the v2 IPC surface; real handlers replace these as
     # subsequent stages land per ADR-0021 / 02-architecture.md §6.
     register_v2_stubs(dispatcher)

@@ -28,9 +28,6 @@ _drop_notify = _DropNotify()
 @pytest.mark.parametrize(
     "method",
     [
-        "thread.recent",
-        "thread.search",
-        "digest.latest",
         "digest.run",
         "auth.list",
         "auth.probe",

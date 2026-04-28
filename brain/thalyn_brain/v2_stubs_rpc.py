@@ -9,8 +9,9 @@ renderer would have to introspect.
 
 Stages that fill these in:
 
-- thread.recent / thread.search / digest.latest / digest.run — the
-  eternal-thread durability stage.
+- digest.run — the eternal-thread durability stage (lands with the
+  rolling-summarizer node; thread.recent / thread.search / digest.latest
+  are already real handlers).
 - auth.list / auth.probe / auth.set — the brain auth-backend split
   stage.
 - lead.spawn / lead.list / lead.pause / lead.resume / lead.archive —
@@ -33,9 +34,6 @@ from thalyn_brain.rpc import (
 )
 
 _STUB_METHODS: tuple[tuple[str, str], ...] = (
-    ("thread.recent", "the eternal-thread durability stage"),
-    ("thread.search", "the eternal-thread durability stage"),
-    ("digest.latest", "the eternal-thread durability stage"),
     ("digest.run", "the eternal-thread durability stage"),
     ("auth.list", "the brain auth-backend split stage"),
     ("auth.probe", "the brain auth-backend split stage"),
