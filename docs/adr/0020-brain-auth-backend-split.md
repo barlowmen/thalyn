@@ -139,3 +139,37 @@ caching is per-instance with explicit-invalidation semantics; stale
 errors surface through the existing `ChatErrorChunk` path; in-app
 login lands with the drawer system (later phase) once the terminal
 surface is real.
+
+## Addendum (2026-04-28, post-v0.22 architecture review)
+
+The first v2 architecture review surfaced a wrinkle worth recording on
+this ADR explicitly. **Anthropic enforced a policy in early April
+2026 that the Claude Agent SDK requires API-key auth and explicitly
+prohibits Pro/Max subscription billing.** The bundled `claude` CLI
+itself still authenticates fine against subscription auth (it's the
+user's own client of the Claude product, not the SDK), so the
+``ClaudeSubscriptionAuth`` flow we ship in v0.22 works at the CLI
+layer — `claude auth status` reports `loggedIn: true` and the bundled
+binary delegates calls to whatever Claude product the user is signed
+into.
+
+The implication is a credential-source / billing-target distinction:
+
+- The user's choice between subscription and API key is about
+  *credential source* — what the SDK uses to authenticate calls.
+  ``ClaudeSubscriptionAuth.token()`` returns ``None`` so the bundled
+  CLI uses its OAuth state; ``AnthropicApiAuth.token()`` returns the
+  pasted key so the SDK uses an explicit credential.
+- Whether Claude API costs hit Pro/Max billing or burn API credit
+  depends on Anthropic's accounting, which is outside Thalyn's
+  control.
+
+The user-visible UX in v0.22 is unchanged (the wizard's Claude
+subscription option still works); the subtlety belongs in product
+docs and the capability-delta dialog's explanatory copy as that
+surface is iterated. The ADR's core decision — split auth from
+provider, default to subscription credentials — stands.
+
+Reference: `docs/architecture-reviews/2026-04-28-v22.md` § ADR-0020.
+[Anthropic Agent SDK overview](https://platform.claude.com/docs/en/agent-sdk/overview),
+[Issue #559 (Max-plan billing)](https://github.com/anthropics/claude-agent-sdk-python/issues/559).
