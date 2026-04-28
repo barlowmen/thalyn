@@ -96,7 +96,7 @@ CI runs the same gates on every push and pull request.
 
 ## When you get stuck
 
-The escalation protocol in `` §7 applies to humans
+The escalation protocol in `` §8 applies to humans
 too: don't retry blindly, don't lower thresholds to make a check pass,
 don't bypass hooks. If a gate is wrong, fix the gate (in a separate
 commit) — don't bypass it. If you're truly stuck, file an issue with
