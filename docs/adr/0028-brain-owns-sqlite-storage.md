@@ -1,6 +1,6 @@
 # ADR-0028 — Brain owns SQLite storage; Rust core accesses via IPC
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-04-28
 - **Supersedes:** —
 
