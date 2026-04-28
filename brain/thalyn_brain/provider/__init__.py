@@ -14,6 +14,11 @@ from thalyn_brain.provider.auth import (
     AuthBackendNotDetectedError,
     AuthProbeResult,
 )
+from thalyn_brain.provider.auth_anthropic import (
+    AnthropicApiAuth,
+    ClaudeSubscriptionAuth,
+    find_claude_cli,
+)
 from thalyn_brain.provider.base import (
     Capability,
     CapabilityChange,
@@ -41,6 +46,7 @@ from thalyn_brain.provider.registry import (
 )
 
 __all__ = [
+    "AnthropicApiAuth",
     "AnthropicProvider",
     "AuthBackend",
     "AuthBackendError",
@@ -59,6 +65,7 @@ __all__ = [
     "ChatTextChunk",
     "ChatToolCallChunk",
     "ChatToolResultChunk",
+    "ClaudeSubscriptionAuth",
     "LlmProvider",
     "ProviderError",
     "ProviderKind",
@@ -69,4 +76,5 @@ __all__ = [
     "build_registry",
     "builtin_providers",
     "compare_profiles",
+    "find_claude_cli",
 ]
