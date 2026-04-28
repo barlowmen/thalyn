@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CapabilityDeltaDialog } from "@/components/chat/capability-delta-dialog";
 import { Composer } from "@/components/chat/composer";
 import { MessageList } from "@/components/chat/message-list";
+import { ThreadDigestGreeting } from "@/components/chat/thread-digest-greeting";
 import {
   commit as commitProviderSwap,
   ProviderSwitcher,
@@ -137,7 +138,10 @@ export function ChatSurface({
         </div>
       )}
 
-      <MessageList messages={messages} />
+      <MessageList
+        messages={messages}
+        header={<ThreadDigestGreeting />}
+      />
 
       {subAgentTiles.length > 0 && (
         <div className="border-t border-border bg-surface px-6 py-3">

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 
 import { ToolCallCard } from "@/components/chat/tool-call-card";
 import type { Message } from "@/components/chat/types";
@@ -6,6 +6,12 @@ import { cn } from "@/lib/utils";
 
 type Props = {
   messages: Message[];
+  /**
+   * Optional header rendered above the messages inside the scroll
+   * region. Used by the chat surface to slot in the day-divider /
+   * since-we-last-spoke digest greeting.
+   */
+  header?: ReactNode;
 };
 
 /**
@@ -13,7 +19,7 @@ type Props = {
  * messages so screen-readers announce streamed text without flooding —
  * polite mode batches per-render.
  */
-export function MessageList({ messages }: Props) {
+export function MessageList({ messages, header }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // Pin to the bottom when new content arrives — common chat affordance.
@@ -25,11 +31,14 @@ export function MessageList({ messages }: Props) {
 
   if (messages.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center text-center text-muted-foreground">
-        <p className="max-w-md text-sm">
-          Say hello to Thalyn — the conversation never resets, so
-          anything you start here picks up where it left off next time.
-        </p>
+      <div className="flex flex-1 flex-col overflow-y-auto px-6 py-4">
+        {header}
+        <div className="flex flex-1 items-center justify-center text-center text-muted-foreground">
+          <p className="max-w-md text-sm">
+            Say hello to Thalyn — the conversation never resets, so
+            anything you start here picks up where it left off next time.
+          </p>
+        </div>
       </div>
     );
   }
@@ -42,6 +51,7 @@ export function MessageList({ messages }: Props) {
       aria-live="polite"
       aria-label="Conversation"
     >
+      {header}
       {messages.map((message) => (
         <MessageBubble key={message.id} message={message} />
       ))}

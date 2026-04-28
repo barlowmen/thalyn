@@ -305,6 +305,37 @@ async fn auth_set(state: State<'_, AppState>, kind: String) -> Result<Value, Str
 }
 
 #[tauri::command]
+async fn thread_recent(
+    state: State<'_, AppState>,
+    thread_id: String,
+    limit: Option<u32>,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    params.insert("threadId".into(), Value::from(thread_id));
+    if let Some(l) = limit {
+        params.insert("limit".into(), Value::from(l));
+    }
+    state
+        .brain
+        .call("thread.recent", Value::Object(params), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn digest_latest(state: State<'_, AppState>, thread_id: String) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "digest.latest",
+            json!({ "threadId": thread_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 async fn create_schedule(
     state: State<'_, AppState>,
     title: String,
@@ -1555,6 +1586,8 @@ pub fn run() {
             auth_list,
             auth_probe,
             auth_set,
+            thread_recent,
+            digest_latest,
             list_memory,
             add_memory,
             update_memory,
