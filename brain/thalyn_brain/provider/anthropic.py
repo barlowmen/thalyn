@@ -1,4 +1,12 @@
-"""Anthropic provider — wraps the Claude Agent SDK."""
+"""Anthropic provider — wraps the Claude Agent SDK.
+
+The provider composes one of two auth backends per ADR-0020:
+``ClaudeSubscriptionAuth`` (the bundled CLI's stored OAuth token —
+default) or ``AnthropicApiAuth`` (an Anthropic API key resolved from
+env / keychain). The selection is per-instance and resolved at call
+time by ``_build_options`` so a hot-rotated key becomes visible
+without restarting the brain.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +25,8 @@ from claude_agent_sdk import (
     UserMessage,
 )
 
+from thalyn_brain.provider.auth import AuthBackend
+from thalyn_brain.provider.auth_anthropic import AnthropicApiAuth
 from thalyn_brain.provider.base import (
     Capability,
     CapabilityProfile,
@@ -54,16 +64,29 @@ def _default_factory(options: ClaudeAgentOptions) -> ClaudeSDKClient:
 
 
 class AnthropicProvider:
-    """Provider that streams responses through the Claude Agent SDK."""
+    """Provider that streams responses through the Claude Agent SDK.
+
+    Composes an ``AuthBackend`` so the same provider class works with
+    either the user's Claude subscription (the bundled CLI's stored
+    OAuth token) or a pasted Anthropic API key. ``token()`` returning
+    ``None`` is the explicit signal to leave ``ANTHROPIC_API_KEY``
+    unset and let the CLI's own auth state apply (per ADR-0020).
+    """
 
     def __init__(
         self,
         *,
         model: str = DEFAULT_MODEL,
         client_factory: SdkClientFactory | None = None,
+        auth_backend: AuthBackend | None = None,
     ) -> None:
         self._model = model
         self._client_factory = client_factory or _default_factory
+        # Default to the v1-compatible API-key path: read
+        # ANTHROPIC_API_KEY from the spawn env. Wiring the
+        # subscription-default selection in the registry / RPC layer
+        # is the next step in the auth split.
+        self._auth_backend = auth_backend or AnthropicApiAuth()
 
     # --- LlmProvider Protocol surface -----------------------------------
 
@@ -83,6 +106,10 @@ class AnthropicProvider:
     def default_model(self) -> str:
         return self._model
 
+    @property
+    def auth_backend(self) -> AuthBackend:
+        return self._auth_backend
+
     def supports(self, capability: Capability) -> bool:
         return _PROFILE.supports(capability)
 
@@ -97,11 +124,19 @@ class AnthropicProvider:
         # — the SDK session itself maintains turn state. A future commit
         # threads multi-turn history through.
         del history
-        options = self._build_options(system_prompt)
-        return _stream(self._client_factory, options, prompt, self._model)
+        return _stream(
+            self._client_factory,
+            self._auth_backend,
+            self._model,
+            prompt,
+            system_prompt,
+        )
 
-    def _build_options(self, system_prompt: str | None) -> ClaudeAgentOptions:
+    async def _build_options(self, system_prompt: str | None) -> ClaudeAgentOptions:
         env: dict[str, str] = {"ANTHROPIC_MODEL": self._model}
+        token = await self._auth_backend.token()
+        if token is not None:
+            env["ANTHROPIC_API_KEY"] = token
         if system_prompt is None:
             return ClaudeAgentOptions(env=env)
         return ClaudeAgentOptions(env=env, system_prompt=system_prompt)
@@ -109,16 +144,32 @@ class AnthropicProvider:
 
 async def _stream(
     factory: SdkClientFactory,
-    options: ClaudeAgentOptions,
-    prompt: str,
+    auth_backend: AuthBackend,
     model: str,
+    prompt: str,
+    system_prompt: str | None,
 ) -> AsyncIterator[ChatChunk]:
-    """Drive the SDK and yield normalized chunks."""
+    """Drive the SDK and yield normalized chunks.
+
+    Builds the SDK options here so the auth backend's ``token()`` is
+    consulted on every call. A subscription backend returns ``None``
+    and we leave ``ANTHROPIC_API_KEY`` unset; an API-key backend
+    returns the current key and we inject it.
+    """
     from thalyn_brain.tracing import annotate_llm_response, llm_call_span
 
     yield ChatStartChunk(model=model)
     with llm_call_span(provider_id="anthropic", model=model) as span:
         try:
+            env: dict[str, str] = {"ANTHROPIC_MODEL": model}
+            token = await auth_backend.token()
+            if token is not None:
+                env["ANTHROPIC_API_KEY"] = token
+            options = (
+                ClaudeAgentOptions(env=env)
+                if system_prompt is None
+                else ClaudeAgentOptions(env=env, system_prompt=system_prompt)
+            )
             async with cast(Any, factory(options)) as client:
                 await client.query(prompt)
                 async for message in client.receive_response():
