@@ -28,6 +28,11 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
+from thalyn_brain.digest_runner import (
+    maybe_compress_old_digests,
+    maybe_run_idle_digest,
+    run_digest,
+)
 from thalyn_brain.provider import (
     ChatChunk,
     ChatErrorChunk,
@@ -85,9 +90,13 @@ def register_thread_send_methods(
     async def thread_recovery_resolve(params: RpcParams) -> JsonValue:
         return await _handle_recovery_resolve(params, threads_store)
 
+    async def digest_run(params: RpcParams) -> JsonValue:
+        return await _handle_digest_run(params, threads_store, registry)
+
     dispatcher.register_streaming("thread.send", thread_send)
     dispatcher.register("thread.recovery_status", thread_recovery_status)
     dispatcher.register("thread.recovery_resolve", thread_recovery_resolve)
+    dispatcher.register("digest.run", digest_run)
 
 
 async def _handle_thread_send(
@@ -121,7 +130,15 @@ async def _handle_thread_send(
     # than leaving an orphan in_progress turn behind.
     provider = registry.get(provider_id)
 
-    # 3. Persist the user turn FIRST, status='in_progress' (ADR-0022 §1).
+    # 3. Close out the prior session if the user has been idle past
+    # the threshold. The digest summarises the prior window, so it
+    # has to land before the new user turn lands — otherwise the new
+    # turn slips into the next digest's window and the boundary is
+    # smeared.
+    await maybe_run_idle_digest(provider, store, thread_id=thread_id)
+    await maybe_compress_old_digests(provider, store, thread_id=thread_id)
+
+    # 4. Persist the user turn FIRST, status='in_progress' (ADR-0022 §1).
     now_ms = int(time.time() * 1000)
     user_turn = ThreadTurn(
         turn_id=new_turn_id(),
@@ -139,13 +156,13 @@ async def _handle_thread_send(
     await store.begin_user_turn(user_turn)
     await store.touch_thread(thread_id, now_ms)
 
-    # 4. Pre-compute the brain reply turn's id so streamed chunks can
+    # 5. Pre-compute the brain reply turn's id so streamed chunks can
     # reference it. The id flows back to the renderer in the response;
     # if the run errors mid-stream the renderer can still correlate
     # the partial chunks with a turn-shaped row that never lands.
     brain_turn_id = new_turn_id()
 
-    # 5. Assemble the per-turn context bundle (rolling digest + recent
+    # 6. Assemble the per-turn context bundle (rolling digest + recent
     # turns + conditional episodic recall) per §9.4.
     assembled = await assemble_context(
         store,
@@ -154,7 +171,7 @@ async def _handle_thread_send(
         base_system_prompt=base_system_prompt,
     )
 
-    # 6. Stream the brain's reply chunk-by-chunk. Buffer text deltas
+    # 7. Stream the brain's reply chunk-by-chunk. Buffer text deltas
     # so the brain reply turn's body matches what the user saw.
     text_parts: list[str] = []
     error_message: str | None = None
@@ -198,13 +215,13 @@ async def _handle_thread_send(
         )
         raise RpcError(code=INTERNAL_ERROR, message=str(exc)) from exc
 
-    # 7. If the provider surfaced an error chunk, leave the user turn
+    # 8. If the provider surfaced an error chunk, leave the user turn
     # in_progress so recovery can replay. Surface the error to the
     # caller as INTERNAL_ERROR rather than swallowing it.
     if error_message is not None:
         raise RpcError(code=INTERNAL_ERROR, message=error_message)
 
-    # 8. Persist the brain reply turn at the completed boundary,
+    # 9. Persist the brain reply turn at the completed boundary,
     # atomically with flipping the user turn to completed (ADR-0022 §1).
     final_response = "".join(text_parts)
     brain_turn = ThreadTurn(
@@ -249,6 +266,27 @@ async def _handle_recovery_status(
     return {
         "threadId": thread_id,
         "inProgressTurns": [t.to_wire() for t in in_progress],
+    }
+
+
+async def _handle_digest_run(
+    params: RpcParams,
+    store: ThreadsStore,
+    registry: ProviderRegistry,
+) -> JsonValue:
+    """Force-run the rolling summarizer.
+
+    The architecture surfaces this as ``digest.run`` for the
+    ``/wrap`` slash command and for tests; the same code path also
+    runs at the 20-min idle gap inside ``thread.send``.
+    """
+    thread_id = _require_str(params, "threadId")
+    provider_id = _require_str(params, "providerId")
+    provider = registry.get(provider_id)
+    digest = await run_digest(provider, store, thread_id=thread_id)
+    return {
+        "threadId": thread_id,
+        "digest": digest.to_wire() if digest is not None else None,
     }
 
 
