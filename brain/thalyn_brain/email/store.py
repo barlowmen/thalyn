@@ -16,21 +16,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from thalyn_brain.orchestration.storage import default_data_dir
+from thalyn_brain.orchestration.storage import (
+    apply_pending_migrations,
+    default_data_dir,
+)
 
 EMAIL_PROVIDERS = frozenset({"gmail", "microsoft"})
-
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS email_accounts (
-    account_id TEXT PRIMARY KEY,
-    provider TEXT NOT NULL,
-    label TEXT NOT NULL,
-    address TEXT NOT NULL,
-    created_at_ms INTEGER NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS email_accounts_provider_idx ON email_accounts(provider);
-"""
 
 
 @dataclass(frozen=True)
@@ -58,11 +49,9 @@ class EmailAccountStore:
 
     def __init__(self, *, data_dir: Path | None = None) -> None:
         base = data_dir or default_data_dir()
-        base.mkdir(parents=True, exist_ok=True)
+        apply_pending_migrations(data_dir=base)
         self._db_path = base / "app.db"
         self._lock = asyncio.Lock()
-        with self._open() as conn:
-            conn.executescript(_SCHEMA)
 
     def _open(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, isolation_level=None)

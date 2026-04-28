@@ -22,7 +22,10 @@ from thalyn_brain.memory import MemoryStore
 from thalyn_brain.memory_rpc import register_memory_methods
 from thalyn_brain.orchestration import Runner
 from thalyn_brain.orchestration.resume import resume_unfinished_runs
-from thalyn_brain.orchestration.storage import default_data_dir
+from thalyn_brain.orchestration.storage import (
+    apply_pending_migrations,
+    default_data_dir,
+)
 from thalyn_brain.provider import build_registry
 from thalyn_brain.provider_rpc import register_provider_methods
 from thalyn_brain.rpc import build_default_dispatcher
@@ -50,6 +53,7 @@ def main() -> int:
     # paste their own DSN into). With no DSN, this is a no-op.
     init_sentry()
     data_dir = default_data_dir()
+    apply_pending_migrations(data_dir=data_dir)
     dispatcher = build_default_dispatcher()
     registry = build_registry()
     runs_store = RunsStore(data_dir=data_dir)

@@ -25,7 +25,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from thalyn_brain.orchestration.storage import default_data_dir
+from thalyn_brain.orchestration.storage import (
+    apply_pending_migrations,
+    default_data_dir,
+)
 
 MEMORY_SCOPES = frozenset({"user", "project", "agent"})
 MEMORY_KINDS = frozenset({"fact", "preference", "reference", "feedback"})
@@ -83,37 +86,15 @@ class MemoryUpdate:
         return self
 
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS memory_entries (
-    memory_id TEXT PRIMARY KEY,
-    project_id TEXT,
-    scope TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    body TEXT NOT NULL,
-    author TEXT NOT NULL,
-    created_at_ms INTEGER NOT NULL,
-    updated_at_ms INTEGER NOT NULL,
-    embedding_json TEXT
-);
-
-CREATE INDEX IF NOT EXISTS memory_scope_idx ON memory_entries(scope);
-CREATE INDEX IF NOT EXISTS memory_project_idx ON memory_entries(project_id);
-CREATE INDEX IF NOT EXISTS memory_kind_idx ON memory_entries(kind);
-CREATE INDEX IF NOT EXISTS memory_created_idx ON memory_entries(created_at_ms);
-"""
-
-
 class MemoryStore:
     """SQLite-backed memory index sharing ``app.db`` with the runs +
     schedules tables."""
 
     def __init__(self, *, data_dir: Path | None = None) -> None:
         base = data_dir or default_data_dir()
-        base.mkdir(parents=True, exist_ok=True)
+        apply_pending_migrations(data_dir=base)
         self._db_path = base / "app.db"
         self._lock = asyncio.Lock()
-        with self._open() as conn:
-            conn.executescript(_SCHEMA)
 
     def _open(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, isolation_level=None)

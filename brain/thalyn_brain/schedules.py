@@ -27,7 +27,10 @@ from typing import Any
 
 from croniter import croniter  # type: ignore[import-untyped]
 
-from thalyn_brain.orchestration.storage import default_data_dir
+from thalyn_brain.orchestration.storage import (
+    apply_pending_migrations,
+    default_data_dir,
+)
 
 
 @dataclass
@@ -83,36 +86,14 @@ class ScheduleUpdate:
         return self
 
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS schedules (
-    schedule_id TEXT PRIMARY KEY,
-    project_id TEXT,
-    title TEXT NOT NULL,
-    nl_input TEXT NOT NULL,
-    cron TEXT NOT NULL,
-    run_template_json TEXT NOT NULL,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    next_run_at_ms INTEGER,
-    last_run_at_ms INTEGER,
-    last_run_id TEXT,
-    created_at_ms INTEGER NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS schedules_next_idx ON schedules(next_run_at_ms);
-CREATE INDEX IF NOT EXISTS schedules_enabled_idx ON schedules(enabled);
-"""
-
-
 class SchedulesStore:
     """SQLite-backed schedule index sharing ``app.db`` with runs."""
 
     def __init__(self, *, data_dir: Path | None = None) -> None:
         base = data_dir or default_data_dir()
-        base.mkdir(parents=True, exist_ok=True)
+        apply_pending_migrations(data_dir=base)
         self._db_path = base / "app.db"
         self._lock = asyncio.Lock()
-        with self._open() as conn:
-            conn.executescript(_SCHEMA)
 
     def _open(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, isolation_level=None)

@@ -1,9 +1,15 @@
-"""Per-run storage — one SQLite file per run.
+"""Per-run storage and the brain-wide migration runner.
 
 LangGraph's `AsyncSqliteSaver` snapshots the graph state on every
 node transition. Per `02-architecture.md` §5 each run gets its own
 file under `runs/{run_id}.db` so individual runs are cheap to
 archive or delete and large runs don't bloat a shared database.
+
+The shared `app.db` schema is owned by yoyo-migrations under
+`thalyn_brain/migrations/` per ADR-0028. `apply_pending_migrations`
+brings the database up to date; stores call it from `__init__` so a
+fresh install or a v1 upgrade picks up the schema before any read
+or write.
 
 The data directory is configurable; production uses the per-OS data
 directory (`~/Library/Application Support/Thalyn/data` on macOS,
@@ -15,12 +21,14 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from yoyo import get_backend, read_migrations
 
 
 def default_data_dir() -> Path:
@@ -71,3 +79,31 @@ async def open_run_checkpointer(
     path = run_db_path(run_id, data_dir=data_dir)
     async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
         yield saver
+
+
+_MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
+_migration_lock = threading.Lock()
+_applied_db_paths: set[Path] = set()
+
+
+def apply_pending_migrations(data_dir: Path | None = None) -> None:
+    """Run any unapplied yoyo migrations against ``app.db``.
+
+    Idempotent: yoyo skips migrations whose hashes match the
+    ``_yoyo_migration`` log. Safe to call from every store's
+    ``__init__`` and from the brain's startup path; the in-process
+    cache short-circuits redundant calls so test runs that build many
+    stores against the same database don't pay the yoyo overhead each
+    time.
+    """
+    base = data_dir or default_data_dir()
+    base.mkdir(parents=True, exist_ok=True)
+    db_path = (base / "app.db").resolve()
+    with _migration_lock:
+        if db_path in _applied_db_paths:
+            return
+        backend = get_backend(f"sqlite:///{db_path}")
+        migrations = read_migrations(str(_MIGRATIONS_DIR))
+        with backend.lock():
+            backend.apply_migrations(backend.to_apply(migrations))
+        _applied_db_paths.add(db_path)

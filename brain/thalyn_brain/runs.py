@@ -25,7 +25,10 @@ from pathlib import Path
 from typing import Any
 
 from thalyn_brain.orchestration.state import RunStatus
-from thalyn_brain.orchestration.storage import default_data_dir
+from thalyn_brain.orchestration.storage import (
+    apply_pending_migrations,
+    default_data_dir,
+)
 
 
 @dataclass
@@ -91,51 +94,15 @@ class RunUpdate:
         return self
 
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS agent_runs (
-    run_id TEXT PRIMARY KEY,
-    project_id TEXT,
-    parent_run_id TEXT,
-    status TEXT NOT NULL,
-    title TEXT NOT NULL,
-    provider_id TEXT NOT NULL,
-    started_at_ms INTEGER NOT NULL,
-    completed_at_ms INTEGER,
-    drift_score REAL NOT NULL DEFAULT 0,
-    final_response TEXT NOT NULL DEFAULT '',
-    plan_json TEXT,
-    sandbox_tier TEXT,
-    budget_json TEXT,
-    budget_consumed_json TEXT
-);
-
-CREATE INDEX IF NOT EXISTS agent_runs_status_idx ON agent_runs(status);
-CREATE INDEX IF NOT EXISTS agent_runs_started_idx ON agent_runs(started_at_ms);
-"""
-
-
 class RunsStore:
     """Synchronous-under-the-hood; async surface so callers don't
     block the event loop while SQLite does its thing."""
 
     def __init__(self, *, data_dir: Path | None = None) -> None:
         base = data_dir or default_data_dir()
-        base.mkdir(parents=True, exist_ok=True)
+        apply_pending_migrations(data_dir=base)
         self._db_path = base / "app.db"
         self._lock = asyncio.Lock()
-        with self._open() as conn:
-            conn.executescript(_SCHEMA)
-            # Forward-compat: ALTER TABLE for older databases that
-            # predate columns introduced after the initial schema.
-            existing_columns = {
-                row["name"] for row in conn.execute("PRAGMA table_info(agent_runs)").fetchall()
-            }
-            if "sandbox_tier" not in existing_columns:
-                conn.execute("ALTER TABLE agent_runs ADD COLUMN sandbox_tier TEXT")
-            if "budget_json" not in existing_columns:
-                conn.execute("ALTER TABLE agent_runs ADD COLUMN budget_json TEXT")
-            if "budget_consumed_json" not in existing_columns:
-                conn.execute("ALTER TABLE agent_runs ADD COLUMN budget_consumed_json TEXT")
 
     def _open(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, isolation_level=None)
