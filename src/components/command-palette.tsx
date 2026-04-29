@@ -1,8 +1,10 @@
 import {
+  Brain,
   Code2,
   FolderTree,
   Inbox,
   type LucideIcon,
+  MessageSquare,
   Monitor,
   Moon,
   Plug,
@@ -30,13 +32,14 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command";
+import { type LeadAgent, listLeads } from "@/lib/leads";
 
 type Action = {
   id: string;
   label: string;
   icon: LucideIcon;
   shortcut?: string;
-  group: "Theme" | "App" | "Drawer";
+  group: "Theme" | "App" | "Drawer" | "Leads";
   run: () => void;
 };
 
@@ -67,6 +70,29 @@ export function CommandPalette({
   const { setTheme } = useTheme();
   const drawerHost = useDrawerHost();
   const hasOpenDrawers = drawerHost.visible.length > 0;
+  const [leads, setLeads] = useState<LeadAgent[]>([]);
+
+  // Refresh the lead list when the palette opens — keeps the menu
+  // honest against pause/resume/archive transitions without a
+  // long-lived subscription. Tauri-less environments (storybook /
+  // playwright) silently keep the empty list so the surface still
+  // renders.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void listLeads({ status: "active" })
+      .then((result) => {
+        if (cancelled) return;
+        setLeads(result.agents);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLeads([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   // Cmd-K (macOS) / Ctrl-K (everywhere else) toggles the palette.
   // The chat-first top bar's keyboard-shortcut chip dispatches the
@@ -110,8 +136,35 @@ export function CommandPalette({
     });
   }
 
+  // One pair of actions per active lead: open the detail drawer or
+  // drop directly into the chat surface. Surfacing both keeps the
+  // F2.4 pattern fluid — the user's intent maps to the right drawer
+  // without an intermediate stop.
+  const leadActions: Action[] = leads.flatMap((lead) => [
+    {
+      id: `lead.detail.${lead.agentId}`,
+      label: `Open ${lead.displayName} detail`,
+      icon: Brain,
+      group: "Leads",
+      run: () =>
+        drawerHost.open({ kind: "lead", params: { agentId: lead.agentId } }),
+    },
+    {
+      id: `lead.chat.${lead.agentId}`,
+      label: `Chat with ${lead.displayName}`,
+      icon: MessageSquare,
+      group: "Leads",
+      run: () =>
+        drawerHost.open({
+          kind: "lead-chat",
+          params: { agentId: lead.agentId, displayName: lead.displayName },
+        }),
+    },
+  ]);
+
   const actions: Action[] = [
     ...drawerActions,
+    ...leadActions,
     {
       id: "theme.dark",
       label: "Theme: Dark",
