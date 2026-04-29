@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { PlanApprovalDialog } from "@/components/approval/plan-approval-dialog";
+import { useApprovalGate } from "@/components/approval/use-approval-gate";
 import { CapabilityDeltaDialog } from "@/components/chat/capability-delta-dialog";
 import { Composer } from "@/components/chat/composer";
 import { MessageList } from "@/components/chat/message-list";
@@ -7,7 +9,12 @@ import { ThreadDigestGreeting } from "@/components/chat/thread-digest-greeting";
 import { commit as commitProviderSwap } from "@/components/chat/provider-switcher";
 import { useChat } from "@/components/chat/use-chat";
 import { CommandPalette } from "@/components/command-palette";
+import { useDriftGate } from "@/components/inspector/use-drift-gate";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
+import {
+  DrawerHost,
+  DrawerHostProvider,
+} from "@/components/shell/drawer-host";
 import { TopBar } from "@/components/shell/top-bar";
 import {
   type TransientActivity,
@@ -23,26 +30,36 @@ import {
 } from "@/lib/providers";
 
 /**
- * The chat-first shell (ADR-0026). Five regions stacked vertically:
+ * The chat-first shell (ADR-0026). Five regions stacked vertically
+ * inside a chat column, with the drawer band sitting to its right
+ * when one or more drawers are open:
  *
- *   ┌──────────────────────────────────────────────────────┐
- *   │  Top bar (~52 px)                                    │
- *   ├──────────────────────────────────────────────────────┤
- *   │  Eternal chat (fluid)                                │
- *   ├──────────────────────────────────────────────────────┤
- *   │  Transient progress strip (~36 px, when in flight)   │
- *   ├──────────────────────────────────────────────────────┤
- *   │  Composer (~72 px)                                   │
- *   └──────────────────────────────────────────────────────┘
+ *   ┌────────────────────────────────────────────────────────┐
+ *   │  Top bar (~52 px)                                      │
+ *   ├──────────────────────────┬─────────────────────────────┤
+ *   │                          │                             │
+ *   │  Eternal chat (fluid)    │  Drawer band                │
+ *   │                          │  (0, 1, or 2 drawers)       │
+ *   ├──────────────────────────┤                             │
+ *   │  Transient progress      │                             │
+ *   ├──────────────────────────┤                             │
+ *   │  Composer                │                             │
+ *   └──────────────────────────┴─────────────────────────────┘
  *
- * Drawer-host primitive lands later; until then this shell wraps
- * the same chat surface logic the v1 mosaic uses, just in the new
- * topology. The legacy mosaic shell stays reachable under
- * ``/legacy`` so the editor / terminal / browser / email /
- * connectors / agents / logs surfaces remain available during the
- * transition.
+ * Drawer host (ADR-0026, F8.2) brings the editor / terminal / email /
+ * file-tree / connectors / logs surfaces in on demand and dismisses
+ * with ⌘\\. Below the 900 px breakpoint the drawer band takes the
+ * chat column's place — chat returns the moment the drawer dismisses.
  */
 export function ChatFirstShell() {
+  return (
+    <DrawerHostProvider>
+      <ShellInner />
+    </DrawerHostProvider>
+  );
+}
+
+function ShellInner() {
   const [providerId, setProviderId] = useState<string>(() => readActiveProvider());
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [pendingSwap, setPendingSwap] = useState<{
@@ -52,6 +69,8 @@ export function ChatFirstShell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const { messages, status, send } = useChat({ providerId });
+  const approval = useApprovalGate();
+  const drift = useDriftGate();
 
   useEffect(() => subscribeActiveProvider(setProviderId), []);
 
@@ -85,7 +104,24 @@ export function ChatFirstShell() {
       ? "No Anthropic API key on file. Open Settings to add one."
       : null;
 
-  const activity: TransientActivity | null = sending
+  // Priority order for the transient strip (F8.3): drift > approval >
+  // sending. The strip shows one signal at a time; clicks dismiss the
+  // gate (v0.27 has no per-run detail drawer to route into yet — that
+  // lands in v0.28's worker / lead drawer work).
+  const activity: TransientActivity | null = drift.gate
+    ? {
+        kind: "drift",
+        label: `Drift flagged on a run${
+          drift.gate.reason ? ` — ${drift.gate.reason}` : "."
+        }`,
+        onClick: drift.dismiss,
+      }
+    : approval.gate
+    ? {
+        kind: "awaiting_approval",
+        label: "Plan ready for review — open to approve or edit.",
+      }
+    : sending
     ? {
         kind: "sending",
         label: "Routing your turn through Thalyn…",
@@ -102,35 +138,44 @@ export function ChatFirstShell() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
-      <main className="flex min-h-0 flex-1 flex-col">
-        <div className="mx-auto flex h-full w-full max-w-3xl flex-1 flex-col">
-          <MessageList messages={messages} header={<ThreadDigestGreeting />} />
-        </div>
-      </main>
+      <DrawerHost
+        chat={
+          <>
+            <main className="flex min-h-0 flex-1 flex-col">
+              <div className="mx-auto flex h-full w-full max-w-3xl flex-1 flex-col">
+                <MessageList
+                  messages={messages}
+                  header={<ThreadDigestGreeting />}
+                />
+              </div>
+            </main>
 
-      {errorMessage && (
-        <p
-          role="alert"
-          className="border-t border-border bg-destructive/10 px-6 py-2 text-xs text-destructive"
-        >
-          {errorMessage}
-        </p>
-      )}
+            {errorMessage && (
+              <p
+                role="alert"
+                className="border-t border-border bg-destructive/10 px-6 py-2 text-xs text-destructive"
+              >
+                {errorMessage}
+              </p>
+            )}
 
-      <TransientProgressStrip activity={activity} />
+            <TransientProgressStrip activity={activity} />
 
-      <div className="mx-auto w-full max-w-3xl">
-        <Composer
-          size="roomy"
-          disabled={sending || !configured}
-          placeholder={
-            !configured
-              ? "Add an Anthropic API key in Settings to enable chat."
-              : undefined
-          }
-          onSubmit={send}
-        />
-      </div>
+            <div className="mx-auto w-full max-w-3xl">
+              <Composer
+                size="roomy"
+                disabled={sending || !configured}
+                placeholder={
+                  !configured
+                    ? "Add an Anthropic API key in Settings to enable chat."
+                    : undefined
+                }
+                onSubmit={send}
+              />
+            </div>
+          </>
+        }
+      />
 
       <CommandPalette
         onOpenSettings={() => setSettingsOpen(true)}
@@ -142,6 +187,14 @@ export function ChatFirstShell() {
         pending={pendingSwap}
         onCancel={handleCancelSwap}
         onConfirm={handleConfirmSwap}
+      />
+
+      <PlanApprovalDialog
+        open={approval.gate !== null}
+        runId={approval.gate?.runId ?? null}
+        providerId={providerId}
+        plan={approval.gate?.plan ?? null}
+        onSettled={approval.clear}
       />
     </div>
   );

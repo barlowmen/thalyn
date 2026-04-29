@@ -1,18 +1,25 @@
 import {
-  Compass,
+  Code2,
+  FolderTree,
+  Inbox,
   type LucideIcon,
-  MessagesSquare,
   Monitor,
   Moon,
-  PanelLeft,
-  PanelRight,
+  Plug,
   RotateCw,
+  ScrollText,
   Settings as SettingsIcon,
   Sun,
+  Terminal as TerminalIcon,
+  X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { useTheme } from "@/components/theme-provider";
+import {
+  type DrawerKind,
+  useDrawerHost,
+} from "@/components/shell/drawer-host";
 import { COMMAND_PALETTE_OPEN_EVENT } from "@/components/shell/top-bar";
 import {
   CommandDialog,
@@ -23,37 +30,43 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command";
-import { navigateTo, usePathname } from "@/lib/use-pathname";
 
 type Action = {
   id: string;
   label: string;
   icon: LucideIcon;
   shortcut?: string;
-  group: "Theme" | "Layout" | "App" | "Navigate";
+  group: "Theme" | "App" | "Drawer";
   run: () => void;
 };
 
+const DRAWER_OPEN_ITEMS: ReadonlyArray<{
+  kind: DrawerKind;
+  label: string;
+  icon: LucideIcon;
+}> = [
+  { kind: "editor", label: "Open editor", icon: Code2 },
+  { kind: "terminal", label: "Open terminal", icon: TerminalIcon },
+  { kind: "email", label: "Open email", icon: Inbox },
+  { kind: "file-tree", label: "Open files", icon: FolderTree },
+  { kind: "connectors", label: "Open connectors", icon: Plug },
+  { kind: "logs", label: "Open logs", icon: ScrollText },
+];
+
 /**
  * The command palette opens with Cmd-K (or Ctrl-K). Every action
- * exposed in menus is also addressable here per F11.2; for v0.2 we
- * ship the theme controls, the layout toggles, and a couple of
- * housekeeping actions. As real surfaces come online they register
- * actions with the palette via props or context.
+ * exposed in menus is also addressable here per F11.2; the chat-first
+ * shell relies on the palette as its primary nav surface (F8.6).
  */
 export function CommandPalette({
-  onToggleSidebar,
-  onToggleInspector,
   onOpenSettings,
 }: {
-  onToggleSidebar?: () => void;
-  onToggleInspector?: () => void;
   onOpenSettings?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const { setTheme } = useTheme();
-  const pathname = usePathname();
-  const onLegacy = pathname === "/legacy" || pathname.startsWith("/legacy/");
+  const drawerHost = useDrawerHost();
+  const hasOpenDrawers = drawerHost.visible.length > 0;
 
   // Cmd-K (macOS) / Ctrl-K (everywhere else) toggles the palette.
   // The chat-first top bar's keyboard-shortcut chip dispatches the
@@ -78,7 +91,27 @@ export function CommandPalette({
 
   const close = () => setOpen(false);
 
+  const drawerActions: Action[] = DRAWER_OPEN_ITEMS.map((item) => ({
+    id: `drawer.open.${item.kind}`,
+    label: item.label,
+    icon: item.icon,
+    group: "Drawer",
+    run: () => drawerHost.open({ kind: item.kind }),
+  }));
+
+  if (hasOpenDrawers) {
+    drawerActions.push({
+      id: "drawer.closeAll",
+      label: "Close all drawers",
+      icon: X,
+      group: "Drawer",
+      shortcut: "⌘\\",
+      run: () => drawerHost.closeAll(),
+    });
+  }
+
   const actions: Action[] = [
+    ...drawerActions,
     {
       id: "theme.dark",
       label: "Theme: Dark",
@@ -101,20 +134,6 @@ export function CommandPalette({
       run: () => setTheme("system"),
     },
     {
-      id: "layout.toggleSidebar",
-      label: "Toggle sidebar",
-      icon: PanelLeft,
-      group: "Layout",
-      run: () => onToggleSidebar?.(),
-    },
-    {
-      id: "layout.toggleInspector",
-      label: "Toggle inspector",
-      icon: PanelRight,
-      group: "Layout",
-      run: () => onToggleInspector?.(),
-    },
-    {
       id: "app.openSettings",
       label: "Open settings…",
       icon: SettingsIcon,
@@ -128,21 +147,6 @@ export function CommandPalette({
       group: "App",
       run: () => window.location.reload(),
     },
-    onLegacy
-      ? {
-          id: "nav.chatFirst",
-          label: "Open chat-first view",
-          icon: MessagesSquare,
-          group: "Navigate",
-          run: () => navigateTo("/"),
-        }
-      : {
-          id: "nav.legacy",
-          label: "Open legacy view (editor / terminal / browser / agents)",
-          icon: Compass,
-          group: "Navigate",
-          run: () => navigateTo("/legacy"),
-        },
   ];
 
   const grouped = actions.reduce<Record<string, Action[]>>((acc, action) => {
