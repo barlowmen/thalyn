@@ -31,6 +31,7 @@ const RUN_STATUS_EVENT: &str = "run:status";
 const RUN_PLAN_UPDATE_EVENT: &str = "run:plan_update";
 const RUN_ACTION_LOG_EVENT: &str = "run:action_log";
 const RUN_APPROVAL_REQUIRED_EVENT: &str = "run:approval_required";
+const LEAD_ESCALATION_EVENT: &str = "lead:escalation";
 const LSP_MESSAGE_EVENT: &str = "lsp:message";
 const LSP_ERROR_EVENT: &str = "lsp:error";
 const TERMINAL_DATA_EVENT: &str = "terminal:data";
@@ -1398,6 +1399,7 @@ fn forward_brain_notification(method: &str, params: &Value, app: &AppHandle, ses
         "run.plan_update" => RUN_PLAN_UPDATE_EVENT,
         "run.action_log" => RUN_ACTION_LOG_EVENT,
         "run.approval_required" => RUN_APPROVAL_REQUIRED_EVENT,
+        "lead.escalation" => LEAD_ESCALATION_EVENT,
         _ => return,
     };
     if event_name == CHAT_CHUNK_EVENT {

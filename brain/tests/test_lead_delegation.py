@@ -14,8 +14,10 @@ import pytest
 from thalyn_brain.agents import AgentRecord, new_agent_id
 from thalyn_brain.lead_delegation import (
     DEFAULT_LEAD_SYSTEM_PROMPT_TEMPLATE,
+    ESCALATION_QUESTION_THRESHOLD,
     LOW_CONFIDENCE_NOTE,
     effective_system_prompt,
+    evaluate_lead_escalation,
     find_addressed_lead,
     sanity_check_lead_reply,
 )
@@ -128,3 +130,39 @@ def test_sanity_check_flags_hedge_phrases(reply: str) -> None:
     verdict = sanity_check_lead_reply(reply)
     assert verdict.ok is False
     assert verdict.note == LOW_CONFIDENCE_NOTE
+
+
+def test_evaluate_escalation_returns_none_below_threshold() -> None:
+    lead = _lead(display_name="Lead-Sam")
+    reply = "I have one open question. Should we land the test fixtures?"
+    assert evaluate_lead_escalation(lead, reply) is None
+
+
+def test_evaluate_escalation_flags_high_density_reply() -> None:
+    lead = _lead(display_name="Lead-Sam")
+    reply = (
+        "A few open questions before I can land the next slice:\n"
+        "1. Do we keep the legacy helper around for one cycle?\n"
+        "2. Should the test fixtures live with this slice or the next?\n"
+        "3. Is the new session boundary documented yet?"
+    )
+    signal = evaluate_lead_escalation(lead, reply)
+    assert signal is not None
+    assert signal.lead_id == lead.agent_id
+    assert signal.density == "high"
+    assert signal.suggestion == "open_drawer"
+    assert signal.question_count >= ESCALATION_QUESTION_THRESHOLD
+
+
+def test_evaluate_escalation_to_wire_round_trip() -> None:
+    lead = _lead(display_name="Lead-Sam")
+    reply = "q1? q2? q3?"
+    signal = evaluate_lead_escalation(lead, reply)
+    assert signal is not None
+    wire = signal.to_wire()
+    assert wire == {
+        "leadId": lead.agent_id,
+        "questionCount": 3,
+        "density": "high",
+        "suggestion": "open_drawer",
+    }

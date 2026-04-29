@@ -9,16 +9,23 @@ path runs:
    row carries an empty one) and may have its own provider — looked
    up against the same ``ProviderRegistry`` the brain uses.
 2. The lead's full reply runs through ``sanity_check_lead_reply``
-   before the brain forwards it. The v0.23 critic is heuristic-only:
+   before the brain forwards it. The critic is heuristic-only:
    it flags empty replies and explicit hedges so the brain can
-   surface a confidence note. Future phases plug an LLM-judge in
+   surface a confidence note. Future stages plug an LLM-judge in
    without changing the critic's call site.
 3. The brain composes its outgoing surface text with a preamble plus
    the lead's reply prefixed by ``"<lead-name> says: "`` (the shape
    ``02-architecture.md`` §6.3 records). The renderer drills into
    provenance to see the lead's raw reply.
+4. The reply is evaluated for question density via
+   ``evaluate_lead_escalation``. When the lead's answer carries
+   enough open questions to justify a side-conversation (F2.5), the
+   handler emits a ``lead.escalation`` notification so the renderer
+   can surface a "drop into Lead-X" CTA inline. Low-density replies
+   stay on the relay path — ``evaluate_lead_escalation`` returns
+   ``None`` so the brain doesn't have to special-case the absence.
 
-Sub-leads are out of scope here; v0.34 extends the matcher and
+Sub-leads are out of scope here; future stages extend the matcher and
 ``effective_system_prompt`` for the deeper hierarchy. The data shape
 already permits sub-leads, so the extension is additive.
 """
@@ -28,6 +35,7 @@ from __future__ import annotations
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import Any, Literal
 
 from thalyn_brain.agents import AgentRecord
 from thalyn_brain.project_context import ProjectContext, merge_into_system_prompt
@@ -58,6 +66,13 @@ _HEDGE_PHRASES: tuple[str, ...] = (
 )
 LOW_CONFIDENCE_NOTE = "Low-confidence reply — flagging the response for context."
 
+# Question-density threshold for escalation. Three or more questions
+# from the lead in a single reply has been the rule of thumb the
+# user-research synthesis converged on — fewer than that and the
+# inline relay still feels lighter than dropping into a side
+# conversation; more, and the user wants the parallel surface.
+ESCALATION_QUESTION_THRESHOLD = 3
+
 
 @dataclass(frozen=True)
 class AddressedLead:
@@ -65,6 +80,30 @@ class AddressedLead:
 
     lead: AgentRecord
     body: str
+
+
+@dataclass(frozen=True)
+class EscalationSignal:
+    """F2.5 escalation hint emitted alongside a lead's reply.
+
+    ``density`` and ``suggestion`` carry the rendered intent: at
+    ``high`` density the brain wants the user to consider the
+    side-pane chat, while ``low`` density never reaches the renderer
+    (the helper returns ``None`` instead of constructing a signal).
+    """
+
+    lead_id: str
+    question_count: int
+    density: Literal["low", "high"]
+    suggestion: Literal["relay_inline", "open_drawer"]
+
+    def to_wire(self) -> dict[str, Any]:
+        return {
+            "leadId": self.lead_id,
+            "questionCount": self.question_count,
+            "density": self.density,
+            "suggestion": self.suggestion,
+        }
 
 
 @dataclass(frozen=True)
@@ -165,6 +204,35 @@ async def collect_lead_reply(
         elif isinstance(chunk, ChatErrorChunk):
             error_message = chunk.message
     return "".join(text_parts), error_message
+
+
+def evaluate_lead_escalation(
+    lead: AgentRecord,
+    reply_text: str,
+    *,
+    threshold: int = ESCALATION_QUESTION_THRESHOLD,
+) -> EscalationSignal | None:
+    """Return an escalation signal when the lead's reply is question-dense.
+
+    The heuristic counts ``?`` characters in the reply and treats any
+    reply with at least ``threshold`` questions as high-density. Below
+    the threshold the helper returns ``None`` so the brain stays on
+    the inline-relay path without an explicit "low" notification.
+
+    The threshold is configurable so a future LLM-judge can override
+    it; until then the rule-of-three matches the wording in F2.5
+    ("Lead-Thalyn has 6 open questions on the auth refactor — want to
+    drop into a quick chat?").
+    """
+    count = reply_text.count("?")
+    if count < threshold:
+        return None
+    return EscalationSignal(
+        lead_id=lead.agent_id,
+        question_count=count,
+        density="high",
+        suggestion="open_drawer",
+    )
 
 
 def sanity_check_lead_reply(reply_text: str) -> SanityCheckVerdict:

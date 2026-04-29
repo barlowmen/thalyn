@@ -42,6 +42,7 @@ from thalyn_brain.lead_delegation import (
     AddressedLead,
     SanityCheckVerdict,
     collect_lead_reply,
+    evaluate_lead_escalation,
     find_addressed_lead,
     sanity_check_lead_reply,
 )
@@ -77,6 +78,7 @@ from thalyn_brain.threads import (
 )
 
 THREAD_CHUNK = "thread.chunk"
+LEAD_ESCALATION = "lead.escalation"
 DEFAULT_BRAIN_AGENT_ID = "agent_brain"
 
 
@@ -475,6 +477,14 @@ async def _handle_delegated_reply(
         THREAD_CHUNK,
         {"turnId": brain_turn_id, "chunk": {"kind": "stop", "reason": "end_turn"}},
     )
+
+    # F2.5 escalation: when the lead's reply is question-dense, surface
+    # a "drop into Lead-X" CTA rather than relying on the user to read
+    # 6 questions inline. ``evaluate_lead_escalation`` returns ``None``
+    # for low-density replies so the relay path stays unchanged.
+    escalation = evaluate_lead_escalation(lead, lead_reply)
+    if escalation is not None:
+        await notify(LEAD_ESCALATION, escalation.to_wire())
 
     now_ms = int(time.time() * 1000)
     lead_turn_id = new_turn_id()

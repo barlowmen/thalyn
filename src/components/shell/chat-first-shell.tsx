@@ -11,6 +11,8 @@ import { commit as commitProviderSwap } from "@/components/chat/provider-switche
 import { useChat } from "@/components/chat/use-chat";
 import { CommandPalette } from "@/components/command-palette";
 import { useDriftGate } from "@/components/inspector/use-drift-gate";
+import { EscalationCard } from "@/components/lead/escalation-card";
+import { useLeadEscalation } from "@/components/lead/use-lead-escalation";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import {
   DrawerHost,
@@ -77,6 +79,7 @@ function ShellInner() {
   const { messages, status, send } = useChat({ providerId });
   const approval = useApprovalGate();
   const drift = useDriftGate();
+  const escalation = useLeadEscalation();
   const drawerHost = useDrawerHost();
 
   useEffect(() => subscribeActiveProvider(setProviderId), []);
@@ -165,18 +168,33 @@ function ShellInner() {
                   messages={messages}
                   header={<ThreadDigestGreeting />}
                   footer={
-                    approval.gate ? (
-                      <InlineApprovalCard
-                        runId={approval.gate.runId}
-                        providerId={providerId}
-                        plan={approval.gate.plan}
-                        onSettled={() => {
-                          approval.clear();
-                          setEditingApproval(false);
-                        }}
-                        onOpenEditor={() => setEditingApproval(true)}
-                      />
-                    ) : null
+                    <>
+                      {escalation.signal && (
+                        <EscalationCard
+                          signal={escalation.signal}
+                          onAccept={() => {
+                            drawerHost.open({
+                              kind: "lead-chat",
+                              params: { agentId: escalation.signal!.leadId },
+                            });
+                            escalation.dismiss();
+                          }}
+                          onDismiss={escalation.dismiss}
+                        />
+                      )}
+                      {approval.gate && (
+                        <InlineApprovalCard
+                          runId={approval.gate.runId}
+                          providerId={providerId}
+                          plan={approval.gate.plan}
+                          onSettled={() => {
+                            approval.clear();
+                            setEditingApproval(false);
+                          }}
+                          onOpenEditor={() => setEditingApproval(true)}
+                        />
+                      )}
+                    </>
                   }
                 />
               </div>

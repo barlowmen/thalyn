@@ -9,6 +9,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type LeadStatus = "active" | "paused" | "archived";
 export type LeadKind = "lead" | "sub_lead";
@@ -69,4 +70,29 @@ export function resumeLead(agentId: string): Promise<LeadMutationResult> {
 
 export function archiveLead(agentId: string): Promise<LeadMutationResult> {
   return invoke<LeadMutationResult>("lead_archive", { agentId });
+}
+
+export type LeadEscalationDensity = "low" | "high";
+export type LeadEscalationSuggestion = "relay_inline" | "open_drawer";
+
+export type LeadEscalationEvent = {
+  leadId: string;
+  questionCount: number;
+  density: LeadEscalationDensity;
+  suggestion: LeadEscalationSuggestion;
+};
+
+/**
+ * Subscribe to F2.5 escalation hints emitted by the brain alongside a
+ * lead's reply. The brain only fires this when the reply crosses the
+ * question-density threshold, so the event always represents a
+ * suggestion to surface a "drop into Lead-X" CTA. Returns the same
+ * unlisten function shape as the rest of the lib bindings.
+ */
+export function subscribeLeadEscalation(
+  handler: (event: LeadEscalationEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<LeadEscalationEvent>("lead:escalation", (e) =>
+    handler(e.payload),
+  );
 }
