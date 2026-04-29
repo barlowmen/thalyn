@@ -17,10 +17,12 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * The seven drawer kinds in v0.27. The browser drawer is reserved
- * but doesn't materialise until v0.29 (the cef-rs swap); listing it
- * here keeps the ``DrawerKind`` type honest about the eventual surface
- * set without forcing every consumer to special-case its absence.
+ * The drawer kinds. Tools (editor / terminal / email / file-tree /
+ * connectors / logs) plus the v0.28 agent surfaces (worker plan +
+ * action-log detail). The browser drawer is reserved but doesn't
+ * materialise until v0.29 (the cef-rs swap); the ``DrawerKind`` type
+ * stays honest about the eventual surface set without forcing every
+ * consumer to special-case its absence.
  */
 export type DrawerKind =
   | "editor"
@@ -28,7 +30,8 @@ export type DrawerKind =
   | "email"
   | "file-tree"
   | "connectors"
-  | "logs";
+  | "logs"
+  | "worker";
 
 /**
  * Per-kind open parameters. The brain (and Cmd-K) pass these through
@@ -43,6 +46,7 @@ export type DrawerParams = {
   "file-tree": { root?: string };
   connectors: Record<string, never>;
   logs: { runId?: string };
+  worker: { runId: string };
 };
 
 export type DrawerOpenSpec = {

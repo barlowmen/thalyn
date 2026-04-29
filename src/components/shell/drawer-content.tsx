@@ -37,6 +37,11 @@ const LogsSurface = lazy(() =>
     default: m.LogsSurface,
   })),
 );
+const WorkerSurface = lazy(() =>
+  import("@/components/worker/worker-surface").then((m) => ({
+    default: m.WorkerSurface,
+  })),
+);
 
 function Fallback({ label }: { label: string }) {
   return (
@@ -101,6 +106,14 @@ export function resolveDrawer<K extends DrawerKind>(
           <LogsSurface />
         </Suspense>
       );
+    case "worker": {
+      const workerParams = (params ?? {}) as DrawerParams["worker"];
+      return (
+        <Suspense fallback={<Fallback label="worker" />}>
+          <WorkerSurface runId={workerParams.runId} />
+        </Suspense>
+      );
+    }
   }
   // The switch is exhaustive over DrawerKind; this is a type
   // assertion for the compiler.

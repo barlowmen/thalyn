@@ -11,6 +11,7 @@ const DRAWER_LABEL: Record<DrawerKind, string> = {
   "file-tree": "Files",
   connectors: "Connectors",
   logs: "Logs",
+  worker: "Worker",
 };
 
 export type DrawerEscapeHatch = {
