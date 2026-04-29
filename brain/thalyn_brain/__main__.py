@@ -35,6 +35,8 @@ from thalyn_brain.projects import ProjectsStore
 from thalyn_brain.provider import AnthropicProvider, build_registry
 from thalyn_brain.provider.auth import AuthBackend
 from thalyn_brain.provider_rpc import register_provider_methods
+from thalyn_brain.routing import RoutingOverridesStore
+from thalyn_brain.routing_rpc import register_routing_methods
 from thalyn_brain.rpc import build_default_dispatcher
 from thalyn_brain.runs import RunsStore
 from thalyn_brain.runs_rpc import register_runs_methods
@@ -77,6 +79,7 @@ def main() -> int:
     threads_store = ThreadsStore(data_dir=data_dir)
     agent_records_store = AgentRecordsStore(data_dir=data_dir)
     projects_store = ProjectsStore(data_dir=data_dir)
+    routing_overrides_store = RoutingOverridesStore(data_dir=data_dir)
     lead_lifecycle = LeadLifecycle(
         agents=agent_records_store,
         projects=projects_store,
@@ -132,6 +135,15 @@ def main() -> int:
     # pause / resume / archive transitions and keeps the project's
     # ``lead_agent_id`` pointer consistent.
     register_lead_methods(dispatcher, lead_lifecycle)
+    # Worker-routing surface (ADR-0023). Real handlers replace the v2
+    # ``routing.*`` stubs; backed by ``RoutingOverridesStore`` plus the
+    # pure ``route_worker`` resolver.
+    register_routing_methods(
+        dispatcher,
+        overrides_store=routing_overrides_store,
+        projects_store=projects_store,
+        valid_provider_ids={meta.id for meta in registry.list_meta()},
+    )
     # Stubs for the v2 IPC surface; real handlers replace these as
     # subsequent stages land per ADR-0021 / 02-architecture.md §6.
     register_v2_stubs(dispatcher)

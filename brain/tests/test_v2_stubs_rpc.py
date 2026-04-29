@@ -28,9 +28,6 @@ _drop_notify = _DropNotify()
 @pytest.mark.parametrize(
     "method",
     [
-        "routing.get",
-        "routing.set",
-        "routing.clear",
         "project.create",
         "project.list",
         "project.classify",

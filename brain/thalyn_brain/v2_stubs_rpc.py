@@ -9,15 +9,15 @@ renderer would have to introspect.
 
 Stages that fill these in:
 
-- routing.get / routing.set / routing.clear — the worker-routing
-  stage.
 - project.create / project.list — the multi-project stage.
 - project.classify — the project-mobility stage.
 
 The ``auth.*`` methods landed alongside the AuthBackend split and
 register themselves through ``auth_rpc.register_auth_methods``. The
 ``lead.*`` methods landed alongside the lead-as-first-class stage and
-register themselves through ``lead_rpc.register_lead_methods``.
+register themselves through ``lead_rpc.register_lead_methods``. The
+``routing.*`` methods landed with the worker-routing stage and register
+themselves through ``routing_rpc.register_routing_methods``.
 """
 
 from __future__ import annotations
@@ -32,9 +32,6 @@ from thalyn_brain.rpc import (
 )
 
 _STUB_METHODS: tuple[tuple[str, str], ...] = (
-    ("routing.get", "the worker-routing stage"),
-    ("routing.set", "the worker-routing stage"),
-    ("routing.clear", "the worker-routing stage"),
     ("project.create", "the multi-project stage"),
     ("project.list", "the multi-project stage"),
     ("project.classify", "the project-mobility stage"),
