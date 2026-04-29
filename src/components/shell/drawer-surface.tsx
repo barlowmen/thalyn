@@ -12,6 +12,7 @@ const DRAWER_LABEL: Record<DrawerKind, string> = {
   connectors: "Connectors",
   logs: "Logs",
   worker: "Worker",
+  lead: "Lead",
 };
 
 export type DrawerEscapeHatch = {

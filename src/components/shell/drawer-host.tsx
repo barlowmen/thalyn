@@ -31,7 +31,8 @@ export type DrawerKind =
   | "file-tree"
   | "connectors"
   | "logs"
-  | "worker";
+  | "worker"
+  | "lead";
 
 /**
  * Per-kind open parameters. The brain (and Cmd-K) pass these through
@@ -47,6 +48,7 @@ export type DrawerParams = {
   connectors: Record<string, never>;
   logs: { runId?: string };
   worker: { runId: string };
+  lead: { agentId: string };
 };
 
 export type DrawerOpenSpec = {

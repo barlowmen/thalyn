@@ -42,6 +42,11 @@ const WorkerSurface = lazy(() =>
     default: m.WorkerSurface,
   })),
 );
+const LeadSurface = lazy(() =>
+  import("@/components/lead/lead-surface").then((m) => ({
+    default: m.LeadSurface,
+  })),
+);
 
 function Fallback({ label }: { label: string }) {
   return (
@@ -111,6 +116,14 @@ export function resolveDrawer<K extends DrawerKind>(
       return (
         <Suspense fallback={<Fallback label="worker" />}>
           <WorkerSurface runId={workerParams.runId} />
+        </Suspense>
+      );
+    }
+    case "lead": {
+      const leadParams = (params ?? {}) as DrawerParams["lead"];
+      return (
+        <Suspense fallback={<Fallback label="lead" />}>
+          <LeadSurface agentId={leadParams.agentId} />
         </Suspense>
       );
     }
