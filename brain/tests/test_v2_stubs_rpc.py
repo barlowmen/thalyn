@@ -28,11 +28,6 @@ _drop_notify = _DropNotify()
 @pytest.mark.parametrize(
     "method",
     [
-        "lead.spawn",
-        "lead.list",
-        "lead.pause",
-        "lead.resume",
-        "lead.archive",
         "routing.get",
         "routing.set",
         "routing.clear",

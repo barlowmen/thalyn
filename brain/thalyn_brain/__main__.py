@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
+from thalyn_brain.agents import AgentRecordsStore
 from thalyn_brain.approval_rpc import register_approval_methods
 from thalyn_brain.auth_registry import AuthBackendRegistry
 from thalyn_brain.auth_rpc import register_auth_methods
@@ -16,6 +17,8 @@ from thalyn_brain.email.credentials import EmailCredentialsCache
 from thalyn_brain.email_rpc import register_email_methods
 from thalyn_brain.error_reporting import init_sentry
 from thalyn_brain.inline_rpc import register_inline_methods
+from thalyn_brain.lead_lifecycle import LeadLifecycle
+from thalyn_brain.lead_rpc import register_lead_methods
 from thalyn_brain.lsp import LspManager
 from thalyn_brain.lsp_rpc import register_lsp_methods
 from thalyn_brain.mcp import ConnectorRegistry, McpManager, builtin_catalog
@@ -28,6 +31,7 @@ from thalyn_brain.orchestration.storage import (
     apply_pending_migrations,
     default_data_dir,
 )
+from thalyn_brain.projects import ProjectsStore
 from thalyn_brain.provider import AnthropicProvider, build_registry
 from thalyn_brain.provider.auth import AuthBackend
 from thalyn_brain.provider_rpc import register_provider_methods
@@ -71,6 +75,12 @@ def main() -> int:
     schedules_store = SchedulesStore(data_dir=data_dir)
     memory_store = MemoryStore(data_dir=data_dir)
     threads_store = ThreadsStore(data_dir=data_dir)
+    agent_records_store = AgentRecordsStore(data_dir=data_dir)
+    projects_store = ProjectsStore(data_dir=data_dir)
+    lead_lifecycle = LeadLifecycle(
+        agents=agent_records_store,
+        projects=projects_store,
+    )
     lsp_manager = LspManager()
     terminal_observer = TerminalObserver()
     browser_manager = BrowserManager()
@@ -116,6 +126,11 @@ def main() -> int:
         auth_registry,
         on_active_changed=_hot_swap_anthropic_auth,
     )
+    # Lead-lifecycle surface (ADR-0021). Real handlers replace the v2
+    # ``lead.*`` stubs; the brain-side state machine owns the spawn /
+    # pause / resume / archive transitions and keeps the project's
+    # ``lead_agent_id`` pointer consistent.
+    register_lead_methods(dispatcher, lead_lifecycle)
     # Stubs for the v2 IPC surface; real handlers replace these as
     # subsequent stages land per ADR-0021 / 02-architecture.md §6.
     register_v2_stubs(dispatcher)
