@@ -47,21 +47,23 @@ test.beforeEach(async ({ page }) => {
 test("editor cold-start lands inside the NFR1 budget", async ({ page }) => {
   const COLD_START_BUDGET_MS = 5_000;
 
-  // The editor lives in the legacy mosaic shell (chat-first replaces
-  // the rail with on-demand drawers; the editor drawer lands later).
-  // Until then ``/legacy`` is where the editor surface is reachable.
-  await page.goto("/legacy");
-  await page.getByRole("heading", { name: "Chat" }).waitFor();
-
-  const editorButton = page.getByRole("button", { name: "Editor" });
-  await editorButton.waitFor();
+  // Editor now lives inside an on-demand drawer (ADR-0026 / F8.2).
+  // We dispatch the same ``thalyn:tools-open`` event the brain bridge
+  // and Cmd-K palette use, so the perf gate exercises the real
+  // brain-opened path rather than synthesising a click chain.
+  await page.goto("/");
+  await page.getByRole("button", { name: /Brain identity:/ }).waitFor();
 
   const start = Date.now();
-  await editorButton.click();
-  // Monaco's editable area is exposed as a textbox role; waiting for
-  // it ensures the editor is past lazy-load AND past the first
-  // useable paint, not just the title bar.
-  await page.locator(".monaco-editor textarea").first().waitFor({ state: "attached" });
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new CustomEvent("thalyn:tools-open", { detail: { kind: "editor" } }),
+    ),
+  );
+  await page
+    .locator(".monaco-editor textarea")
+    .first()
+    .waitFor({ state: "attached" });
   const elapsed = Date.now() - start;
 
   expect(elapsed, `editor cold-start was ${elapsed}ms`).toBeLessThan(

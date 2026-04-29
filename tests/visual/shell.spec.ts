@@ -2,8 +2,9 @@ import { expect, test } from "@playwright/test";
 
 /**
  * Visual baselines for the chat-first shell (ADR-0026): top bar +
- * eternal chat + transient strip + composer. The legacy mosaic shell
- * is exercised under ``/legacy`` for as long as that route survives.
+ * eternal chat + transient strip + composer. The drawer host is
+ * exercised separately via the editor-perf spec and the Storybook
+ * a11y harness.
  *
  * The Tauri-specific `invoke` is replaced with a window stub so the
  * renderer doesn't error out when the brain bridge is absent. We're
@@ -166,13 +167,6 @@ test("chat-first shell — light", async ({ page }) => {
     page.getByRole("button", { name: /Brain identity:/ }),
   ).toBeVisible();
   await expect(page).toHaveScreenshot("chat-first-light.png");
-});
-
-test("legacy shell — dark", async ({ page }) => {
-  await page.addInitScript(seedStorage("dark"));
-  await page.goto("/legacy");
-  await expect(page.getByRole("heading", { name: "Chat" })).toBeVisible();
-  await expect(page).toHaveScreenshot("legacy-dark.png");
 });
 
 test("command palette open", async ({ page }) => {
