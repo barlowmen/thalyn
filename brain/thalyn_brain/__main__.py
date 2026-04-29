@@ -36,11 +36,11 @@ from thalyn_brain.provider import AnthropicProvider, build_registry
 from thalyn_brain.provider.auth import AuthBackend
 from thalyn_brain.provider_rpc import register_provider_methods
 from thalyn_brain.routing import RoutingOverridesStore
+from thalyn_brain.routing_intents import RoutingActionsDispatcher
 from thalyn_brain.routing_rpc import register_routing_methods
 from thalyn_brain.rpc import build_default_dispatcher
 from thalyn_brain.runs import RunsStore
 from thalyn_brain.runs_rpc import register_runs_methods
-from thalyn_brain.worker_router import StoreBackedWorkerRouter
 from thalyn_brain.schedules import (
     Schedule,
     SchedulerLoop,
@@ -55,6 +55,7 @@ from thalyn_brain.threads_rpc import register_thread_methods
 from thalyn_brain.tracing import init_tracer
 from thalyn_brain.transport import serve_stdio
 from thalyn_brain.v2_stubs_rpc import register_v2_stubs
+from thalyn_brain.worker_router import StoreBackedWorkerRouter
 
 
 def main() -> int:
@@ -120,11 +121,17 @@ def main() -> int:
     # write-side thread.send and the recovery-status helpers for the
     # in-progress recovery flow.
     register_thread_methods(dispatcher, threads_store)
+    routing_actions = RoutingActionsDispatcher(
+        overrides_store=routing_overrides_store,
+        projects_store=projects_store,
+        valid_provider_ids={meta.id for meta in registry.list_meta()},
+    )
     register_thread_send_methods(
         dispatcher,
         threads_store=threads_store,
         registry=registry,
         agent_records=agent_records_store,
+        routing_actions=routing_actions,
     )
 
     # Auth-backend surface (ADR-0020). Real handlers replace the v2

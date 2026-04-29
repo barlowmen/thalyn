@@ -171,6 +171,25 @@ class ProjectsStore:
             )
             return cur.rowcount > 0
 
+    async def set_local_only(self, project_id: str, local_only: bool) -> bool:
+        """Flip the project's privacy flag (F3.8 / ADR-0023).
+
+        Returns ``True`` when a row was updated. The conversational
+        edit path uses this to honour ``"make this project local-only"``;
+        the routing layer then short-circuits worker spawns to local
+        providers regardless of stored overrides.
+        """
+        async with self._lock:
+            return await asyncio.to_thread(self._set_local_only_sync, project_id, local_only)
+
+    def _set_local_only_sync(self, project_id: str, local_only: bool) -> bool:
+        with self._open() as conn:
+            cur = conn.execute(
+                "UPDATE projects SET local_only = ? WHERE project_id = ?",
+                (1 if local_only else 0, project_id),
+            )
+            return cur.rowcount > 0
+
     async def delete(self, project_id: str) -> bool:
         async with self._lock:
             return await asyncio.to_thread(self._delete_sync, project_id)

@@ -55,6 +55,7 @@ from thalyn_brain.provider import (
     ProviderNotImplementedError,
     ProviderRegistry,
 )
+from thalyn_brain.routing_intents import RoutingActionsDispatcher
 from thalyn_brain.rpc import (
     INTERNAL_ERROR,
     INVALID_PARAMS,
@@ -81,6 +82,7 @@ def register_thread_send_methods(
     threads_store: ThreadsStore,
     registry: ProviderRegistry,
     agent_records: AgentRecordsStore | None = None,
+    routing_actions: RoutingActionsDispatcher | None = None,
 ) -> None:
     """Register ``thread.send`` and the recovery helpers.
 
@@ -92,10 +94,16 @@ def register_thread_send_methods(
     before the renderer attaches the stdio channel, so a poll is the
     right primitive.)
 
-    ``agent_records`` is optional so the v0.21 tests that don't
+    ``agent_records`` is optional so the early v0.21 tests that don't
     exercise the lead path can keep their narrow setup. When the
     store is wired in, ``thread.send`` runs the lead-delegation
     classify-and-route step before assembling the brain's reply.
+
+    ``routing_actions`` (per ADR-0023) is the action-registry stub for
+    routing-edit intents. When wired, ``thread.send`` recognises
+    phrases like "route coding to ollama in this project" before
+    delegating, dispatches the action, and replies with the
+    confirmation directly.
     """
 
     async def thread_send(params: RpcParams, notify: Notifier) -> JsonValue:
@@ -105,6 +113,7 @@ def register_thread_send_methods(
             threads_store,
             registry,
             agent_records,
+            routing_actions,
         )
 
     async def thread_recovery_status(params: RpcParams) -> JsonValue:
@@ -128,6 +137,7 @@ async def _handle_thread_send(
     store: ThreadsStore,
     registry: ProviderRegistry,
     agent_records: AgentRecordsStore | None,
+    routing_actions: RoutingActionsDispatcher | None = None,
 ) -> JsonValue:
     thread_id = _require_str(params, "threadId")
     provider_id = _require_str(params, "providerId")
@@ -200,7 +210,27 @@ async def _handle_thread_send(
         base_system_prompt=base_system_prompt,
     )
 
-    # 6a. Classify-and-route: if the user is addressing an active
+    # 6a. Routing-edit intent (per ADR-0023). Recognise "route X to Y
+    # in this project" before delegating; on a hit the action lands
+    # against the per-project routing table and the brain's reply is
+    # the dispatcher's confirmation. Misses fall through.
+    if routing_actions is not None:
+        routing_intent = await routing_actions.dispatch(prompt, project_id=project_id)
+        if routing_intent is not None:
+            return await _handle_routing_reply(
+                notify=notify,
+                store=store,
+                provider_id=provider_id,
+                thread_id=thread_id,
+                user_turn=user_turn,
+                project_id=project_id,
+                brain_turn_id=brain_turn_id,
+                confirmation=routing_intent.confirmation,
+                action=routing_intent.action,
+                assembled=assembled,
+            )
+
+    # 6b. Classify-and-route: if the user is addressing an active
     # lead, run the delegation flow instead of a direct brain reply.
     addressed = await _maybe_address_lead(prompt, agent_records)
     if addressed is not None:
@@ -448,6 +478,72 @@ async def _handle_delegated_reply(
             "leadDisplayName": lead.display_name,
             "sanityCheck": _verdict_to_wire(verdict),
         },
+    }
+
+
+async def _handle_routing_reply(
+    *,
+    notify: Notifier,
+    store: ThreadsStore,
+    provider_id: str,
+    thread_id: str,
+    user_turn: ThreadTurn,
+    project_id: str | None,
+    brain_turn_id: str,
+    confirmation: str,
+    action: str,
+    assembled: AssembledContext,
+) -> JsonValue:
+    """Reply with the action dispatcher's confirmation text.
+
+    The routing-edit action has already landed against the store by
+    the time this runs; this turn's job is to surface the
+    confirmation to the user in the eternal thread the same shape a
+    direct brain reply would. Streamed as text deltas so the renderer
+    sees the same chunk shape as a normal reply.
+    """
+    await notify(
+        THREAD_CHUNK,
+        {"turnId": brain_turn_id, "chunk": {"kind": "start", "model": "thalyn-routing"}},
+    )
+    await notify(
+        THREAD_CHUNK,
+        {"turnId": brain_turn_id, "chunk": {"kind": "text", "delta": confirmation}},
+    )
+    await notify(
+        THREAD_CHUNK,
+        {"turnId": brain_turn_id, "chunk": {"kind": "stop", "reason": "end_turn"}},
+    )
+
+    brain_turn = ThreadTurn(
+        turn_id=brain_turn_id,
+        thread_id=thread_id,
+        project_id=project_id,
+        agent_id=DEFAULT_BRAIN_AGENT_ID,
+        role="brain",
+        body=confirmation,
+        provenance={
+            "providerId": provider_id,
+            "routingAction": action,
+        },
+        confidence=None,
+        episodic_index_ptr=None,
+        at_ms=int(time.time() * 1000),
+        status="completed",
+    )
+    await store.complete_turn_pair(user_turn_id=user_turn.turn_id, brain_turn=brain_turn)
+    await store.touch_thread(thread_id, brain_turn.at_ms)
+
+    return {
+        "threadId": thread_id,
+        "userTurnId": user_turn.turn_id,
+        "turnId": brain_turn_id,
+        "agentId": DEFAULT_BRAIN_AGENT_ID,
+        "projectId": project_id,
+        "status": "completed",
+        "finalResponse": confirmation,
+        "context": _context_summary(assembled),
+        "routingAction": action,
     }
 
 
