@@ -1,7 +1,7 @@
 # ADR-0021 — Agent hierarchy: brain → leads → sub-leads → workers, persisted as AGENT_RECORD
 
-- **Status:** Proposed
-- **Date:** 2026-04-28
+- **Status:** Accepted
+- **Date:** 2026-04-28 (Proposed) · 2026-04-29 (Accepted)
 - **Supersedes:** —
 
 ## Context
@@ -149,14 +149,34 @@ Concrete shape:
 
 ## Notes
 
-This ADR is **drafted now** with `Status: Proposed` even though the
-lifecycle work (spawn / pause / resume / archive transitions, the
-direct-lead-chat surface, sub-lead spawning) lands in subsequent
-stages. The data model is the artefact this ADR explains, and that
-data model is what migration 003 + the agents/projects stores set up.
-The status flips to `Accepted` when the lead-as-first-class stage
-ratifies it under load.
+This ADR was **drafted with `Status: Proposed`** when migration 003 +
+the agents/projects stores landed the data model in v0.20. The
+`Accepted` flip is recorded here because the v0.23 cycle exercised
+every load-bearing claim under traffic:
+
+- `LeadLifecycle` enforces the spawn / pause / resume / archive
+  state machine end-to-end (one active-or-paused lead per project,
+  archive clears `projects.lead_agent_id`).
+- Brain → lead delegation routes through `thread.send`'s classify-
+  and-route step, the lead's underlying provider runs the reply, a
+  heuristic sanity-check critic gates the lead → brain hop, and the
+  brain's surfaced reply carries provenance pointing at the lead's
+  raw row. Three rows commit in one transaction so the F1.10
+  drill-down has a real source to navigate to.
+- Worker runs spawned through a lead inherit `parent_lead_id` so a
+  drill-by-lead query (`runs.list(parent_lead_id=…)`) sees the whole
+  tree even when the immediate parent is a worker. The runs index
+  carries the lead attribution; the renderer's lead-tile drill view
+  reads it directly.
+- The direct-lead-chat surface (F2.4) and sub-lead spawning (F2.3)
+  remain deferred as the data model intends — the kind enum and the
+  parent_agent_id column are in place; the lifecycle module extends
+  rather than rewrites when those work.
 
 `02-architecture.md` §4.2, §5 (data model) and §13 (risk #4 —
 LangGraph + Claude Agent SDK session-id coupling) are the touchpoints
-this ADR builds on.
+this ADR builds on. The session-id ↔ thread-id risk hasn't bitten in
+v0.23 because the brain still routes the lead's provider call through
+the same SDK client surface as the brain's own; the per-lead
+LangGraph thread per the architecture lands when direct lead chat
+becomes a primary surface.
