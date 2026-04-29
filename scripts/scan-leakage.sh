@@ -35,11 +35,15 @@ ALLOWED_LITERALS=(
 
 # Files exempt from scanning. These either *define* the forbidden-token
 # vocabulary (and so must reference it) or are external documents brought
-# into the repo whose wording is not authored by us.
+# into the repo whose wording is not authored by us. Architecture-review
+# summaries cite upstream library versions (``v0.1.71`` etc.) which match
+# the bare-word ``v0.x.y`` pattern; their job is to record the upstream
+# release picture, so they're exempt as a class.
 EXEMPT_PATHSPECS=(
   ':!scripts/scan-leakage.sh'
   ':!docs/adr/0015-commit-hygiene-conventional-commits.md'
   ':!docs/adr/README.md'
+  ':!docs/architecture-reviews/'
 )
 
 added_diff() {
