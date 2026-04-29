@@ -21,7 +21,7 @@ async def test_write_persists_to_store_and_emits_action_log(tmp_path: Path) -> N
         store,
         run_id="r_1",
         body="User prefers tabs over spaces.",
-        scope="user",
+        scope="personal",
         kind="preference",
         author="agent",
         notify=notify,
@@ -40,7 +40,7 @@ async def test_write_persists_to_store_and_emits_action_log(tmp_path: Path) -> N
     assert payload["kind"] == "memory_write"
     assert payload["payload"]["memoryId"] == entry.memory_id
     assert payload["payload"]["author"] == "agent"
-    assert payload["payload"]["scope"] == "user"
+    assert payload["payload"]["scope"] == "personal"
     assert payload["payload"]["preview"].startswith("User prefers")
 
 
@@ -50,7 +50,7 @@ async def test_write_without_notifier_still_persists(tmp_path: Path) -> None:
         store,
         run_id="r_x",
         body="A fact.",
-        scope="user",
+        scope="personal",
         kind="fact",
         author="user",
     )
@@ -89,7 +89,7 @@ async def test_empty_body_is_rejected(tmp_path: Path) -> None:
             store,
             run_id="r_x",
             body="   ",
-            scope="user",
+            scope="personal",
             kind="fact",
             author="user",
         )

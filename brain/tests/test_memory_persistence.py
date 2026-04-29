@@ -35,7 +35,7 @@ async def test_memory_survives_a_fresh_store_instance(tmp_path: Path) -> None:
         store_a,
         run_id="r_1",
         body="User prefers tabs over spaces.",
-        scope="user",
+        scope="personal",
         kind="preference",
         author="agent",
     )
@@ -62,7 +62,7 @@ async def test_memory_search_still_works_after_restart(tmp_path: Path) -> None:
         store_a,
         run_id="r_x",
         body="The user's preferred indentation is tabs.",
-        scope="user",
+        scope="personal",
         kind="preference",
         author="agent",
     )

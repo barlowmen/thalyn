@@ -2,11 +2,18 @@
  * Memory store types + Tauri bindings.
  *
  * Mirrors `brain/thalyn_brain/memory.py`. Camel-case across the wire.
+ *
+ * The five-tier model from `01-requirements.md` §F6 splits into two
+ * halves by lifetime. `working` and `session` are ephemeral and
+ * never persist as `MEMORY_ENTRY` rows; the renderer references them
+ * by name (e.g. for badge labels) but the SQLite store rejects them
+ * on insert. The four scopes below are the persisted tiers.
  */
 
 import { invoke } from "@tauri-apps/api/core";
 
-export type MemoryScope = "user" | "project" | "agent";
+export type MemoryScope = "project" | "personal" | "episodic" | "agent";
+export type MemoryTier = "working" | "session" | MemoryScope;
 export type MemoryKind = "fact" | "preference" | "reference" | "feedback";
 
 export type MemoryEntry = {

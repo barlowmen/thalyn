@@ -16,7 +16,7 @@ def _entry(**overrides: Any) -> MemoryEntry:
     base: dict[str, Any] = {
         "memory_id": new_memory_id(),
         "project_id": None,
-        "scope": "user",
+        "scope": "personal",
         "kind": "preference",
         "body": "Tabs over spaces.",
         "author": "user",
@@ -44,7 +44,7 @@ async def test_insert_and_get_round_trip(tmp_path: Path) -> None:
 async def test_list_filters_by_scope_and_orders_by_created_desc(tmp_path: Path) -> None:
     store = MemoryStore(data_dir=tmp_path)
     base = int(time.time() * 1000)
-    await store.insert(_entry(scope="user", created_at_ms=base, updated_at_ms=base))
+    await store.insert(_entry(scope="personal", created_at_ms=base, updated_at_ms=base))
     await store.insert(
         _entry(
             scope="project",
@@ -59,11 +59,23 @@ async def test_list_filters_by_scope_and_orders_by_created_desc(tmp_path: Path) 
             updated_at_ms=base + 200,
         )
     )
+    await store.insert(
+        _entry(
+            scope="episodic",
+            created_at_ms=base + 300,
+            updated_at_ms=base + 300,
+        )
+    )
 
-    user = await store.list_entries(scopes=["user"])
-    assert [e.scope for e in user] == ["user"]
+    personal = await store.list_entries(scopes=["personal"])
+    assert [e.scope for e in personal] == ["personal"]
     all_entries = await store.list_entries()
-    assert [e.scope for e in all_entries] == ["agent", "project", "user"]
+    assert [e.scope for e in all_entries] == [
+        "episodic",
+        "agent",
+        "project",
+        "personal",
+    ]
 
 
 async def test_search_finds_substring_matches(tmp_path: Path) -> None:
@@ -107,6 +119,27 @@ async def test_invalid_scope_or_kind_rejected_at_insert(tmp_path: Path) -> None:
         await store.insert(_entry(kind="bogus"))
 
 
+async def test_ephemeral_tiers_are_rejected_at_insert(tmp_path: Path) -> None:
+    """``working`` and ``session`` are recognized in the five-tier
+    vocabulary but never persist as ``MEMORY_ENTRY`` rows — the store
+    rejects them so a bug elsewhere can't quietly land an in-memory
+    tier in ``app.db``."""
+    store = MemoryStore(data_dir=tmp_path)
+    with pytest.raises(ValueError):
+        await store.insert(_entry(scope="working"))
+    with pytest.raises(ValueError):
+        await store.insert(_entry(scope="session"))
+
+
+async def test_legacy_user_scope_rejected_after_rename(tmp_path: Path) -> None:
+    """The migration renames v1 ``user`` rows to ``personal`` once;
+    fresh writes carrying the legacy scope are rejected so callers
+    that still send ``user`` are flagged loudly."""
+    store = MemoryStore(data_dir=tmp_path)
+    with pytest.raises(ValueError):
+        await store.insert(_entry(scope="user"))
+
+
 # ---------------------------------------------------------------------------
 # JSON-RPC surface
 # ---------------------------------------------------------------------------
@@ -127,7 +160,7 @@ async def test_rpc_add_and_list_round_trip(tmp_path: Path) -> None:
             "method": "memory.add",
             "params": {
                 "body": "User prefers tabs over spaces.",
-                "scope": "user",
+                "scope": "personal",
                 "kind": "preference",
                 "author": "agent",
             },
@@ -185,7 +218,7 @@ async def test_rpc_update_and_delete(tmp_path: Path) -> None:
             "method": "memory.add",
             "params": {
                 "body": "v1",
-                "scope": "user",
+                "scope": "personal",
                 "kind": "fact",
                 "author": "user",
             },

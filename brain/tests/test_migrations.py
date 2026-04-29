@@ -334,6 +334,64 @@ def test_thread_turn_index_indexes_and_searches(tmp_path: Path) -> None:
         assert ids[:1] == ["turn_fts_1"]
 
 
+# ---------------------------------------------------------------------------
+# Five-tier memory scope rename (migration 007)
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_user_memory_rows_renamed_to_personal(tmp_path: Path) -> None:
+    """v1 stores carrying ``scope='user'`` rows must come up under
+    the v2 ``personal`` tier name so the new validator doesn't trip
+    on data the user already created."""
+    db_path = tmp_path / "app.db"
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE memory_entries (
+                memory_id TEXT PRIMARY KEY,
+                project_id TEXT,
+                scope TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                body TEXT NOT NULL,
+                author TEXT NOT NULL,
+                created_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                embedding_json TEXT
+            );
+            INSERT INTO memory_entries
+                (memory_id, project_id, scope, kind, body, author,
+                 created_at_ms, updated_at_ms)
+            VALUES
+                ('m_v1_legacy', NULL, 'user', 'preference',
+                 'Tabs over spaces.', 'user', 0, 0),
+                ('m_v1_project', 'proj_default', 'project', 'fact',
+                 'Conventional Commits.', 'user', 0, 0);
+            """
+        )
+    apply_pending_migrations(data_dir=tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        scopes = dict(conn.execute("SELECT memory_id, scope FROM memory_entries").fetchall())
+        assert scopes["m_v1_legacy"] == "personal"
+        assert scopes["m_v1_project"] == "project"
+
+
+def test_migration_007_is_idempotent(tmp_path: Path) -> None:
+    apply_pending_migrations(data_dir=tmp_path)
+    from thalyn_brain.orchestration.storage import _applied_db_paths
+
+    _applied_db_paths.clear()
+    apply_pending_migrations(data_dir=tmp_path)
+    db_path = tmp_path / "app.db"
+    with sqlite3.connect(db_path) as conn:
+        # No legacy 'user' rows ever land — fresh installs never had any,
+        # and a re-apply on a clean db is a no-op.
+        (count,) = conn.execute(
+            "SELECT COUNT(*) FROM memory_entries WHERE scope = 'user'"
+        ).fetchone()
+        assert count == 0
+
+
 def test_migration_005_is_idempotent_on_existing_app_db(tmp_path: Path) -> None:
     """Re-applying after a cache flush must not re-add the status
     column or recreate the FTS5 vtable."""

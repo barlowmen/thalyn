@@ -1,17 +1,28 @@
 """Memory store — cross-session recall the agent and user share.
 
-Each entry pairs a body of free-form text with a coarse scope (user
-/ project / agent), a kind (fact / preference / reference / feedback),
-an author marker so the renderer can show "who wrote this", and the
-usual created/updated timestamps. Memory is the third physical SQLite
-store per ``02-architecture.md`` §5.
+Each entry pairs a body of free-form text with a scope from the
+five-tier model (``01-requirements.md`` §F6, ``02-architecture.md``
+§5), a kind (fact / preference / reference / feedback), an author
+marker so the renderer can show "who wrote this", and the usual
+created/updated timestamps.
 
-For v0.11 the search surface is plain text matching — semantic
-recall via Mem0 / LangMem stays out of scope until the dependency
-choice is settled (the post-v0.6 architecture review flagged
-LangMem as the LangGraph-native option to evaluate). The shape of
-the API is the same either way; the v0.11 SQLite implementation
-is the thing the renderer + brain are built against today.
+The five tiers split into two halves by lifetime:
+
+* **Ephemeral** — ``working`` (the current LLM context window) and
+  ``session`` (the rolling-summary window). These tiers are
+  recognized in the IPC vocabulary so callers can ask about them,
+  but they never land as ``MEMORY_ENTRY`` rows: ``working`` is
+  whatever the prompt-builder packs into the next call, and
+  ``session`` lives in ``session_digests`` per ADR-0022.
+* **Persisted** — ``project`` (lead-owned, per-project memory),
+  ``personal`` (user-level cross-project preferences and voice),
+  ``episodic`` (semantic recall over the eternal transcript), and
+  ``agent`` (a specific lead/sub-lead/worker's notes). These are
+  the four scopes the SQLite store accepts on insert.
+
+The v0.11 search surface is plain-text LIKE matching; the
+semantic-recall replacement plugs in behind the same API when
+ADR-0009's Mem0 wiring lands.
 """
 
 from __future__ import annotations
@@ -30,7 +41,16 @@ from thalyn_brain.orchestration.storage import (
     default_data_dir,
 )
 
-MEMORY_SCOPES = frozenset({"user", "project", "agent"})
+MEMORY_TIERS: tuple[str, ...] = (
+    "working",
+    "session",
+    "project",
+    "personal",
+    "episodic",
+    "agent",
+)
+EPHEMERAL_MEMORY_TIERS = frozenset({"working", "session"})
+MEMORY_SCOPES = frozenset({"project", "personal", "episodic", "agent"})
 MEMORY_KINDS = frozenset({"fact", "preference", "reference", "feedback"})
 
 
@@ -282,8 +302,10 @@ def new_memory_id() -> str:
 
 
 __all__ = [
+    "EPHEMERAL_MEMORY_TIERS",
     "MEMORY_KINDS",
     "MEMORY_SCOPES",
+    "MEMORY_TIERS",
     "MemoryEntry",
     "MemoryStore",
     "MemoryUpdate",

@@ -21,7 +21,7 @@ import {
   updateMemory,
 } from "@/lib/memory";
 
-const SCOPES: MemoryScope[] = ["user", "project", "agent"];
+const SCOPES: MemoryScope[] = ["personal", "project", "episodic", "agent"];
 const KINDS: MemoryKind[] = ["fact", "preference", "reference", "feedback"];
 
 export function MemoryDialog({
@@ -132,7 +132,7 @@ export function MemoryDialog({
 
 function MemoryForm({ onCreated }: { onCreated: () => void | Promise<void> }) {
   const [body, setBody] = useState("");
-  const [scope, setScope] = useState<MemoryScope>("user");
+  const [scope, setScope] = useState<MemoryScope>("personal");
   const [kind, setKind] = useState<MemoryKind>("preference");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
