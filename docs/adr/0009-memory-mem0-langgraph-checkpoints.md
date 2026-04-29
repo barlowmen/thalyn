@@ -1,7 +1,7 @@
 # ADR-0009 — Memory: Mem0 (semantic) + LangGraph checkpoints (run state) + project files
 
-- **Status:** Accepted (provisional)
-- **Date:** 2026-04-25
+- **Status:** Accepted
+- **Date:** 2026-04-29 (finalised at v0.25; provisional acceptance 2026-04-25)
 
 ## Context
 
@@ -38,7 +38,7 @@ without committing to a recall engine. The shape behind the API
 is **SQLite + plain-text LIKE search**: same schema as the cold-
 tier above (memory_id, scope, kind, body, author, timestamps),
 shared SQLite app.db file, no semantic embeddings yet. The
-`scope` enum (user / project / agent / global) and `kind` enum
+`scope` enum (user / project / agent) and `kind` enum
 (fact / preference / reference / feedback) are already wired so
 the recall engine is a drop-in upgrade behind the same surface.
 
@@ -68,3 +68,53 @@ This validates the three-tier-not-one-store decision: the user
 edits `THALYN.md` directly when they want code-versioned
 context, and the in-flight tier (session) and cold tier (Mem0
 when we light it up) carry the rest.
+
+### Finalisation at v0.25 — five tiers with explicit ownership
+
+The original "three-tier" framing collapsed two separate concerns
+into the cold tier (per-user vs per-project). v0.25 closes the
+five-tier model called for in `01-requirements.md` §F6 and
+`02-architecture.md` §5:
+
+| Tier | Lifetime | Owner | Persisted? |
+|---|---|---|---|
+| **Working** | One LLM call (the prompt-builder's output) | Caller | No — ephemeral |
+| **Session** | Today's working session, summarised at boundaries | Brain (rolling summarizer per ADR-0022) | `session_digests` table |
+| **Project** | Project lifetime; archived with the project | Project lead | `memory_entries` (`scope='project'`) + `THALYN.md` |
+| **Personal** | User lifetime, cross-project | Brain (writes); workers cannot write | `memory_entries` (`scope='personal'`) |
+| **Episodic** | Forever, with explicit-prune affordance | Brain reads; the indexer writes on every turn | `thread_turns` + FTS5 (`thread_turn_index`) |
+| **Agent** | Agent lifetime (lead / sub-lead / worker notes) | The agent itself | `memory_entries` (`scope='agent'`) |
+
+The persisted `MEMORY_ENTRY.scope` enum is `project | personal |
+episodic | agent`. The two ephemeral tiers (`working`, `session`)
+appear in the user-facing vocabulary (`MEMORY_TIERS` in
+`thalyn_brain/memory.py`) but the SQLite store rejects them on
+insert — `working` is the prompt-builder's working set (no row),
+and `session` lives in the `session_digests` table.
+
+**Write paths are explicit, no silent profile-building (F6.6):**
+
+- The brain writes any persisted scope. Personal-memory writes
+  surface a confirmation in chat and emit a `memory_write`
+  action-log entry.
+- The lead writes `project` and `agent` scopes through the same
+  helper. Workers reach project memory only through
+  `record_worker_project_memory_write`, which fixes the scope at
+  `project`, requires a `via_lead_id`, and tags the audit-log
+  payload with `writerRole='worker'` so the renderer can drill
+  into "Worker X wrote this through Lead Y".
+- Workers cannot write `personal` memory at all; the API surface
+  doesn't carry a path for it, and the validator rejects the
+  scope from any worker-attributed call.
+
+**Read paths follow ownership.** The eternal-thread context
+assembler pulls personal memory into every turn whose distinctive
+tokens didn't resolve in the recent window (the same heuristic
+that gates eternal-transcript episodic recall). Project memory
+loads at the lead-delegation hop: when the addressed lead's
+project carries a `workspace_path`, the workspace's `THALYN.md`
+folds in front of the lead's identity prompt. Agent memory is
+read by the owning agent through its own namespace.
+
+The migration that closes out the v1→v2 rename ships in
+`007_memory_personal_scope.sql` (`scope='user'` → `scope='personal'`).

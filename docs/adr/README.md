@@ -21,7 +21,7 @@ This directory contains Thalyn's ADRs — one decision per file, in [MADR](https
 | [0006](0006-python-sidecar-packaging-pyoxidizer.md) | Python sidecar packaging: PyOxidizer | Superseded by ADR-0018 |
 | [0007](0007-orchestration-langgraph-claude-sdk.md) | Orchestration: LangGraph 1.0 + Claude Agent SDK | Accepted (provisional) |
 | [0008](0008-durable-execution-sqlitesaver.md) | Durable execution: LangGraph SqliteSaver | Accepted (provisional) |
-| [0009](0009-memory-mem0-langgraph-checkpoints.md) | Memory: Mem0 + LangGraph checkpoints + project files | Accepted (provisional) |
+| [0009](0009-memory-mem0-langgraph-checkpoints.md) | Memory: Mem0 + LangGraph checkpoints + project files | Accepted |
 | [0010](0010-browser-sidecar-chromium-cdp.md) | Browser: sidecar Chromium driven over CDP | Accepted (provisional) |
 | [0011](0011-sandbox-tiers-devcontainer-microvm.md) | Sandbox tiers: devcontainer + worktree default; microVM opt-in | Accepted (provisional) |
 | [0012](0012-provider-abstraction.md) | Provider abstraction: in-process trait + adapters | Accepted (provisional) |
