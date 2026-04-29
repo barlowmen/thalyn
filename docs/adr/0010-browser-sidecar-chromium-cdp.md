@@ -1,7 +1,28 @@
 # ADR-0010 — Browser: sidecar headed Chromium driven over CDP
 
-- **Status:** Accepted (provisional)
+- **Status:** Superseded by [ADR-0019](0019-browser-engine-v2.md)
 - **Date:** 2026-04-25
+- **Superseded:** 2026-04-29
+
+> **Superseded.** The v2 hard rule (`project_no_external_apps` —
+> the user is never *forced* to leave the Thalyn app) is incompatible
+> with this ADR's default flow: a sidecar Chromium spawning its own
+> visible OS window. The follow-up spike
+> [`docs/spikes/2026-04-27-browser-engine.md`](../spikes/2026-04-27-browser-engine.md)
+> evaluated the wider option space and ratified
+> **bundled Chromium via `tauri-apps/cef-rs`, embedded in-process**
+> (ADR-0019).
+>
+> The brain CDP transport documented below — `CdpConnection`,
+> `--remote-debugging-port=0` discovery, the five `browser_*` tools,
+> per-step DOM+PNG capture under `runs/{run_id}/browser/<seq>.{html,png}`
+> — **carries forward unchanged** against the in-process CEF
+> instance; only the WS URL points in-process now. The sidecar
+> process supervisor, profile-discovery, OS-window-raise plumbing
+> (`NSWindow.makeKeyAndOrderFront` / `SetForegroundWindow` /
+> `wlr-foreign-toplevel`), and the activity-rail browser surface
+> retire alongside this ADR. The refinements below are preserved
+> as historical context; ADR-0019 is the active record.
 
 ## Context
 

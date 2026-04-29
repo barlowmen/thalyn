@@ -1,7 +1,8 @@
 # ADR-0019 — Browser engine: bundled Chromium via cef-rs, embedded in-process
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-04-27
+- **Accepted:** 2026-04-29
 - **Supersedes:** ADR-0010
 
 ## Context

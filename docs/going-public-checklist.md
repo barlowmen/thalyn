@@ -45,6 +45,29 @@ Each item links to the requirement / ADR it overrides or extends.
 ### Audit logs
 - [ ] **Hash-chained / signed audit logs** (currently F7.6 ships unsigned NDJSON). Upgrade to a tamper-evident format.
 
+### Browser engine (CEF)
+- [ ] **CEF / Chromium-stable CVE response SLO.** Define and publish the
+  service-level objective from a Chromium-stable security advisory to a
+  shipped Thalyn release with the matching CEF bump. ADR-0019's
+  maintenance-burden note flags this; a published target (e.g.
+  `Chromium-stable advisory → Thalyn release within 7 days`) is the
+  going-public bar.
+- [ ] **CEF native Wayland embedded-toplevel support.** v1 ships
+  CEF with `ozone-platform=x11` (X11/XWayland) on Linux; native
+  Wayland embedded-toplevel is on the CEF roadmap
+  ([chromiumembedded/cef#2804](https://github.com/chromiumembedded/cef/issues/2804))
+  but not yet shipped. Switch when it lands and document the
+  Wayland-native install path.
+- [ ] **CEF bundle-size review at release.** Installer growth from
+  the engine swap is documented at ~130 MB compressed / ~250 MB on
+  disk per platform. Re-measure at release-cut and compare against
+  the documented budget; surface if it has drifted.
+- [ ] **CEF profile encryption-at-rest.** v1 stores the per-Thalyn
+  Chromium profile (cookies, login state, form history) as
+  plaintext under the app data dir. Public-release bar is
+  encryption-at-rest parity with the user's main browser; OS-keychain-
+  wrapped DEK is the likely shape.
+
 ### Eternal-thread durability
 - [ ] **30-min duration-based soak gate.** The per-push CI gate runs the randomized-kill soak count-bounded (default 200 iterations, ~30s); a public release needs the same harness scheduled nightly with `THALYN_SOAK_DURATION_SECS=1800` so the 30-minute exposure window the v2 build plan calls for is exercised continuously. (ADR-0022's "Alternatives considered" section captures the trade-off.)
 - [ ] **Power-cut-grade durability test.** The current soak asserts SQLite-transaction atomicity at the application layer. A public-release-grade gate needs an OS-level kill (real `kill -9` between SQLite's commit and the disk's fsync barrier) before claiming the class-A correctness invariant under hardware failure modes.
