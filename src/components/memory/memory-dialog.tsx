@@ -24,6 +24,10 @@ import {
 const SCOPES: MemoryScope[] = ["personal", "project", "episodic", "agent"];
 const KINDS: MemoryKind[] = ["fact", "preference", "reference", "feedback"];
 
+type ScopeFilter = MemoryScope | "all";
+
+const SCOPE_FILTERS: ScopeFilter[] = ["all", ...SCOPES];
+
 export function MemoryDialog({
   open,
   onOpenChange,
@@ -35,19 +39,22 @@ export function MemoryDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<ScopeFilter>("all");
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await listMemory();
+      const result = await listMemory(
+        filter === "all" ? undefined : { scopes: [filter] },
+      );
       setEntries(result.entries);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filter]);
 
   useEffect(() => {
     if (!open) return;
@@ -86,9 +93,36 @@ export function MemoryDialog({
           <MemoryForm onCreated={refresh} />
 
           <section>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Entries
-            </h3>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Entries
+              </h3>
+              <div
+                role="radiogroup"
+                aria-label="Filter memory by scope"
+                className="flex flex-wrap gap-1"
+              >
+                {SCOPE_FILTERS.map((value) => {
+                  const active = value === filter;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setFilter(value)}
+                      className={`rounded-md px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors ${
+                        active
+                          ? "bg-primary text-primary-foreground"
+                          : "border border-border text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {value}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             {loading && (
               <p className="text-xs text-muted-foreground">Loading…</p>
             )}
