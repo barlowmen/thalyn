@@ -45,6 +45,8 @@ export function MessageList({ messages, header }: Props) {
     );
   }
 
+  let lastDayMs: number | null = null;
+
   return (
     <div
       ref={scrollRef}
@@ -54,9 +56,47 @@ export function MessageList({ messages, header }: Props) {
       aria-label="Conversation"
     >
       {header}
-      {messages.map((message) => (
-        <MessageBubble key={message.id} message={message} />
-      ))}
+      {messages.map((message) => {
+        const messageDayMs = startOfDay(message.atMs);
+        const showDivider =
+          messageDayMs !== null &&
+          (lastDayMs === null || messageDayMs > lastDayMs);
+        if (messageDayMs !== null) {
+          lastDayMs = messageDayMs;
+        }
+        return (
+          <div key={message.id} className="space-y-4">
+            {showDivider && messageDayMs !== null && (
+              <DayDivider dayMs={messageDayMs} />
+            )}
+            <MessageBubble message={message} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function startOfDay(ms: number | undefined): number | null {
+  if (ms === undefined) return null;
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function DayDivider({ dayMs }: { dayMs: number }) {
+  const label = new Date(dayMs).toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+  return (
+    <div role="separator" className="flex items-center gap-3" aria-label={label}>
+      <div className="h-px flex-1 bg-border" aria-hidden />
+      <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <div className="h-px flex-1 bg-border" aria-hidden />
     </div>
   );
 }

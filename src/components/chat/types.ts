@@ -30,6 +30,12 @@ export type Message =
       id: string;
       role: "user";
       text: string;
+      /** Wall-clock ms the message was created. Used by the chat
+       *  surface to insert a day-divider when consecutive messages
+       *  cross a calendar-day boundary. Optional so the legacy
+       *  Storybook fixtures (which don't care about dividers) keep
+       *  working unchanged. */
+      atMs?: number;
     }
   | {
       id: string;
@@ -39,4 +45,5 @@ export type Message =
       done: boolean;
       totalCostUsd?: number;
       leadAttribution?: LeadAttribution;
+      atMs?: number;
     };

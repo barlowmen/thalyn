@@ -66,3 +66,28 @@ export const DelegatedReplyWithLeadChip: Story = {
     messages: [userMessage, delegatedReply],
   },
 };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const yesterday = Date.now() - DAY_MS;
+const today = Date.now();
+
+export const SpansTwoDays: Story = {
+  args: {
+    messages: [
+      { ...userMessage, id: "m_yest_user", text: "Sam, can you triage the queue overnight?", atMs: yesterday },
+      {
+        ...directReply,
+        id: "m_yest_assistant",
+        segments: [{ kind: "text", text: "On it — I'll have a summary for you in the morning." }],
+        atMs: yesterday,
+      },
+      { ...userMessage, id: "m_today_user", text: "Morning. What's the haul?", atMs: today },
+      {
+        ...directReply,
+        id: "m_today_assistant",
+        segments: [{ kind: "text", text: "Three commits shipped overnight; one open question waiting on you." }],
+        atMs: today,
+      },
+    ],
+  },
+};

@@ -83,6 +83,7 @@ export function useChat({
             segments: [],
             model: chunk.model,
             done: false,
+            atMs: Date.now(),
           };
           activeAssistantId.current = message.id;
           next.push(message);
@@ -153,6 +154,7 @@ export function useChat({
         id: newId(),
         role: "user",
         text: trimmed,
+        atMs: Date.now(),
       };
       setMessages((current) => [...current, userMessage]);
       try {
