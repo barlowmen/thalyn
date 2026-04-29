@@ -336,6 +336,95 @@ async fn digest_latest(state: State<'_, AppState>, thread_id: String) -> Result<
 }
 
 #[tauri::command]
+async fn lead_list(
+    state: State<'_, AppState>,
+    project_id: Option<String>,
+    status: Option<String>,
+    kind: Option<String>,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    if let Some(p) = project_id {
+        params.insert("projectId".into(), Value::from(p));
+    }
+    if let Some(s) = status {
+        params.insert("status".into(), Value::from(s));
+    }
+    if let Some(k) = kind {
+        params.insert("kind".into(), Value::from(k));
+    }
+    state
+        .brain
+        .call("lead.list", Value::Object(params), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn lead_spawn(
+    state: State<'_, AppState>,
+    project_id: String,
+    display_name: Option<String>,
+    default_provider_id: Option<String>,
+    system_prompt: Option<String>,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    params.insert("projectId".into(), Value::from(project_id));
+    if let Some(name) = display_name {
+        params.insert("displayName".into(), Value::from(name));
+    }
+    if let Some(provider) = default_provider_id {
+        params.insert("defaultProviderId".into(), Value::from(provider));
+    }
+    if let Some(prompt) = system_prompt {
+        params.insert("systemPrompt".into(), Value::from(prompt));
+    }
+    state
+        .brain
+        .call("lead.spawn", Value::Object(params), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn lead_pause(state: State<'_, AppState>, agent_id: String) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "lead.pause",
+            json!({ "agentId": agent_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn lead_resume(state: State<'_, AppState>, agent_id: String) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "lead.resume",
+            json!({ "agentId": agent_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn lead_archive(state: State<'_, AppState>, agent_id: String) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "lead.archive",
+            json!({ "agentId": agent_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 async fn create_schedule(
     state: State<'_, AppState>,
     title: String,
@@ -1588,6 +1677,11 @@ pub fn run() {
             auth_set,
             thread_recent,
             digest_latest,
+            lead_list,
+            lead_spawn,
+            lead_pause,
+            lead_resume,
+            lead_archive,
             list_memory,
             add_memory,
             update_memory,

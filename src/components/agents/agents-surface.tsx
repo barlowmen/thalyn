@@ -1,10 +1,11 @@
-import { Bot, Compass, RefreshCw } from "lucide-react";
+import { Bot, Compass, RefreshCw, UserCog } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { BudgetMeter } from "@/components/inspector/budget-meter";
 import { SurfaceCloseButton } from "@/components/shell/surface-close";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { type LeadAgent, type LeadStatus, listLeads } from "@/lib/leads";
 import {
   type RunHeader,
   type RunStatus,
@@ -49,6 +50,21 @@ const ACTIVE_STATUSES: RunStatus[] = [
 
 const TERMINAL_STATUSES: RunStatus[] = ["completed", "errored", "killed"];
 
+const LEAD_STATUS_TONE: Record<
+  LeadStatus,
+  "default" | "success" | "warning" | "danger" | "muted"
+> = {
+  active: "success",
+  paused: "warning",
+  archived: "muted",
+};
+
+const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
+  active: "Active",
+  paused: "Paused",
+  archived: "Archived",
+};
+
 /**
  * Sub-agent inventory — every run that has a parent (i.e. was
  * spawned by another agent). Sectioned by lifecycle so the eye
@@ -64,6 +80,7 @@ export function AgentsSurface({
   onClose?: () => void;
 }) {
   const [runs, setRuns] = useState<RunHeader[] | null>(null);
+  const [leads, setLeads] = useState<LeadAgent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -71,11 +88,19 @@ export function AgentsSurface({
     setBusy(true);
     setError(null);
     try {
-      const result = await listRuns({ limit: 200 });
-      setRuns(result.runs);
+      // Pull runs and leads in parallel — the brain serves both off
+      // app.db, so a single round-trip per resource keeps the panel
+      // responsive even with a large run history.
+      const [runsResult, leadsResult] = await Promise.all([
+        listRuns({ limit: 200 }),
+        listLeads({ kind: "lead" }),
+      ]);
+      setRuns(runsResult.runs);
+      setLeads(leadsResult.agents);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setRuns([]);
+      setLeads([]);
     } finally {
       setBusy(false);
     }
@@ -116,7 +141,8 @@ export function AgentsSurface({
   return (
     <AgentsView
       runs={subAgents}
-      loading={runs === null}
+      leads={leads ?? []}
+      loading={runs === null || leads === null}
       error={error}
       busy={busy}
       onRefresh={() => void refresh()}
@@ -131,6 +157,7 @@ export function AgentsSurface({
 
 export function AgentsView({
   runs,
+  leads,
   loading,
   error,
   busy,
@@ -140,6 +167,7 @@ export function AgentsView({
   onKill,
 }: {
   runs: RunHeader[];
+  leads: LeadAgent[];
   loading: boolean;
   error: string | null;
   busy: boolean;
@@ -155,6 +183,9 @@ export function AgentsView({
       (a, b) =>
         (b.completedAtMs ?? b.startedAtMs) - (a.completedAtMs ?? a.startedAtMs),
     );
+  const liveLeads = leads.filter(
+    (l) => l.status === "active" || l.status === "paused",
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -193,24 +224,79 @@ export function AgentsView({
 
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading agents…</p>
-        ) : runs.length === 0 ? (
-          <EmptyState />
         ) : (
           <div className="space-y-6">
-            <Section
-              title={`Active (${active.length})`}
-              runs={active}
-              onOpen={onOpen}
-              onKill={onKill}
-            />
-            <Section
-              title={`Recent (${terminal.length})`}
-              runs={terminal.slice(0, 50)}
-              onOpen={onOpen}
-            />
+            <LeadsSection leads={liveLeads} />
+            {runs.length === 0 ? (
+              <EmptyState />
+            ) : (
+              <>
+                <Section
+                  title={`Active (${active.length})`}
+                  runs={active}
+                  onOpen={onOpen}
+                  onKill={onKill}
+                />
+                <Section
+                  title={`Recent (${terminal.length})`}
+                  runs={terminal.slice(0, 50)}
+                  onOpen={onOpen}
+                />
+              </>
+            )}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function LeadsSection({ leads }: { leads: LeadAgent[] }) {
+  return (
+    <section aria-label={`Project leads (${leads.length})`}>
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Leads ({leads.length})
+      </h3>
+      {leads.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          No project leads yet — Thalyn spawns one when you create a project.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {leads.map((lead) => (
+            <li key={lead.agentId}>
+              <LeadRow lead={lead} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function LeadRow({ lead }: { lead: LeadAgent }) {
+  const status = (
+    lead.status === "active" || lead.status === "paused" || lead.status === "archived"
+      ? lead.status
+      : "active"
+  ) as LeadStatus;
+  return (
+    <div className="rounded-md border border-border bg-card p-3">
+      <div className="flex items-center gap-2">
+        <UserCog aria-hidden className="size-4 text-muted-foreground" />
+        <span className="text-sm font-medium">{lead.displayName}</span>
+        <Badge tone={LEAD_STATUS_TONE[status]}>
+          {LEAD_STATUS_LABEL[status]}
+        </Badge>
+      </div>
+      <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+        {lead.agentId}
+      </p>
+      {lead.projectId ? (
+        <p className="text-xs text-muted-foreground">
+          Project: {lead.projectId}
+        </p>
+      ) : null}
     </div>
   );
 }

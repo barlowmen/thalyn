@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
 import { AgentsView } from "@/components/agents/agents-surface";
+import type { LeadAgent } from "@/lib/leads";
 import type { RunHeader } from "@/lib/runs";
 
 const meta: Meta<typeof AgentsView> = {
@@ -17,6 +18,7 @@ const meta: Meta<typeof AgentsView> = {
   args: {
     busy: false,
     error: null,
+    leads: [],
     onRefresh: () => undefined,
     onOpen: () => undefined,
     onKill: () => undefined,
@@ -46,9 +48,26 @@ const baseRun = (overrides: Partial<RunHeader>): RunHeader => ({
   ...overrides,
 });
 
+const baseLead = (overrides: Partial<LeadAgent>): LeadAgent => ({
+  agentId: "agent_lead_demo",
+  kind: "lead",
+  displayName: "Lead-Default",
+  parentAgentId: null,
+  projectId: "proj_default",
+  scopeFacet: null,
+  memoryNamespace: "lead-default",
+  defaultProviderId: "anthropic",
+  systemPrompt: "",
+  status: "active",
+  createdAtMs: now - 1000 * 60 * 60 * 24,
+  lastActiveAtMs: now - 1000 * 60 * 4,
+  ...overrides,
+});
+
 export const Loading: Story = {
   args: {
     runs: [],
+    leads: [],
     loading: true,
   },
 };
@@ -56,13 +75,35 @@ export const Loading: Story = {
 export const Empty: Story = {
   args: {
     runs: [],
+    leads: [],
     loading: false,
+  },
+};
+
+export const LeadsOnly: Story = {
+  args: {
+    runs: [],
+    loading: false,
+    leads: [
+      baseLead({}),
+      baseLead({
+        agentId: "agent_lead_alpha",
+        displayName: "Sam",
+        projectId: "proj_alpha",
+      }),
+      baseLead({
+        agentId: "agent_lead_paused",
+        displayName: "Lead-Beta",
+        status: "paused",
+      }),
+    ],
   },
 };
 
 export const ActiveAndRecent: Story = {
   args: {
     loading: false,
+    leads: [baseLead({})],
     runs: [
       baseRun({
         runId: "run_active_001",
@@ -97,6 +138,7 @@ export const ActiveAndRecent: Story = {
 export const ErrorState: Story = {
   args: {
     runs: [],
+    leads: [],
     loading: false,
     error: "Failed to load agents: brain sidecar not responding.",
   },
