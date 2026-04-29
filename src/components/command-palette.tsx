@@ -11,6 +11,7 @@ import {
 import { useEffect, useState } from "react";
 
 import { useTheme } from "@/components/theme-provider";
+import { COMMAND_PALETTE_OPEN_EVENT } from "@/components/shell/top-bar";
 import {
   CommandDialog,
   CommandEmpty,
@@ -50,6 +51,9 @@ export function CommandPalette({
   const { setTheme } = useTheme();
 
   // Cmd-K (macOS) / Ctrl-K (everywhere else) toggles the palette.
+  // The chat-first top bar's keyboard-shortcut chip dispatches the
+  // open event so the user can reach the palette by mouse too without
+  // forcing every caller to know how to synthesise a keypress.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const isToggle =
@@ -58,8 +62,13 @@ export function CommandPalette({
       event.preventDefault();
       setOpen((current) => !current);
     };
+    const onOpenEvent = () => setOpen(true);
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener(COMMAND_PALETTE_OPEN_EVENT, onOpenEvent);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener(COMMAND_PALETTE_OPEN_EVENT, onOpenEvent);
+    };
   }, []);
 
   const close = () => setOpen(false);
