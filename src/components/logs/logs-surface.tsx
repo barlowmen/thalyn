@@ -1,7 +1,6 @@
 import { Filter, RefreshCw, ScrollText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { SurfaceCloseButton } from "@/components/shell/surface-close";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -56,10 +55,8 @@ const ALL_STATUSES: RunStatus[] = [
  */
 export function LogsSurface({
   onOpen,
-  onClose,
 }: {
   onOpen?: (runId: string) => void;
-  onClose?: () => void;
 }) {
   const [runs, setRuns] = useState<RunHeader[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -122,7 +119,6 @@ export function LogsSurface({
       onFilterChange={setFilter}
       onRefresh={() => void refresh()}
       onOpen={onOpen}
-      onClose={onClose}
     />
   );
 }
@@ -136,7 +132,6 @@ export function LogsView({
   onFilterChange,
   onRefresh,
   onOpen,
-  onClose,
 }: {
   runs: RunHeader[];
   loading: boolean;
@@ -146,7 +141,6 @@ export function LogsView({
   onFilterChange: (next: RunStatus[]) => void;
   onRefresh: () => void;
   onOpen?: (runId: string) => void;
-  onClose?: () => void;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -169,7 +163,6 @@ export function LogsView({
               className={cn("size-4", busy && "animate-spin")}
             />
           </Button>
-          <SurfaceCloseButton onClose={onClose} />
         </div>
       </header>
 

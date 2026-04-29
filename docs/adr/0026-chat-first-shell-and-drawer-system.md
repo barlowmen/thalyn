@@ -1,7 +1,7 @@
 # ADR-0026 — App shape: chat-first shell + on-demand drawer system
 
-- **Status:** Accepted (provisional)
-- **Date:** 2026-04-29
+- **Status:** Accepted
+- **Date:** 2026-04-29 *(provisional)* · 2026-04-29 *(promoted to Accepted with v0.27)*
 - **Deciders:** Barlow
 - **Supersedes:** —
 - **Superseded by:** —
@@ -192,11 +192,32 @@ something larger if the drawer state-machine wants URL persistence.
 
 ## Notes
 
-This ADR ships at the start of the chat-first pivot with `Status:
-Accepted (provisional)`. It flips to `Accepted` when the drawer-host
-primitive lands and the `/legacy` route retires — at that point both
-of this ADR's load-bearing claims (chat-first topology, drawers as
-the migration target) have been exercised end-to-end with no escape
-hatch. Until then, the provisional marker keeps the door open for
-the topology to re-shape if the drawer experiments uncover something
-this ADR didn't anticipate.
+This ADR landed *Accepted (provisional)* at the start of the
+chat-first pivot (v0.26) and was promoted to *Accepted* with v0.27,
+which delivered the drawer-host primitive (right-side band with the
+two-drawer cap, the chat-≥-1/3 invariant enforced numerically, the
+keyboard-focusable resize separator, the `⌘\` dismiss shortcut, and
+the brain-opened path via the Tauri `tools:open` channel + window
+event) and retired the `/legacy` route + the v1 mosaic `AppShell`
+together. Editor / Terminal / Email / Files / Connectors / Logs all
+moved into drawers; Browser stays sidecar until v0.29's cef-rs swap.
+
+One small refinement on the F8.2 wording: the spec calls for
+"dismissible with `⌘\` or by clicking outside." The implementation
+ships `⌘\` + an explicit close button per drawer + a Cmd-K
+`Close all drawers` action; click-outside is *not* wired because the
+drawer band lives in the same horizontal flex as the chat column
+rather than as a CSS overlay, so a click in chat-region territory is
+extremely easy to trigger by accident (typing in the composer,
+selecting message text, scrolling). The escape-hatch surface is
+already three-deep without adding click-outside; the trade-off is
+documented here so v0.28+ doesn't reintroduce it without re-reading
+this thread.
+
+The escape-hatch slot in `DrawerSurface` is wired and rendered
+conditionally on params (e.g. an editor drawer with a path shows
+"Reveal in Finder", one without does not). The Tauri command
+(`reveal_in_finder`) is invoked best-effort and the surface tolerates
+its absence — the actual command lands when worker projects flow
+real paths through `tools:open`. The chrome support is in place
+ahead of that.

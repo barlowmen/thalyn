@@ -1,7 +1,6 @@
 import { Inbox, Mail, RefreshCw, Send, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { SurfaceCloseButton } from "@/components/shell/surface-close";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,7 +32,7 @@ type SurfaceState = {
  * so an autonomous draft can never reach the wire without a user
  * click on this surface.
  */
-export function EmailSurface({ onClose }: { onClose?: () => void }) {
+export function EmailSurface() {
   const [state, setState] = useState<SurfaceState>({
     accounts: [],
     selectedAccountId: null,
@@ -73,7 +72,7 @@ export function EmailSurface({ onClose }: { onClose?: () => void }) {
 
   if (state.loadingAccounts) {
     return (
-      <SurfaceFrame heading="Email" onClose={onClose}>
+      <SurfaceFrame heading="Email">
         Loading accounts…
       </SurfaceFrame>
     );
@@ -81,7 +80,7 @@ export function EmailSurface({ onClose }: { onClose?: () => void }) {
 
   if (state.error) {
     return (
-      <SurfaceFrame heading="Email" onClose={onClose}>
+      <SurfaceFrame heading="Email">
         <p className="text-sm text-destructive" role="alert">
           {state.error}
         </p>
@@ -91,7 +90,7 @@ export function EmailSurface({ onClose }: { onClose?: () => void }) {
 
   if (state.accounts.length === 0) {
     return (
-      <SurfaceFrame heading="Email" onClose={onClose}>
+      <SurfaceFrame heading="Email">
         <EmptyState />
       </SurfaceFrame>
     );
@@ -119,7 +118,6 @@ export function EmailSurface({ onClose }: { onClose?: () => void }) {
               </option>
             ))}
           </select>
-          <SurfaceCloseButton onClose={onClose} />
         </div>
       </header>
       {selectedAccount ? <AccountInbox account={selectedAccount} /> : null}
@@ -130,11 +128,9 @@ export function EmailSurface({ onClose }: { onClose?: () => void }) {
 function SurfaceFrame({
   heading,
   children,
-  onClose,
 }: {
   heading: string;
   children: React.ReactNode;
-  onClose?: () => void;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -143,7 +139,6 @@ function SurfaceFrame({
           <Inbox aria-hidden className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-medium">{heading}</h2>
         </div>
-        <SurfaceCloseButton onClose={onClose} />
       </header>
       <div className="flex flex-1 items-start justify-center p-6">{children}</div>
     </div>

@@ -32,4 +32,4 @@ This directory contains Thalyn's ADRs — one decision per file, in [MADR](https
 | [0017](0017-observability-otel-langfuse.md) | Observability: OpenTelemetry GenAI + self-hosted Langfuse | Accepted (provisional) |
 | [0018](0018-python-sidecar-packaging-pyinstaller.md) | Python sidecar packaging: PyInstaller (uv-managed venv during early phases) | Proposed |
 | [0020](0020-brain-auth-backend-split.md) | Brain auth-backend split: Claude subscription default, API-key secondary | Proposed |
-| [0026](0026-chat-first-shell-and-drawer-system.md) | App shape: chat-first shell + on-demand drawer system | Accepted (provisional) |
+| [0026](0026-chat-first-shell-and-drawer-system.md) | App shape: chat-first shell + on-demand drawer system | Accepted |

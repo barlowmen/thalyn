@@ -1,7 +1,6 @@
 import { Check, Plug, Power, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { SurfaceCloseButton } from "@/components/shell/surface-close";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,7 +55,7 @@ const EMPTY: ConnectorsState = {
  * state and call Tauri directly; that's fine because each card
  * scopes its busy/error to itself.
  */
-export function ConnectorsSurface({ onClose }: { onClose?: () => void }) {
+export function ConnectorsSurface() {
   const [state, setState] = useState<ConnectorsState>(EMPTY);
 
   const refresh = useCallback(async () => {
@@ -94,7 +93,6 @@ export function ConnectorsSurface({ onClose }: { onClose?: () => void }) {
       error={state.error}
       onRefresh={() => void refresh()}
       onChanged={() => void refresh()}
-      onClose={onClose}
     />
   );
 }
@@ -106,7 +104,6 @@ export function ConnectorsView({
   error,
   onRefresh,
   onChanged,
-  onClose,
 }: {
   catalog: ConnectorDescriptor[];
   installed: InstalledConnector[];
@@ -114,7 +111,6 @@ export function ConnectorsView({
   error: string | null;
   onRefresh: () => void;
   onChanged: () => Promise<void> | void;
-  onClose?: () => void;
 }) {
   const installedById = useMemo(() => {
     const map = new Map<string, InstalledConnector>();
@@ -141,7 +137,6 @@ export function ConnectorsView({
           >
             <RefreshCw aria-hidden className="size-4" />
           </Button>
-          <SurfaceCloseButton onClose={onClose} />
         </div>
       </header>
 
