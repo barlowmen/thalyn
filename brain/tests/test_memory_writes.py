@@ -7,7 +7,10 @@ from typing import Any
 
 import pytest
 from thalyn_brain.memory import MemoryStore
-from thalyn_brain.memory_writes import record_memory_write
+from thalyn_brain.memory_writes import (
+    record_memory_write,
+    record_worker_project_memory_write,
+)
 
 
 async def test_write_persists_to_store_and_emits_action_log(tmp_path: Path) -> None:
@@ -93,3 +96,96 @@ async def test_empty_body_is_rejected(tmp_path: Path) -> None:
             kind="fact",
             author="user",
         )
+
+
+# ---------------------------------------------------------------------------
+# Worker-through-lead project memory
+# ---------------------------------------------------------------------------
+
+
+async def test_worker_project_write_persists_and_records_lead_provenance(
+    tmp_path: Path,
+) -> None:
+    store = MemoryStore(data_dir=tmp_path)
+    captured: list[tuple[str, Any]] = []
+
+    async def notify(method: str, params: Any) -> None:
+        captured.append((method, params))
+
+    entry = await record_worker_project_memory_write(
+        store,
+        run_id="r_42",
+        project_id="proj_alpha",
+        body="rate-limit redesign decision: token bucket per user.",
+        kind="reference",
+        worker_author="worker_codegen",
+        via_lead_id="lead_alpha",
+        notify=notify,
+    )
+
+    fetched = await store.get(entry.memory_id)
+    assert fetched is not None
+    assert fetched.scope == "project"
+    assert fetched.project_id == "proj_alpha"
+    assert fetched.author == "worker_codegen"
+
+    actions = [params for method, params in captured if method == "run.action_log"]
+    assert len(actions) == 1
+    payload = actions[0]["entry"]["payload"]
+    assert payload["scope"] == "project"
+    assert payload["author"] == "worker_codegen"
+    assert payload["viaLeadId"] == "lead_alpha"
+    assert payload["writerRole"] == "worker"
+
+
+async def test_worker_project_write_requires_project_id(tmp_path: Path) -> None:
+    store = MemoryStore(data_dir=tmp_path)
+    with pytest.raises(ValueError):
+        await record_worker_project_memory_write(
+            store,
+            run_id="r_x",
+            project_id="",
+            body="some note",
+            kind="reference",
+            worker_author="worker",
+            via_lead_id="lead_x",
+        )
+
+
+async def test_worker_project_write_requires_lead_id(tmp_path: Path) -> None:
+    store = MemoryStore(data_dir=tmp_path)
+    with pytest.raises(ValueError):
+        await record_worker_project_memory_write(
+            store,
+            run_id="r_x",
+            project_id="proj_x",
+            body="note",
+            kind="reference",
+            worker_author="worker",
+            via_lead_id="",
+        )
+
+
+async def test_brain_write_omits_lead_and_role_in_payload(tmp_path: Path) -> None:
+    """Brain-direct writes (no via_lead_id) should not surface
+    ``viaLeadId`` or ``writerRole`` so the renderer can distinguish
+    them from worker-through-lead writes."""
+    store = MemoryStore(data_dir=tmp_path)
+    captured: list[tuple[str, Any]] = []
+
+    async def notify(method: str, params: Any) -> None:
+        captured.append((method, params))
+
+    await record_memory_write(
+        store,
+        run_id="r_b",
+        body="User prefers tabs.",
+        scope="personal",
+        kind="preference",
+        author="agent_brain",
+        notify=notify,
+    )
+
+    payload = captured[0][1]["entry"]["payload"]
+    assert "viaLeadId" not in payload
+    assert "writerRole" not in payload
