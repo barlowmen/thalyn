@@ -32,7 +32,8 @@ export type DrawerKind =
   | "connectors"
   | "logs"
   | "worker"
-  | "lead";
+  | "lead"
+  | "lead-chat";
 
 /**
  * Per-kind open parameters. The brain (and Cmd-K) pass these through
@@ -49,6 +50,7 @@ export type DrawerParams = {
   logs: { runId?: string };
   worker: { runId: string };
   lead: { agentId: string };
+  "lead-chat": { agentId: string; displayName?: string };
 };
 
 export type DrawerOpenSpec = {

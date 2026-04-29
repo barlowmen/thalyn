@@ -47,6 +47,11 @@ const LeadSurface = lazy(() =>
     default: m.LeadSurface,
   })),
 );
+const LeadChatSurface = lazy(() =>
+  import("@/components/lead/lead-chat-surface").then((m) => ({
+    default: m.LeadChatSurface,
+  })),
+);
 
 function Fallback({ label }: { label: string }) {
   return (
@@ -124,6 +129,17 @@ export function resolveDrawer<K extends DrawerKind>(
       return (
         <Suspense fallback={<Fallback label="lead" />}>
           <LeadSurface agentId={leadParams.agentId} />
+        </Suspense>
+      );
+    }
+    case "lead-chat": {
+      const leadChatParams = (params ?? {}) as DrawerParams["lead-chat"];
+      return (
+        <Suspense fallback={<Fallback label="lead chat" />}>
+          <LeadChatSurface
+            agentId={leadChatParams.agentId}
+            displayName={leadChatParams.displayName}
+          />
         </Suspense>
       );
     }

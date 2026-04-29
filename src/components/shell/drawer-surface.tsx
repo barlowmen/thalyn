@@ -13,6 +13,7 @@ const DRAWER_LABEL: Record<DrawerKind, string> = {
   logs: "Logs",
   worker: "Worker",
   lead: "Lead",
+  "lead-chat": "Lead chat",
 };
 
 export type DrawerEscapeHatch = {

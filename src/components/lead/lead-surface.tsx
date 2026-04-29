@@ -1,4 +1,4 @@
-import { Bot, Brain, MessageSquareDashed, RefreshCw } from "lucide-react";
+import { Bot, Brain, MessageSquare, MessageSquareDashed, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -200,6 +200,25 @@ export function LeadSurface({
           </p>
         </div>
         <div className="flex items-center gap-1">
+          {agent && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1 px-2 text-[11px]"
+              onClick={() =>
+                dispatchToolsOpen({
+                  kind: "lead-chat",
+                  params: {
+                    agentId: agent.agentId,
+                    displayName: agent.displayName,
+                  },
+                })
+              }
+            >
+              <MessageSquare aria-hidden className="size-3" /> Direct chat
+            </Button>
+          )}
           <Button
             type="button"
             variant="ghost"
