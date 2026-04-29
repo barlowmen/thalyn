@@ -25,10 +25,11 @@ This directory contains Thalyn's ADRs — one decision per file, in [MADR](https
 | [0010](0010-browser-sidecar-chromium-cdp.md) | Browser: sidecar Chromium driven over CDP | Accepted (provisional) |
 | [0011](0011-sandbox-tiers-devcontainer-microvm.md) | Sandbox tiers: devcontainer + worktree default; microVM opt-in | Accepted (provisional) |
 | [0012](0012-provider-abstraction.md) | Provider abstraction: in-process trait + adapters | Accepted (provisional) |
-| [0013](0013-design-system-oklch-geist.md) | Design system: OKLCH tokens, Geist typography, three-panel mosaic | Accepted (provisional) |
+| [0013](0013-design-system-oklch-geist.md) | Design system: OKLCH tokens, Geist typography, three-panel mosaic | Accepted (provisional) — layout claim refined by ADR-0026 |
 | [0014](0014-documentation-madr-mermaid.md) | Documentation: MADR + Mermaid C4 + ARCHITECTURE.md | Accepted (provisional) |
 | [0015](0015-commit-hygiene-conventional-commits.md) | Commit hygiene: Conventional Commits + git-cliff + leakage scan + no Co-Authored-By | Accepted (provisional) |
 | [0016](0016-license-mit.md) | License: MIT (revisit before public) | Accepted (provisional) |
 | [0017](0017-observability-otel-langfuse.md) | Observability: OpenTelemetry GenAI + self-hosted Langfuse | Accepted (provisional) |
 | [0018](0018-python-sidecar-packaging-pyinstaller.md) | Python sidecar packaging: PyInstaller (uv-managed venv during early phases) | Proposed |
 | [0020](0020-brain-auth-backend-split.md) | Brain auth-backend split: Claude subscription default, API-key secondary | Proposed |
+| [0026](0026-chat-first-shell-and-drawer-system.md) | App shape: chat-first shell + on-demand drawer system | Accepted (provisional) |

@@ -1,7 +1,7 @@
 # ADR-0013 — Design system: OKLCH tokens, Geist typography, three-panel mosaic
 
-- **Status:** Accepted (provisional)
-- **Date:** 2026-04-25
+- **Status:** Accepted (provisional) — *layout claim refined by ADR-0026*
+- **Date:** 2026-04-25 (revised 2026-04-29)
 
 ## Context
 
@@ -35,3 +35,19 @@ Tokens live in `src/design/tokens.css` (CSS custom properties) with a TypeScript
 ## Notes
 
 Visual-design decisions are user-changeable; the token files are the single source of truth and are revisable per release.
+
+### Revision 2026-04-29 — layout claim narrowed
+
+The token system (OKLCH colour, Geist Sans + Mono, Motion durations,
+Lucide iconography, surfaces / glass posture) carries forward intact
+and is unaffected by this revision.
+
+The **three-panel-mosaic** layout claim does not survive contact with
+F8 (chat-first, drawer-based) and is refined by ADR-0026: the v2 shell
+is chat-first with on-demand drawers, not a permanent mosaic. The
+mosaic shell continues to render under the `/legacy` route during the
+chat-first pivot for migration safety, then retires once the
+drawer-host primitive lands.
+
+Token-level decisions (colour, type, motion, iconography, surfaces) are
+not reopened by ADR-0026; this ADR remains authoritative for those.
