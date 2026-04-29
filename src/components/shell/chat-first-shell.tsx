@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { InlineApprovalCard } from "@/components/approval/inline-approval-card";
 import { PlanApprovalDialog } from "@/components/approval/plan-approval-dialog";
 import { useApprovalGate } from "@/components/approval/use-approval-gate";
 import { CapabilityDeltaDialog } from "@/components/chat/capability-delta-dialog";
@@ -68,6 +69,10 @@ function ShellInner() {
     to: ProviderMeta;
   } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** Inline approval is the default surface; the modal opens only
+   *  when the user clicks "Edit plan" (multi-step form is too tall
+   *  for the inline card). */
+  const [editingApproval, setEditingApproval] = useState(false);
 
   const { messages, status, send } = useChat({ providerId });
   const approval = useApprovalGate();
@@ -159,6 +164,20 @@ function ShellInner() {
                 <MessageList
                   messages={messages}
                   header={<ThreadDigestGreeting />}
+                  footer={
+                    approval.gate ? (
+                      <InlineApprovalCard
+                        runId={approval.gate.runId}
+                        providerId={providerId}
+                        plan={approval.gate.plan}
+                        onSettled={() => {
+                          approval.clear();
+                          setEditingApproval(false);
+                        }}
+                        onOpenEditor={() => setEditingApproval(true)}
+                      />
+                    ) : null
+                  }
                 />
               </div>
             </main>
@@ -203,11 +222,14 @@ function ShellInner() {
       />
 
       <PlanApprovalDialog
-        open={approval.gate !== null}
+        open={editingApproval && approval.gate !== null}
         runId={approval.gate?.runId ?? null}
         providerId={providerId}
         plan={approval.gate?.plan ?? null}
-        onSettled={approval.clear}
+        onSettled={() => {
+          approval.clear();
+          setEditingApproval(false);
+        }}
       />
     </div>
   );

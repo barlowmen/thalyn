@@ -14,6 +14,13 @@ type Props = {
    * since-we-last-spoke digest greeting.
    */
   header?: ReactNode;
+  /**
+   * Optional footer rendered below the messages inside the scroll
+   * region. Used by the chat surface to slot in inline approval gates
+   * (F8.9 — everyday gates render inline with the conversation rather
+   * than as modal dialogs).
+   */
+  footer?: ReactNode;
 };
 
 /**
@@ -21,7 +28,7 @@ type Props = {
  * messages so screen-readers announce streamed text without flooding —
  * polite mode batches per-render.
  */
-export function MessageList({ messages, header }: Props) {
+export function MessageList({ messages, header, footer }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // Pin to the bottom when new content arrives — common chat affordance.
@@ -29,7 +36,7 @@ export function MessageList({ messages, header }: Props) {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages]);
+  }, [messages, footer]);
 
   if (messages.length === 0) {
     return (
@@ -41,6 +48,7 @@ export function MessageList({ messages, header }: Props) {
             anything you start here picks up where it left off next time.
           </p>
         </div>
+        {footer}
       </div>
     );
   }
@@ -73,6 +81,7 @@ export function MessageList({ messages, header }: Props) {
           </div>
         );
       })}
+      {footer}
     </div>
   );
 }
