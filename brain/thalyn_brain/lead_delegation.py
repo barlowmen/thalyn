@@ -30,6 +30,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from thalyn_brain.agents import AgentRecord
+from thalyn_brain.project_context import ProjectContext, merge_into_system_prompt
 from thalyn_brain.provider import (
     ChatChunk,
     ChatErrorChunk,
@@ -107,17 +108,31 @@ def find_addressed_lead(
     return AddressedLead(lead=lead, body=body or message)
 
 
-def effective_system_prompt(lead: AgentRecord) -> str:
+def effective_system_prompt(
+    lead: AgentRecord,
+    *,
+    project_context: ProjectContext | None = None,
+) -> str:
     """Lead's stored prompt, or a default identity prompt by name.
 
     The default keeps a fresh lead useful out of the box — calling a
     blank-system-prompt provider produces ungrounded chat. The user's
     rename surfaces here too: if the user has renamed the lead, the
     default prompt names the renamed identity.
+
+    When ``project_context`` is supplied (a parsed ``THALYN.md`` /
+    ``CLAUDE.md`` from the project's workspace root), it's merged in
+    front of the lead's prompt so every delegation hop carries the
+    human-editable project corpus. Per F6.3 this is the project
+    memory tier the lead reads on session start; the merged prompt
+    is what the provider actually sees.
     """
     if lead.system_prompt:
-        return lead.system_prompt
-    return DEFAULT_LEAD_SYSTEM_PROMPT_TEMPLATE.format(name=lead.display_name)
+        base = lead.system_prompt
+    else:
+        base = DEFAULT_LEAD_SYSTEM_PROMPT_TEMPLATE.format(name=lead.display_name)
+    merged = merge_into_system_prompt(base, project_context)
+    return merged or base
 
 
 async def collect_lead_reply(
@@ -125,6 +140,7 @@ async def collect_lead_reply(
     *,
     lead: AgentRecord,
     user_message: str,
+    project_context: ProjectContext | None = None,
 ) -> tuple[str, str | None]:
     """Drive the lead's provider once and return (text, error_or_none).
 
@@ -132,12 +148,16 @@ async def collect_lead_reply(
     caller — the brain wraps the reply with a preamble and a
     sanity-check note before re-emitting it on the eternal-thread
     surface, so partial streaming would surface the unwrapped text.
+
+    ``project_context`` (when supplied) folds into the system prompt
+    via ``effective_system_prompt`` so the lead's provider sees the
+    project's ``THALYN.md`` corpus alongside the lead's identity.
     """
     text_parts: list[str] = []
     error_message: str | None = None
     chunks: AsyncIterator[ChatChunk] = provider.stream_chat(
         user_message,
-        system_prompt=effective_system_prompt(lead),
+        system_prompt=effective_system_prompt(lead, project_context=project_context),
     )
     async for chunk in chunks:
         if isinstance(chunk, ChatTextChunk):

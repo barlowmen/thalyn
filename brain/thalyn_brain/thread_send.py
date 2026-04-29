@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 from thalyn_brain.agents import AgentRecordsStore
@@ -45,6 +46,8 @@ from thalyn_brain.lead_delegation import (
     sanity_check_lead_reply,
 )
 from thalyn_brain.memory import MemoryStore
+from thalyn_brain.project_context import ProjectContext, load_project_context
+from thalyn_brain.projects import ProjectsStore
 from thalyn_brain.provider import (
     ChatChunk,
     ChatErrorChunk,
@@ -85,6 +88,7 @@ def register_thread_send_methods(
     agent_records: AgentRecordsStore | None = None,
     routing_actions: RoutingActionsDispatcher | None = None,
     memory_store: MemoryStore | None = None,
+    projects_store: ProjectsStore | None = None,
 ) -> None:
     """Register ``thread.send`` and the recovery helpers.
 
@@ -113,6 +117,12 @@ def register_thread_send_methods(
     rows so cross-project preferences surface back into context. The
     parameter is optional so legacy tests that only exercise the
     eternal-thread plumbing keep their narrow setup.
+
+    ``projects_store`` lets the delegation path resolve the addressed
+    lead's project so its ``THALYN.md`` (per F6.3) folds into the
+    lead's system prompt at the moment of the hop. Optional for the
+    same reason — narrow tests that don't drive a delegation flow
+    keep their existing wiring.
     """
 
     async def thread_send(params: RpcParams, notify: Notifier) -> JsonValue:
@@ -124,6 +134,7 @@ def register_thread_send_methods(
             agent_records,
             routing_actions,
             memory_store,
+            projects_store,
         )
 
     async def thread_recovery_status(params: RpcParams) -> JsonValue:
@@ -149,6 +160,7 @@ async def _handle_thread_send(
     agent_records: AgentRecordsStore | None,
     routing_actions: RoutingActionsDispatcher | None = None,
     memory_store: MemoryStore | None = None,
+    projects_store: ProjectsStore | None = None,
 ) -> JsonValue:
     thread_id = _require_str(params, "threadId")
     provider_id = _require_str(params, "providerId")
@@ -247,6 +259,10 @@ async def _handle_thread_send(
     # lead, run the delegation flow instead of a direct brain reply.
     addressed = await _maybe_address_lead(prompt, agent_records)
     if addressed is not None:
+        project_context = await _load_lead_project_context(
+            addressed.lead.project_id,
+            projects_store,
+        )
         return await _handle_delegated_reply(
             notify=notify,
             store=store,
@@ -257,6 +273,7 @@ async def _handle_thread_send(
             brain_turn_id=brain_turn_id,
             addressed=addressed,
             assembled=assembled,
+            project_context=project_context,
         )
 
     # 7. Stream the brain's reply chunk-by-chunk. Buffer text deltas
@@ -362,6 +379,30 @@ async def _maybe_address_lead(
     return find_addressed_lead(prompt, leads)
 
 
+async def _load_lead_project_context(
+    project_id: str | None,
+    projects_store: ProjectsStore | None,
+) -> ProjectContext | None:
+    """Resolve the lead's ``workspace_path`` into a ``ProjectContext``.
+
+    Returns ``None`` when the project lookup yields no row, when the
+    project has no workspace path, or when the workspace's
+    ``THALYN.md`` / ``CLAUDE.md`` doesn't exist or doesn't parse.
+    Errors are swallowed: a misconfigured workspace must never
+    derail a delegation hop. F6.3 makes the project-context file a
+    convenience tier, not a load-bearing one.
+    """
+    if project_id is None or projects_store is None:
+        return None
+    project = await projects_store.get(project_id)
+    if project is None or not project.workspace_path:
+        return None
+    try:
+        return load_project_context(Path(project.workspace_path))
+    except OSError:
+        return None
+
+
 async def _handle_delegated_reply(
     *,
     notify: Notifier,
@@ -373,6 +414,7 @@ async def _handle_delegated_reply(
     brain_turn_id: str,
     addressed: AddressedLead,
     assembled: AssembledContext,
+    project_context: ProjectContext | None = None,
 ) -> JsonValue:
     """Delegate the turn to a project lead and stream the reply.
 
@@ -405,6 +447,7 @@ async def _handle_delegated_reply(
         lead_provider,
         lead=lead,
         user_message=addressed.body,
+        project_context=project_context,
     )
     if lead_error is not None:
         # The lead's provider surfaced an error — leave the user turn

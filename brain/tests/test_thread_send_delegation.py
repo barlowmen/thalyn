@@ -254,6 +254,105 @@ async def test_hedged_lead_reply_surfaces_low_confidence_note(tmp_path: Path) ->
     assert "Low-confidence" in turns[2].body
 
 
+async def test_lead_session_loads_thalyn_md_into_system_prompt(tmp_path: Path) -> None:
+    """When the project has a workspace_path and a ``THALYN.md`` lives
+    there, the lead's provider sees the file's contents merged in
+    front of its identity prompt — the F6.3 project-memory tier is
+    auto-loaded at session start without the user re-pasting it."""
+    workspace = tmp_path / "alpha-workspace"
+    workspace.mkdir()
+    (workspace / "THALYN.md").write_text(
+        "# Alpha conventions\n- Always run pnpm lint before pushing.\n",
+    )
+
+    threads = ThreadsStore(data_dir=tmp_path)
+    agents = AgentRecordsStore(data_dir=tmp_path)
+    projects = ProjectsStore(data_dir=tmp_path)
+    lifecycle = LeadLifecycle(agents=agents, projects=projects)
+
+    fake, factory = factory_for([text_message("noted"), result_message()])
+    provider = AnthropicProvider(client_factory=factory)
+    registry = _registry_with(provider)
+    dispatcher = Dispatcher()
+    register_thread_send_methods(
+        dispatcher,
+        threads_store=threads,
+        registry=registry,
+        agent_records=agents,
+        projects_store=projects,
+    )
+
+    project = Project(
+        project_id=new_project_id(),
+        name="Alpha",
+        slug="alpha",
+        workspace_path=str(workspace),
+        repo_remote=None,
+        lead_agent_id=None,
+        memory_namespace="alpha",
+        conversation_tag="Alpha",
+        roadmap="",
+        provider_config=None,
+        connector_grants=None,
+        local_only=False,
+        status="active",
+        created_at_ms=_now(),
+        last_active_at_ms=_now(),
+    )
+    await projects.insert(project)
+    await lifecycle.spawn(SpawnRequest(project_id=project.project_id, display_name="Sam"))
+    thread = await _seed_thread(threads)
+
+    await _send(
+        dispatcher,
+        thread_id=thread.thread_id,
+        prompt="Sam, what should I check before pushing?",
+    )
+
+    sys_prompt = fake.options.system_prompt if fake.options is not None else ""
+    assert sys_prompt is not None
+    assert "Project context — THALYN.md" in sys_prompt
+    assert "Always run pnpm lint" in sys_prompt
+
+
+async def test_lead_session_without_workspace_path_skips_project_context(
+    tmp_path: Path,
+) -> None:
+    """A project without a workspace_path doesn't try to load
+    ``THALYN.md`` and the lead's prompt stays at the identity
+    template."""
+    threads = ThreadsStore(data_dir=tmp_path)
+    agents = AgentRecordsStore(data_dir=tmp_path)
+    projects = ProjectsStore(data_dir=tmp_path)
+    lifecycle = LeadLifecycle(agents=agents, projects=projects)
+
+    fake, factory = factory_for([text_message("noted"), result_message()])
+    provider = AnthropicProvider(client_factory=factory)
+    registry = _registry_with(provider)
+    dispatcher = Dispatcher()
+    register_thread_send_methods(
+        dispatcher,
+        threads_store=threads,
+        registry=registry,
+        agent_records=agents,
+        projects_store=projects,
+    )
+
+    project = await _seed_project(projects)  # workspace_path=None
+    await lifecycle.spawn(SpawnRequest(project_id=project.project_id, display_name="Sam"))
+    thread = await _seed_thread(threads)
+
+    await _send(
+        dispatcher,
+        thread_id=thread.thread_id,
+        prompt="Sam, ping?",
+    )
+
+    sys_prompt = fake.options.system_prompt if fake.options is not None else ""
+    assert sys_prompt is not None
+    assert "Project context" not in sys_prompt
+
+
 async def test_delegation_disabled_when_no_agent_records_store(tmp_path: Path) -> None:
     """The optional ``agent_records`` parameter keeps callers (and
     tests) that don't wire the registry on the v0.21 fast path."""
