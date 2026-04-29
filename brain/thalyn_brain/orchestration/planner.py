@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from thalyn_brain.orchestration.state import Plan, PlanNode, PlanNodeStatus
 from thalyn_brain.provider import ChatTextChunk, LlmProvider
+from thalyn_brain.routing_table import TASK_TAGS
 
 PLAN_SYSTEM_PROMPT = """You are the planning step of an agent runtime.
 
@@ -31,7 +32,8 @@ nothing else:
       "rationale": "<why this step is needed>",
       "estimated_tokens": <integer>,
       "subagent_kind": "<optional; one of \"research\", \"edit\", \"tool\", or omit>",
-      "sandbox_tier": "<optional; one of \"tier_0\", \"tier_1\", \"tier_2\", \"tier_3\", or omit>"
+      "sandbox_tier": "<optional; one of \"tier_0\", \"tier_1\", \"tier_2\", \"tier_3\", or omit>",
+      "task_tag": "<coding|image|research|writing|quick|default; or omit>"
     }
   ]
 }
@@ -46,6 +48,12 @@ default (devcontainer + git worktree, default-deny egress) for any
 step that touches the filesystem or shell, and ``tier_2``/``tier_3``
 are higher-isolation tiers reserved for risky or compute-heavy work.
 Omit when ``subagent_kind`` is not set.
+
+``task_tag`` controls which provider the runtime routes the worker
+to. Use ``coding`` for refactors and edits, ``image`` for image
+generation, ``research`` for read-only investigation, ``writing``
+for prose, ``quick`` for trivial answers, and omit for the default
+route.
 
 If the task is a simple question or doesn't need decomposition, emit
 a single step that is "Answer the user's question." with rationale
@@ -134,6 +142,12 @@ def _parse_plan(text: str, *, fallback_goal: str) -> Plan:
         # work that never spawns a sub-agent.
         if sandbox_tier is None and subagent_kind is not None:
             sandbox_tier = "tier_1"
+        task_tag_value = raw.get("task_tag")
+        task_tag: str | None = None
+        if isinstance(task_tag_value, str):
+            candidate_tag = task_tag_value.strip().lower()
+            if candidate_tag in TASK_TAGS:
+                task_tag = candidate_tag
         nodes.append(
             PlanNode(
                 id=f"step_{uuid.uuid4().hex[:8]}",
@@ -144,6 +158,7 @@ def _parse_plan(text: str, *, fallback_goal: str) -> Plan:
                 status=PlanNodeStatus.PENDING,
                 subagent_kind=subagent_kind,
                 sandbox_tier=sandbox_tier,
+                task_tag=task_tag,
             )
         )
 

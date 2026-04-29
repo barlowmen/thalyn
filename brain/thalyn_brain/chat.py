@@ -83,6 +83,19 @@ async def _handle_chat_send(
     # by lead surfaces the whole tree (per ADR-0021).
     lead_id: str | None = lead_id_value or None
 
+    project_id_value = params.get("projectId")
+    if project_id_value is not None and not isinstance(project_id_value, str):
+        raise RpcError(
+            code=INVALID_PARAMS,
+            message="projectId must be a string when provided",
+        )
+    # ``projectId`` carries the routing context: the runner threads it
+    # into the worker spawner so per-project overrides + the
+    # ``local_only`` privacy flag take effect (per ADR-0023). The
+    # field is optional so non-routed callers (the brain's own runs
+    # before a project lead exists) keep working.
+    project_id: str | None = project_id_value or None
+
     workspace_root_value = params.get("workspaceRoot")
     project_context = None
     if isinstance(workspace_root_value, str) and workspace_root_value:
@@ -100,6 +113,7 @@ async def _handle_chat_send(
             system_prompt=system_prompt,
             agent_id=lead_id,
             parent_lead_id=lead_id,
+            project_id=project_id,
         )
     except ProviderNotImplementedError as exc:
         raise RpcError(code=INVALID_PARAMS, message=str(exc)) from exc
@@ -117,6 +131,8 @@ async def _handle_chat_send(
         summary["projectContext"] = project_context.to_wire()
     if lead_id is not None:
         summary["leadId"] = lead_id
+    if project_id is not None:
+        summary["projectId"] = project_id
     return summary
 
 

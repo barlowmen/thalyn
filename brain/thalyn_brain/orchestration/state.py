@@ -41,6 +41,12 @@ class PlanNode:
     handed off to a focused worker (research, edit, tool, …) instead of
     inlined into the respond turn. ``None`` keeps the historical
     pass-through behaviour.
+
+    ``task_tag`` is the routing input (per ADR-0023): the lead tags
+    each step with one of the recognized vocabulary entries (``coding``,
+    ``image``, ``research``, ``writing``, ``quick``, ``default``) so
+    the spawn path resolves a per-tag provider through the routing
+    layer. ``None`` collapses to the ``default`` route.
     """
 
     id: str
@@ -52,6 +58,7 @@ class PlanNode:
     parent_id: str | None = None
     subagent_kind: str | None = None
     sandbox_tier: str | None = None
+    task_tag: str | None = None
 
     def to_wire(self) -> dict[str, Any]:
         return {
@@ -64,6 +71,7 @@ class PlanNode:
             "parentId": self.parent_id,
             "subagentKind": self.subagent_kind,
             "sandboxTier": self.sandbox_tier,
+            "taskTag": self.task_tag,
         }
 
 

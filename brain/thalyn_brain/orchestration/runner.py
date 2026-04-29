@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from thalyn_brain.audit import AuditLogWriter, wrap_notifier
 from thalyn_brain.orchestration.budget import Budget, BudgetConsumption
@@ -30,8 +30,16 @@ from thalyn_brain.orchestration.state import GraphState, RunStatus, SubAgentResu
 from thalyn_brain.orchestration.storage import open_run_checkpointer
 from thalyn_brain.orchestration.subagent import SubAgentSpawner
 from thalyn_brain.provider import ProviderRegistry
+from thalyn_brain.routing_table import LocalOnlyViolation
 from thalyn_brain.runs import RunHeader, RunsStore, RunUpdate
 from thalyn_brain.tracing import THALYN_RUN_STATUS, run_span
+
+if TYPE_CHECKING:
+    # ``WorkerRouter`` is a Protocol used only for typing — keeping the
+    # runtime import out of this module lets ``worker_router`` (which
+    # depends on ``ProjectsStore`` -> ``orchestration.storage``) stay
+    # outside the orchestration import cycle.
+    from thalyn_brain.worker_router import WorkerRouter
 
 RUN_APPROVAL_REQUIRED = "run.approval_required"
 DEFAULT_DEPTH_CAP = 2
@@ -75,6 +83,7 @@ class Runner:
         runs_store: RunsStore | None = None,
         data_dir: Path | None = None,
         depth_cap: int = DEFAULT_DEPTH_CAP,
+        worker_router: WorkerRouter | None = None,
     ) -> None:
         self._registry = registry
         if checkpointer_context is not None:
@@ -93,6 +102,11 @@ class Runner:
         # ``run.approval_required`` notification and are skipped until
         # an explicit-approval surface is wired up.
         self._depth_cap = depth_cap
+        # Worker-routing layer (per ADR-0023). When wired, every spawn
+        # consults it to pick a per-tag provider; when ``None``, spawns
+        # inherit the parent's provider. Tests for non-routing flow
+        # leave this unset.
+        self._worker_router = worker_router
 
     def _audit_for(self, run_id: str) -> AuditLogWriter | None:
         if self._audit_data_dir is None:
@@ -153,11 +167,13 @@ class Runner:
                 )
 
             existing_lead_id = await self._lookup_parent_lead_id(run_id)
+            existing_project_id = await self._lookup_project_id(run_id)
             spawner = self._spawner_for(
                 session_id=existing_values.get("session_id", ""),
                 provider_id=provider_id,
                 parent_notify=notify,
                 parent_lead_id=existing_lead_id,
+                project_id=existing_project_id,
             )
             graph = build_graph(
                 provider,
@@ -189,6 +205,7 @@ class Runner:
         system_prompt: str | None = None,
         agent_id: str | None = None,
         parent_lead_id: str | None = None,
+        project_id: str | None = None,
     ) -> RunResult:
         provider = self._registry.get(provider_id)
 
@@ -220,7 +237,7 @@ class Runner:
                 await self._runs_store.insert(
                     RunHeader(
                         run_id=run_id,
-                        project_id=None,
+                        project_id=project_id,
                         parent_run_id=parent_run_id,
                         status=RunStatus.PLANNING.value,
                         title=title,
@@ -241,6 +258,7 @@ class Runner:
                 provider_id=provider_id,
                 parent_notify=notify,
                 parent_lead_id=parent_lead_id,
+                project_id=project_id,
             )
 
             async with self._checkpointer_context(run_id) as checkpointer:
@@ -344,11 +362,13 @@ class Runner:
 
             existing_values = dict(existing.values)
             existing_lead_id = await self._lookup_parent_lead_id(run_id)
+            existing_project_id = await self._lookup_project_id(run_id)
             spawner = self._spawner_for(
                 session_id=existing_values.get("session_id", ""),
                 provider_id=provider_id,
                 parent_notify=notify,
                 parent_lead_id=existing_lead_id,
+                project_id=existing_project_id,
             )
             graph = build_graph(
                 provider,
@@ -508,6 +528,18 @@ class Runner:
         header = await self._runs_store.get(run_id)
         return header.parent_lead_id if header is not None else None
 
+    async def _lookup_project_id(self, run_id: str) -> str | None:
+        """Read the persisted ``project_id`` for a run.
+
+        Mirrors ``_lookup_parent_lead_id`` so the routing layer can
+        resolve per-project overrides + ``local_only`` for spawns
+        triggered by ``resume`` / ``approve_plan`` after a restart.
+        """
+        if self._runs_store is None:
+            return None
+        header = await self._runs_store.get(run_id)
+        return header.project_id if header is not None else None
+
     def _spawner_for(
         self,
         *,
@@ -515,6 +547,7 @@ class Runner:
         provider_id: str,
         parent_notify: Notifier,
         parent_lead_id: str | None = None,
+        project_id: str | None = None,
     ) -> SubAgentSpawner:
         """Build a closure the graph layer uses to dispatch a sub-agent.
 
@@ -524,6 +557,9 @@ class Runner:
         ``parent_lead_id`` is attribution: every child run inherits
         the lead that owns the work, so a drill-down by lead id sees
         the whole tree even when the immediate parent is a worker.
+        ``project_id`` carries the routing context: spawns consult
+        the worker router with this project for per-project overrides
+        and the ``local_only`` privacy flag.
         """
 
         async def spawner(
@@ -540,6 +576,7 @@ class Runner:
                 provider_id=provider_id,
                 parent_notify=parent_notify,
                 parent_lead_id=parent_lead_id,
+                project_id=project_id,
             )
 
         return spawner
@@ -554,14 +591,21 @@ class Runner:
         provider_id: str,
         parent_notify: Notifier,
         parent_lead_id: str | None = None,
+        project_id: str | None = None,
     ) -> SubAgentResult:
         """Drive one sub-agent run to completion and return its outcome.
 
-        The child shares the parent's session and provider but gets a
-        fresh ``run_id``, its own checkpoint db, its own audit log,
-        and its own ``parent_run_id`` / ``depth`` markers in state. Sub-agent
-        events flow through the same notifier the parent is using —
-        the renderer routes them by ``runId``.
+        The child gets a fresh ``run_id``, its own checkpoint db, its
+        own audit log, and its own ``parent_run_id`` / ``depth`` markers
+        in state. Sub-agent events flow through the same notifier the
+        parent is using — the renderer routes them by ``runId``.
+
+        The provider is *not* simply inherited from the parent: when a
+        worker router is wired (per ADR-0023), the spawn consults it
+        with the plan node's ``task_tag`` + ``project_id`` and the
+        chosen provider runs the child run. When no router is wired —
+        legacy chat.send paths, narrow tests — the child inherits the
+        parent's provider unchanged.
 
         Spawning at a depth that exceeds the runner's depth cap fires
         a depth-gate ``run.approval_required`` notification and
@@ -596,9 +640,34 @@ class Runner:
             title = title[:80]
         description = plan_node.get("description") or ""
 
-        provider = self._registry.get(provider_id)
-        audit = self._audit_for(child_run_id)
-        notify = wrap_notifier(parent_notify, audit)
+        # Resolve the spawn's provider through the routing layer when
+        # one is wired; otherwise inherit the parent's provider so
+        # legacy paths keep working unchanged.
+        task_tag_raw = plan_node.get("taskTag")
+        task_tag = task_tag_raw if isinstance(task_tag_raw, str) else None
+        child_audit = self._audit_for(child_run_id)
+        try:
+            child_provider_id = await self._resolve_child_provider(
+                task_tag=task_tag,
+                project_id=project_id,
+                fallback_provider_id=provider_id,
+                audit=child_audit,
+                parent_notify=parent_notify,
+                parent_run_id=parent_run_id,
+                child_run_id=child_run_id,
+            )
+        except LocalOnlyViolation as exc:
+            return await self._record_routing_failure(
+                parent_run_id=parent_run_id,
+                child_run_id=child_run_id,
+                plan_node_id=str(plan_node_id),
+                exc=exc,
+                audit=child_audit,
+                parent_notify=parent_notify,
+            )
+
+        provider = self._registry.get(child_provider_id)
+        notify = wrap_notifier(parent_notify, child_audit)
         started_at = int(time.time() * 1000)
 
         await notify(
@@ -617,11 +686,11 @@ class Runner:
             await self._runs_store.insert(
                 RunHeader(
                     run_id=child_run_id,
-                    project_id=None,
+                    project_id=project_id,
                     parent_run_id=parent_run_id,
                     status=RunStatus.PLANNING.value,
                     title=str(title),
-                    provider_id=provider_id,
+                    provider_id=child_provider_id,
                     started_at_ms=started_at,
                     completed_at_ms=None,
                     drift_score=0.0,
@@ -636,11 +705,15 @@ class Runner:
         # creates a fresh closure rather than sharing state across
         # nested calls. Lead attribution flows verbatim — a worker
         # spawned by a worker still belongs to the original lead.
+        # The router is consulted again per spawn, so a deeper child
+        # carrying a different ``task_tag`` can land on a different
+        # provider than its immediate parent.
         child_spawner = self._spawner_for(
             session_id=session_id,
-            provider_id=provider_id,
+            provider_id=child_provider_id,
             parent_notify=parent_notify,
             parent_lead_id=parent_lead_id,
+            project_id=project_id,
         )
 
         async with self._checkpointer_context(child_run_id) as checkpointer:
@@ -654,7 +727,7 @@ class Runner:
             initial: GraphState = {
                 "run_id": child_run_id,
                 "session_id": session_id,
-                "provider_id": provider_id,
+                "provider_id": child_provider_id,
                 "parent_run_id": parent_run_id,
                 "depth": child_depth,
                 "user_message": description,
@@ -670,7 +743,7 @@ class Runner:
 
         finalised = await self._finalize(
             run_id=child_run_id,
-            provider_id=provider_id,
+            provider_id=child_provider_id,
             session_id=session_id,
             final_state=final_state,
         )
@@ -680,6 +753,92 @@ class Runner:
             plan_node_id=str(plan_node_id),
             status=finalised.status,
             final_response=finalised.final_response,
+        )
+
+    async def _resolve_child_provider(
+        self,
+        *,
+        task_tag: str | None,
+        project_id: str | None,
+        fallback_provider_id: str,
+        audit: AuditLogWriter | None,
+        parent_notify: Notifier,
+        parent_run_id: str,
+        child_run_id: str,
+    ) -> str:
+        """Pick a provider for a worker spawn through the routing layer.
+
+        Returns ``fallback_provider_id`` when no router is wired
+        (legacy / narrow-test paths). Otherwise consults the router,
+        records the decision in the per-run audit log + a
+        ``run.routing_decision`` notification so the renderer can
+        surface the choice in the inspector, and returns the routed
+        provider id.
+
+        Raises ``LocalOnlyViolation`` if the routed provider
+        contradicts the project's ``local_only`` flag — the spawn
+        path catches it and records a routing failure rather than
+        proceeding.
+        """
+        if self._worker_router is None:
+            return fallback_provider_id
+        decision = await self._worker_router.route(
+            task_tag=task_tag,
+            project_id=project_id,
+        )
+        payload = decision.to_audit_payload(project_id=project_id)
+        if audit is not None:
+            audit.append("decision", payload)
+        await parent_notify(
+            "run.routing_decision",
+            {
+                "parentRunId": parent_run_id,
+                "runId": child_run_id,
+                **payload,
+            },
+        )
+        return decision.provider_id
+
+    async def _record_routing_failure(
+        self,
+        *,
+        parent_run_id: str,
+        child_run_id: str,
+        plan_node_id: str,
+        exc: LocalOnlyViolation,
+        audit: AuditLogWriter | None,
+        parent_notify: Notifier,
+    ) -> SubAgentResult:
+        """Surface a ``local_only`` invariant violation as a skipped spawn.
+
+        The spawn never started, so there's no run row to mark errored
+        — the audit log carries the explanation, and the parent's
+        notifier sees the failure inline so the renderer can surface
+        it. The plan node is reported as ``skipped`` rather than
+        ``errored`` because the failure is a routing-policy refusal,
+        not an in-flight run that crashed.
+        """
+        message = str(exc)
+        if audit is not None:
+            audit.append(
+                "decision",
+                {"action": "route_worker", "error": "local_only_violation", "message": message},
+            )
+        await parent_notify(
+            "run.routing_decision",
+            {
+                "parentRunId": parent_run_id,
+                "runId": child_run_id,
+                "error": "local_only_violation",
+                "message": message,
+            },
+        )
+        return SubAgentResult(
+            parent_run_id=parent_run_id,
+            child_run_id="",
+            plan_node_id=plan_node_id,
+            status="skipped",
+            final_response="",
         )
 
     async def _finalize(

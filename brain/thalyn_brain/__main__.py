@@ -40,6 +40,7 @@ from thalyn_brain.routing_rpc import register_routing_methods
 from thalyn_brain.rpc import build_default_dispatcher
 from thalyn_brain.runs import RunsStore
 from thalyn_brain.runs_rpc import register_runs_methods
+from thalyn_brain.worker_router import StoreBackedWorkerRouter
 from thalyn_brain.schedules import (
     Schedule,
     SchedulerLoop,
@@ -92,7 +93,17 @@ def main() -> int:
     email_store = EmailAccountStore(data_dir=data_dir)
     email_credentials = EmailCredentialsCache()
     email_manager = EmailManager(store=email_store, token_source=email_credentials.token_source)
-    runner = Runner(registry, runs_store=runs_store, data_dir=data_dir)
+    worker_router = StoreBackedWorkerRouter(
+        overrides_store=routing_overrides_store,
+        projects_store=projects_store,
+        registry=registry,
+    )
+    runner = Runner(
+        registry,
+        runs_store=runs_store,
+        data_dir=data_dir,
+        worker_router=worker_router,
+    )
     register_chat_methods(dispatcher, registry, runner=runner)
     register_approval_methods(dispatcher, runner)
     register_runs_methods(dispatcher, runs_store, runner=runner)
