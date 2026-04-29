@@ -1,7 +1,7 @@
 # ADR-0023 — Worker model routing: task-tag → provider with per-project overrides
 
-- **Status:** Proposed
-- **Date:** 2026-04-29
+- **Status:** Accepted
+- **Date:** 2026-04-29 (Proposed) · 2026-04-29 (Accepted)
 - **Deciders:** Barlow
 - **Supersedes:** —
 - **Superseded by:** —
@@ -178,3 +178,39 @@ the same actions; both write through `RoutingOverridesStore`.
   is the lead-tier default that workers route *off of*).
 - ADR-0028 (brain owns SQLite storage; routing-overrides table lives
   in the brain's `app.db`).
+
+## Notes
+
+Drafted with `Status: Proposed` alongside the routing-table module
+and routing.* IPC. Flipped to `Accepted` at the end of this stage's
+work — every load-bearing claim has been exercised under traffic:
+
+- `route_worker` answers the resolution-order matrix (no overrides
+  → global default; per-project override; ``local_only``
+  short-circuit) under unit + integration coverage.
+- `StoreBackedWorkerRouter` reads overrides + the project's
+  `local_only` flag from SQLite per spawn and runs the pure
+  resolver; the runner consults it in `_spawn_subagent` so the
+  child run uses the routed provider, the per-run audit log
+  records the `decision` line with `(taskTag, projectId,
+  providerId, matched)`, and a `run.routing_decision` notification
+  carries the same payload to the renderer for live inspection.
+- Lead attribution (`parent_lead_id`) flows verbatim through the
+  spawner closure — the routing layer picks the *provider*, not
+  the *lead*. Sibling spawns with different tags can land on
+  different providers; a worker that spawns a sub-worker
+  re-consults the router so deeper nodes can route differently
+  from the parent's choice.
+- The `local_only` invariant is enforced twice: the resolver
+  short-circuits cloud providers out for `local_only` projects,
+  and the spawn site asserts the chosen provider's
+  `capability_profile.local` flag before the run starts. A
+  bypass raises `LocalOnlyViolation` and the spawn is reported
+  `skipped` — the project's privacy invariant survives even when
+  an upstream code path slipped past the routing layer.
+- Conversational edits ("route coding to ollama in this project",
+  "make this project local-only") land through a small intent
+  parser in `thread.send`. Provider aliases collapse model-flavoured
+  language to a registry key so the user isn't forced to think in
+  provider-vs-model terms; misses fall through to the regular
+  reply flow unchanged.
