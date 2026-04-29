@@ -14,6 +14,7 @@ import { SettingsDialog } from "@/components/settings/settings-dialog";
 import {
   DrawerHost,
   DrawerHostProvider,
+  useDrawerHost,
 } from "@/components/shell/drawer-host";
 import { TopBar } from "@/components/shell/top-bar";
 import {
@@ -71,6 +72,7 @@ function ShellInner() {
   const { messages, status, send } = useChat({ providerId });
   const approval = useApprovalGate();
   const drift = useDriftGate();
+  const drawerHost = useDrawerHost();
 
   useEffect(() => subscribeActiveProvider(setProviderId), []);
 
@@ -105,21 +107,32 @@ function ShellInner() {
       : null;
 
   // Priority order for the transient strip (F8.3): drift > approval >
-  // sending. The strip shows one signal at a time; clicks dismiss the
-  // gate (v0.27 has no per-run detail drawer to route into yet — that
-  // lands in v0.28's worker / lead drawer work).
+  // sending. The strip shows one signal at a time; clicks open the
+  // worker drawer for that run so the user can drill into the plan
+  // and action log without leaving chat.
   const activity: TransientActivity | null = drift.gate
     ? {
         kind: "drift",
         label: `Drift flagged on a run${
           drift.gate.reason ? ` — ${drift.gate.reason}` : "."
         }`,
-        onClick: drift.dismiss,
+        onClick: () => {
+          drawerHost.open({
+            kind: "worker",
+            params: { runId: drift.gate!.runId },
+          });
+          drift.dismiss();
+        },
       }
     : approval.gate
     ? {
         kind: "awaiting_approval",
         label: "Plan ready for review — open to approve or edit.",
+        onClick: () =>
+          drawerHost.open({
+            kind: "worker",
+            params: { runId: approval.gate!.runId },
+          }),
       }
     : sending
     ? {
