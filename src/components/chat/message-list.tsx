@@ -1,7 +1,9 @@
+import { UserCog } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
 
 import { ToolCallCard } from "@/components/chat/tool-call-card";
 import type { Message } from "@/components/chat/types";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -70,8 +72,22 @@ function MessageBubble({ message }: { message: Message }) {
     );
   }
 
+  const attribution = message.leadAttribution;
+
   return (
     <div className="space-y-2">
+      {attribution ? (
+        <div
+          className="flex items-center gap-1.5 text-xs text-muted-foreground"
+          aria-label={`Delegated to ${attribution.displayName ?? attribution.agentId}`}
+        >
+          <UserCog aria-hidden className="size-3" />
+          <span>via</span>
+          <Badge tone="default">
+            {attribution.displayName ?? attribution.agentId}
+          </Badge>
+        </div>
+      ) : null}
       {message.segments.map((segment, idx) => {
         if (segment.kind === "text") {
           return (

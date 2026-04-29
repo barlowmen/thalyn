@@ -7,7 +7,7 @@ import {
   subscribeChatChunks,
 } from "@/lib/chat";
 
-import type { AssistantSegment, Message } from "./types";
+import type { AssistantSegment, LeadAttribution, Message } from "./types";
 
 type Status =
   | { kind: "idle" }
@@ -25,9 +25,16 @@ const newId = () => `m_${Date.now()}_${nextId++}`;
 export function useChat({
   providerId,
   systemPrompt,
+  leadId,
+  leadDisplayName,
 }: {
   providerId: string;
   systemPrompt?: string;
+  /** When set, the next chat.send delegates the run to this lead.
+   *  The brain stamps run.agent_id / parent_lead_id from the value
+   *  and the response surfaces leadId for the attribution chip. */
+  leadId?: string;
+  leadDisplayName?: string;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
@@ -149,19 +156,39 @@ export function useChat({
       };
       setMessages((current) => [...current, userMessage]);
       try {
-        await sendChat({
+        const summary = await sendChat({
           sessionId: sessionRef.current,
           providerId,
           prompt: trimmed,
           systemPrompt,
+          leadId,
         });
+        // Stamp the active assistant message with the lead the brain
+        // delegated to, so the bubble can render the attribution
+        // chip. The summary carries leadId only when the brain
+        // routed through a project lead; v1 (project-less) replies
+        // leave it undefined and the chip stays hidden.
+        if (summary.leadId) {
+          const attribution: LeadAttribution = {
+            agentId: summary.leadId,
+            displayName: leadDisplayName,
+          };
+          setMessages((current) => {
+            const target = activeAssistantId.current;
+            return current.map((m) =>
+              m.role === "assistant" && m.id === target
+                ? { ...m, leadAttribution: attribution }
+                : m,
+            );
+          });
+        }
         setStatus({ kind: "idle" });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         setStatus({ kind: "error", message });
       }
     },
-    [providerId, systemPrompt],
+    [providerId, systemPrompt, leadId, leadDisplayName],
   );
 
   return { messages, status, send };

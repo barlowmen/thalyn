@@ -16,6 +16,15 @@ export type AssistantSegment =
     }
   | { kind: "error"; message: string; code?: string };
 
+export type LeadAttribution = {
+  /** The agent_id of the lead the brain delegated to. */
+  agentId: string;
+  /** The lead's display_name at delegation time. Renderer uses this
+   *  for the "via Lead-X" chip; later phases plug a live store-lookup
+   *  in so renames flow through automatically. */
+  displayName?: string;
+};
+
 export type Message =
   | {
       id: string;
@@ -29,4 +38,5 @@ export type Message =
       model?: string;
       done: boolean;
       totalCostUsd?: number;
+      leadAttribution?: LeadAttribution;
     };

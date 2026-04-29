@@ -79,6 +79,8 @@ struct ChatSummary {
     reason: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     total_cost_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lead_id: Option<String>,
 }
 
 #[tauri::command]
@@ -1513,6 +1515,7 @@ async fn send_chat(
     provider_id: String,
     prompt: String,
     system_prompt: Option<String>,
+    lead_id: Option<String>,
 ) -> Result<ChatSummary, String> {
     if !state.secrets.has_api_key(&provider_id) {
         return Err(format!("provider {provider_id} has no API key configured",));
@@ -1528,6 +1531,9 @@ async fn send_chat(
     });
     if let Some(sp) = system_prompt {
         params["systemPrompt"] = Value::String(sp);
+    }
+    if let Some(id) = lead_id {
+        params["leadId"] = Value::String(id);
     }
 
     let result = state
@@ -1551,6 +1557,10 @@ async fn send_chat(
             .unwrap_or("incomplete")
             .to_string(),
         total_cost_usd: result.get("totalCostUsd").and_then(|v| v.as_f64()),
+        lead_id: result
+            .get("leadId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
     })
 }
 

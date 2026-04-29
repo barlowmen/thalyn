@@ -36,6 +36,7 @@ export type ChatSummary = {
   chunks: number;
   reason: string;
   totalCostUsd?: number;
+  leadId?: string;
 };
 
 export type SendChatParams = {
@@ -43,6 +44,7 @@ export type SendChatParams = {
   providerId: string;
   prompt: string;
   systemPrompt?: string;
+  leadId?: string;
 };
 
 export function sendChat(params: SendChatParams): Promise<ChatSummary> {
