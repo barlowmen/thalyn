@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Visual baselines for the v0.3 walking-skeleton shell with the chat
- * surface in the main panel.
+ * Visual baselines for the chat-first shell (ADR-0026): top bar +
+ * eternal chat + transient strip + composer. The legacy mosaic shell
+ * is exercised under ``/legacy`` for as long as that route survives.
  *
  * The Tauri-specific `invoke` is replaced with a window stub so the
  * renderer doesn't error out when the brain bridge is absent. We're
@@ -149,24 +150,35 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(installTauriStub);
 });
 
-test("dark shell — default layout", async ({ page }) => {
+test("chat-first shell — dark", async ({ page }) => {
   await page.addInitScript(seedStorage("dark"));
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Chat" })).toBeVisible();
-  await expect(page).toHaveScreenshot("dark-shell.png");
+  await expect(
+    page.getByRole("button", { name: /Brain identity:/ }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("chat-first-dark.png");
 });
 
-test("light shell — default layout", async ({ page }) => {
+test("chat-first shell — light", async ({ page }) => {
   await page.addInitScript(seedStorage("light"));
   await page.goto("/");
+  await expect(
+    page.getByRole("button", { name: /Brain identity:/ }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("chat-first-light.png");
+});
+
+test("legacy shell — dark", async ({ page }) => {
+  await page.addInitScript(seedStorage("dark"));
+  await page.goto("/legacy");
   await expect(page.getByRole("heading", { name: "Chat" })).toBeVisible();
-  await expect(page).toHaveScreenshot("light-shell.png");
+  await expect(page).toHaveScreenshot("legacy-dark.png");
 });
 
 test("command palette open", async ({ page }) => {
   await page.addInitScript(seedStorage("dark"));
   await page.goto("/");
-  await page.getByRole("heading", { name: "Chat" }).waitFor();
+  await page.getByRole("button", { name: /Brain identity:/ }).waitFor();
   await page.keyboard.press("ControlOrMeta+k");
   await expect(page.getByPlaceholder("Type a command…")).toBeVisible();
   await expect(page).toHaveScreenshot("command-palette.png");

@@ -2,7 +2,9 @@ import { Suspense, lazy, useCallback, useState } from "react";
 
 import { ChatSurface } from "@/components/chat/chat-surface";
 import { FirstRunWizard } from "@/components/onboarding/first-run-wizard";
+import { ChatFirstShell } from "@/components/shell/chat-first-shell";
 import { AppShell } from "@/components/shell/app-shell";
+import { usePathname } from "@/lib/use-pathname";
 
 // Heavy surfaces are split out of the initial chat bundle so the
 // cold-start path stays inside the NFR1 budget. Each lazy import
@@ -62,6 +64,22 @@ function SurfaceFallback({ label }: { label: string }) {
 }
 
 function App() {
+  const pathname = usePathname();
+  // The chat-first shell is the default route. The legacy mosaic
+  // shell remains reachable under ``/legacy`` while the drawer-host
+  // primitive comes online; once drawers re-home the surfaces, the
+  // legacy route and the mosaic shell delete together (ADR-0026).
+  const isLegacy = pathname === "/legacy" || pathname.startsWith("/legacy/");
+
+  return (
+    <>
+      <FirstRunWizard />
+      {isLegacy ? <LegacyShell /> : <ChatFirstShell />}
+    </>
+  );
+}
+
+function LegacyShell() {
   const [openSubAgentRunId, setOpenSubAgentRunId] = useState<string | null>(null);
   const [takeOverRunId, setTakeOverRunId] = useState<string | null>(null);
 
@@ -82,9 +100,7 @@ function App() {
   }, []);
 
   return (
-    <>
-      <FirstRunWizard />
-      <AppShell
+    <AppShell
       openSubAgentRunId={openSubAgentRunId}
       onOpenSubAgent={handleOpenSubAgent}
       onCloseSurface={handleCloseSubAgent}
@@ -168,7 +184,6 @@ function App() {
         />
       )}
     />
-    </>
   );
 }
 

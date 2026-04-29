@@ -47,7 +47,10 @@ test.beforeEach(async ({ page }) => {
 test("editor cold-start lands inside the NFR1 budget", async ({ page }) => {
   const COLD_START_BUDGET_MS = 5_000;
 
-  await page.goto("/");
+  // The editor lives in the legacy mosaic shell (chat-first replaces
+  // the rail with on-demand drawers; the editor drawer lands later).
+  // Until then ``/legacy`` is where the editor surface is reachable.
+  await page.goto("/legacy");
   await page.getByRole("heading", { name: "Chat" }).waitFor();
 
   const editorButton = page.getByRole("button", { name: "Editor" });

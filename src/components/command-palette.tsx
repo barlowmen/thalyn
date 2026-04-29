@@ -1,5 +1,7 @@
 import {
+  Compass,
   type LucideIcon,
+  MessagesSquare,
   Monitor,
   Moon,
   PanelLeft,
@@ -21,13 +23,14 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command";
+import { navigateTo, usePathname } from "@/lib/use-pathname";
 
 type Action = {
   id: string;
   label: string;
   icon: LucideIcon;
   shortcut?: string;
-  group: "Theme" | "Layout" | "App";
+  group: "Theme" | "Layout" | "App" | "Navigate";
   run: () => void;
 };
 
@@ -49,6 +52,8 @@ export function CommandPalette({
 }) {
   const [open, setOpen] = useState(false);
   const { setTheme } = useTheme();
+  const pathname = usePathname();
+  const onLegacy = pathname === "/legacy" || pathname.startsWith("/legacy/");
 
   // Cmd-K (macOS) / Ctrl-K (everywhere else) toggles the palette.
   // The chat-first top bar's keyboard-shortcut chip dispatches the
@@ -123,6 +128,21 @@ export function CommandPalette({
       group: "App",
       run: () => window.location.reload(),
     },
+    onLegacy
+      ? {
+          id: "nav.chatFirst",
+          label: "Open chat-first view",
+          icon: MessagesSquare,
+          group: "Navigate",
+          run: () => navigateTo("/"),
+        }
+      : {
+          id: "nav.legacy",
+          label: "Open legacy view (editor / terminal / browser / agents)",
+          icon: Compass,
+          group: "Navigate",
+          run: () => navigateTo("/legacy"),
+        },
   ];
 
   const grouped = actions.reduce<Record<string, Action[]>>((acc, action) => {
