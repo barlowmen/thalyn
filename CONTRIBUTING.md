@@ -24,6 +24,27 @@ pnpm tauri dev
 If `pnpm tauri dev` brings up a window and `Ping brain` returns a pong,
 you're set up.
 
+### CEF feature (optional during the engine swap)
+
+The bundled-Chromium engine (ADR-0019) lives behind the optional `cef`
+Cargo feature so trunk builds stay light during the implementation
+phase. Enable it locally only when you're working on browser-engine
+code:
+
+```sh
+# One-time tools (in addition to the Tauri prerequisites above):
+#   - cmake
+#   - ninja
+# The cef-dll-sys build script downloads the pinned CEF SDK
+# (~130 MB compressed) under $CEF_PATH on first build and caches it.
+export CEF_PATH="$HOME/.cache/thalyn-cef"
+cargo check --manifest-path src-tauri/Cargo.toml --features cef
+```
+
+The pinned CEF version lives in [`src-tauri/cef-version.txt`](src-tauri/cef-version.txt);
+the CI `cef build (linux)` job runs the same command with the SDK
+cached across runs.
+
 ## Where things live
 
 - `src/` — React renderer.

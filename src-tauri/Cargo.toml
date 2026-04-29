@@ -12,6 +12,16 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+default = []
+# Pulls in `cef` and links against a downloaded CEF binary distribution.
+# Off by default during the engine-swap implementation phase so trunk
+# builds don't depend on a CEF SDK or the cmake/ninja toolchain. The
+# pinned CEF version lives in `cef-version.txt`. Local opt-in:
+# `cargo build --features cef` after sourcing the env vars from the
+# README under "CEF feature" — CI's `cef` job runs this end-to-end.
+cef = ["dep:cef"]
+
 [dependencies]
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
@@ -24,6 +34,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "linux-native-sync-persistent"] }
 portable-pty = "0.9"
 uuid = { version = "1", features = ["v4"] }
+cef = { version = "147.1.0", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
