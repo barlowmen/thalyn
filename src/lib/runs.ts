@@ -85,6 +85,8 @@ export type RunHeader = {
   sandboxTier?: SandboxTier | null;
   budget?: Budget | null;
   budgetConsumed?: BudgetConsumed | null;
+  agentId?: string | null;
+  parentLeadId?: string | null;
 };
 
 /**

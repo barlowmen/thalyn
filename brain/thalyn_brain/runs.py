@@ -33,7 +33,15 @@ from thalyn_brain.orchestration.storage import (
 
 @dataclass
 class RunHeader:
-    """The header-row shape exposed over JSON-RPC."""
+    """The header-row shape exposed over JSON-RPC.
+
+    ``agent_id`` is which agent is *running* the row (a lead spawning
+    a worker tags the worker with the lead's id; v1 rows leave it
+    NULL). ``parent_lead_id`` is the lead that owns the run — the
+    drill-down filter on the agents inspector queries by it. Both
+    columns were added in migration 003 and migration 004 backfills
+    ``parent_lead_id = agent_lead_default`` for legacy rows.
+    """
 
     run_id: str
     project_id: str | None
@@ -49,6 +57,8 @@ class RunHeader:
     sandbox_tier: str | None = None
     budget: dict[str, Any] | None = None
     budget_consumed: dict[str, Any] | None = None
+    agent_id: str | None = None
+    parent_lead_id: str | None = None
 
     def to_wire(self) -> dict[str, Any]:
         d = asdict(self)
@@ -67,6 +77,8 @@ class RunHeader:
             "sandboxTier": d["sandbox_tier"],
             "budget": d["budget"],
             "budgetConsumed": d["budget_consumed"],
+            "agentId": d["agent_id"],
+            "parentLeadId": d["parent_lead_id"],
         }
 
 
@@ -123,8 +135,9 @@ class RunsStore:
                     (run_id, project_id, parent_run_id, status, title,
                      provider_id, started_at_ms, completed_at_ms,
                      drift_score, final_response, plan_json, sandbox_tier,
-                     budget_json, budget_consumed_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     budget_json, budget_consumed_json,
+                     agent_id, parent_lead_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     header.run_id,
@@ -143,6 +156,8 @@ class RunsStore:
                     json.dumps(header.budget_consumed)
                     if header.budget_consumed is not None
                     else None,
+                    header.agent_id,
+                    header.parent_lead_id,
                 ),
             )
 
@@ -186,15 +201,23 @@ class RunsStore:
         self,
         *,
         project_id: str | None = None,
+        parent_lead_id: str | None = None,
         statuses: Iterable[str] | None = None,
         limit: int = 100,
     ) -> list[RunHeader]:
         async with self._lock:
-            return await asyncio.to_thread(self._list_sync, project_id, statuses, limit)
+            return await asyncio.to_thread(
+                self._list_sync,
+                project_id,
+                parent_lead_id,
+                statuses,
+                limit,
+            )
 
     def _list_sync(
         self,
         project_id: str | None,
+        parent_lead_id: str | None,
         statuses: Iterable[str] | None,
         limit: int,
     ) -> list[RunHeader]:
@@ -203,6 +226,9 @@ class RunsStore:
         if project_id is not None:
             clauses.append("project_id = ?")
             values.append(project_id)
+        if parent_lead_id is not None:
+            clauses.append("parent_lead_id = ?")
+            values.append(parent_lead_id)
         if statuses is not None:
             status_list = list(statuses)
             if status_list:
@@ -273,11 +299,12 @@ class RunsStore:
 def _row_to_header(row: sqlite3.Row) -> RunHeader:
     plan_json = row["plan_json"]
     plan = json.loads(plan_json) if plan_json else None
-    sandbox_tier = row["sandbox_tier"] if "sandbox_tier" in row.keys() else None
-    budget_json = row["budget_json"] if "budget_json" in row.keys() else None
-    budget_consumed_json = (
-        row["budget_consumed_json"] if "budget_consumed_json" in row.keys() else None
-    )
+    keys = row.keys()
+    sandbox_tier = row["sandbox_tier"] if "sandbox_tier" in keys else None
+    budget_json = row["budget_json"] if "budget_json" in keys else None
+    budget_consumed_json = row["budget_consumed_json"] if "budget_consumed_json" in keys else None
+    agent_id = row["agent_id"] if "agent_id" in keys else None
+    parent_lead_id = row["parent_lead_id"] if "parent_lead_id" in keys else None
     return RunHeader(
         run_id=row["run_id"],
         project_id=row["project_id"],
@@ -293,4 +320,6 @@ def _row_to_header(row: sqlite3.Row) -> RunHeader:
         sandbox_tier=sandbox_tier,
         budget=json.loads(budget_json) if budget_json else None,
         budget_consumed=json.loads(budget_consumed_json) if budget_consumed_json else None,
+        agent_id=agent_id,
+        parent_lead_id=parent_lead_id,
     )

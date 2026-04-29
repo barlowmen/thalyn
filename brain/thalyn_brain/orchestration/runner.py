@@ -152,10 +152,12 @@ class Runner:
                     action_log_size=len(existing_values.get("action_log") or []),
                 )
 
+            existing_lead_id = await self._lookup_parent_lead_id(run_id)
             spawner = self._spawner_for(
                 session_id=existing_values.get("session_id", ""),
                 provider_id=provider_id,
                 parent_notify=notify,
+                parent_lead_id=existing_lead_id,
             )
             graph = build_graph(
                 provider,
@@ -185,6 +187,8 @@ class Runner:
         depth: int = 0,
         budget: Budget | None = None,
         system_prompt: str | None = None,
+        agent_id: str | None = None,
+        parent_lead_id: str | None = None,
     ) -> RunResult:
         provider = self._registry.get(provider_id)
 
@@ -227,6 +231,8 @@ class Runner:
                         final_response="",
                         budget=budget_wire,
                         budget_consumed=consumed.to_wire(),
+                        agent_id=agent_id,
+                        parent_lead_id=parent_lead_id,
                     )
                 )
 
@@ -234,6 +240,7 @@ class Runner:
                 session_id=session_id,
                 provider_id=provider_id,
                 parent_notify=notify,
+                parent_lead_id=parent_lead_id,
             )
 
             async with self._checkpointer_context(run_id) as checkpointer:
@@ -336,10 +343,12 @@ class Runner:
                 return None
 
             existing_values = dict(existing.values)
+            existing_lead_id = await self._lookup_parent_lead_id(run_id)
             spawner = self._spawner_for(
                 session_id=existing_values.get("session_id", ""),
                 provider_id=provider_id,
                 parent_notify=notify,
+                parent_lead_id=existing_lead_id,
             )
             graph = build_graph(
                 provider,
@@ -486,18 +495,35 @@ class Runner:
             action_log_size=0,
         )
 
+    async def _lookup_parent_lead_id(self, run_id: str) -> str | None:
+        """Read the persisted ``parent_lead_id`` for a run.
+
+        Used by ``resume`` and ``approve_plan`` so children spawned
+        after a restart inherit the same lead-tier attribution as
+        the original run carried. Returns ``None`` when the runs
+        store isn't wired (tests) or the row is gone.
+        """
+        if self._runs_store is None:
+            return None
+        header = await self._runs_store.get(run_id)
+        return header.parent_lead_id if header is not None else None
+
     def _spawner_for(
         self,
         *,
         session_id: str,
         provider_id: str,
         parent_notify: Notifier,
+        parent_lead_id: str | None = None,
     ) -> SubAgentSpawner:
         """Build a closure the graph layer uses to dispatch a sub-agent.
 
         The graph supplies the parent's current depth on each call —
         that's the only authoritative reading once the run resumes
         across an interrupt — so the closure forwards it verbatim.
+        ``parent_lead_id`` is attribution: every child run inherits
+        the lead that owns the work, so a drill-down by lead id sees
+        the whole tree even when the immediate parent is a worker.
         """
 
         async def spawner(
@@ -513,6 +539,7 @@ class Runner:
                 session_id=session_id,
                 provider_id=provider_id,
                 parent_notify=parent_notify,
+                parent_lead_id=parent_lead_id,
             )
 
         return spawner
@@ -526,6 +553,7 @@ class Runner:
         session_id: str,
         provider_id: str,
         parent_notify: Notifier,
+        parent_lead_id: str | None = None,
     ) -> SubAgentResult:
         """Drive one sub-agent run to completion and return its outcome.
 
@@ -599,17 +627,20 @@ class Runner:
                     drift_score=0.0,
                     final_response="",
                     sandbox_tier=sandbox_tier,
+                    parent_lead_id=parent_lead_id,
                 )
             )
 
         # Children of this child go through the same spawner, so the
         # tree can grow as deep as the depth cap allows. Each spawn
         # creates a fresh closure rather than sharing state across
-        # nested calls.
+        # nested calls. Lead attribution flows verbatim — a worker
+        # spawned by a worker still belongs to the original lead.
         child_spawner = self._spawner_for(
             session_id=session_id,
             provider_id=provider_id,
             parent_notify=parent_notify,
+            parent_lead_id=parent_lead_id,
         )
 
         async with self._checkpointer_context(child_run_id) as checkpointer:

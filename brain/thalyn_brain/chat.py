@@ -71,6 +71,18 @@ async def _handle_chat_send(
             message="systemPrompt must be a string when provided",
         )
 
+    lead_id_value = params.get("leadId")
+    if lead_id_value is not None and not isinstance(lead_id_value, str):
+        raise RpcError(
+            code=INVALID_PARAMS,
+            message="leadId must be a string when provided",
+        )
+    # When the caller names a lead, the run is *the lead's*: the run
+    # header records ``agent_id=leadId`` (who's running), and every
+    # spawned worker inherits ``parent_lead_id=leadId`` so a drill
+    # by lead surfaces the whole tree (per ADR-0021).
+    lead_id: str | None = lead_id_value or None
+
     workspace_root_value = params.get("workspaceRoot")
     project_context = None
     if isinstance(workspace_root_value, str) and workspace_root_value:
@@ -86,6 +98,8 @@ async def _handle_chat_send(
             notify=notify,
             budget=budget,
             system_prompt=system_prompt,
+            agent_id=lead_id,
+            parent_lead_id=lead_id,
         )
     except ProviderNotImplementedError as exc:
         raise RpcError(code=INVALID_PARAMS, message=str(exc)) from exc
@@ -101,6 +115,8 @@ async def _handle_chat_send(
         summary["plan"] = result.plan
     if project_context is not None:
         summary["projectContext"] = project_context.to_wire()
+    if lead_id is not None:
+        summary["leadId"] = lead_id
     return summary
 
 
