@@ -209,17 +209,32 @@ class MemoryStore:
         query: str,
         *,
         project_id: str | None = None,
+        scopes: Iterable[str] | None = None,
         limit: int = 20,
     ) -> list[MemoryEntry]:
         """Plain-text LIKE search over the body. v0.11 MVP — a
-        semantic-recall replacement is the next refinement."""
+        semantic-recall replacement is the next refinement.
+
+        ``scopes`` narrows the search to a specific tier (e.g.
+        ``("personal",)`` for cross-project user memory). Unrecognised
+        scope values are silently dropped so callers can hand straight
+        through whatever the IPC carried — invalid values won't match
+        any rows and the only side effect is an empty result.
+        """
         async with self._lock:
-            return await asyncio.to_thread(self._search_sync, query, project_id, limit)
+            return await asyncio.to_thread(
+                self._search_sync,
+                query,
+                project_id,
+                scopes,
+                limit,
+            )
 
     def _search_sync(
         self,
         query: str,
         project_id: str | None,
+        scopes: Iterable[str] | None,
         limit: int,
     ) -> list[MemoryEntry]:
         if not query.strip():
@@ -230,6 +245,11 @@ class MemoryStore:
         if project_id is not None:
             clauses.append("(project_id = ? OR project_id IS NULL)")
             values.append(project_id)
+        if scopes is not None:
+            scope_list = [s for s in scopes if isinstance(s, str)]
+            if scope_list:
+                clauses.append(f"scope IN ({','.join('?' * len(scope_list))})")
+                values.extend(scope_list)
         values.append(limit)
         with self._open() as conn:
             rows = conn.execute(

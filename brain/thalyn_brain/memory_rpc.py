@@ -48,10 +48,22 @@ def register_memory_methods(dispatcher: Dispatcher, store: MemoryStore) -> None:
         project_id = params.get("projectId")
         if project_id is not None and not isinstance(project_id, str):
             raise RpcError(code=INVALID_PARAMS, message="projectId must be a string")
+        scopes = params.get("scopes")
+        if scopes is not None:
+            if not (isinstance(scopes, list) and all(isinstance(s, str) for s in scopes)):
+                raise RpcError(
+                    code=INVALID_PARAMS,
+                    message="scopes must be a list of strings",
+                )
         limit_raw = params.get("limit", 20)
         if not isinstance(limit_raw, int) or limit_raw <= 0:
             raise RpcError(code=INVALID_PARAMS, message="limit must be a positive integer")
-        rows = await store.search(query, project_id=project_id, limit=limit_raw)
+        rows = await store.search(
+            query,
+            project_id=project_id,
+            scopes=scopes,
+            limit=limit_raw,
+        )
         return {"entries": [row.to_wire() for row in rows]}
 
     async def memory_add(params: RpcParams) -> JsonValue:

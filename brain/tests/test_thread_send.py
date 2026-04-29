@@ -589,3 +589,61 @@ async def test_thread_send_returns_context_summary(tmp_path: Path) -> None:
     assert summary["recentTurnCount"] == 3
     assert summary["digestId"] is None
     assert summary["episodicHits"] == []
+    assert summary["personalMemoryHits"] == []
+
+
+async def test_thread_send_pulls_personal_memory_into_context(tmp_path: Path) -> None:
+    """Wiring memory_store into ``thread.send`` lets the assembler
+    pull personal-scope rows that match the current turn's
+    distinctive tokens."""
+    from thalyn_brain.memory import MemoryEntry, MemoryStore, new_memory_id
+
+    fake, factory = factory_for([text_message("noted"), result_message()])
+    provider = AnthropicProvider(client_factory=factory)
+    registry = _registry_with(provider)
+    store = ThreadsStore(data_dir=tmp_path)
+    memory = MemoryStore(data_dir=tmp_path)
+    now = _now_ms()
+    await memory.insert(
+        MemoryEntry(
+            memory_id=new_memory_id(),
+            project_id=None,
+            scope="personal",
+            kind="preference",
+            body="User does not auto-merge pull requests.",
+            author="user",
+            created_at_ms=now,
+            updated_at_ms=now,
+        )
+    )
+    dispatcher = Dispatcher()
+    register_thread_send_methods(
+        dispatcher,
+        threads_store=store,
+        registry=registry,
+        memory_store=memory,
+    )
+    thread = await _seed_thread(store)
+
+    _, notify = _captured_notifier()
+    response = await dispatcher.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "thread.send",
+            "params": {
+                "threadId": thread.thread_id,
+                "providerId": "anthropic",
+                "prompt": "Should renovate auto-merge be on for this repo?",
+            },
+        },
+        notify,
+    )
+    assert response is not None
+    summary = response["result"]["context"]
+    assert len(summary["personalMemoryHits"]) >= 1
+
+    sys_prompt = fake.options.system_prompt if fake.options is not None else ""
+    assert sys_prompt is not None
+    assert "Personal memory references" in sys_prompt
+    assert "auto-merge" in sys_prompt

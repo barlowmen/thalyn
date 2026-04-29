@@ -3,10 +3,18 @@
 Per ``02-architecture.md`` §9.4 the brain assembles a bounded working
 context on every ``thread.send``: the system prompt, the rolling
 digest, the recent verbatim turns, and (conditional) episodic recall
-hits. Steps 4 (episodic) and 5 (project memory) are *pull-on-demand*
-so a chatty session doesn't pay the cost on every turn — episodic
-recall fires only when the user's input contains tokens that didn't
-resolve in the recent window.
+hits — both over the eternal transcript and over the user's
+``personal``-scope memory. Steps 4 (episodic) and 5 (project memory)
+are *pull-on-demand* so a chatty session doesn't pay the cost on
+every turn — episodic recall fires only when the user's input
+contains tokens that didn't resolve in the recent window.
+
+Personal-memory recall is the F6.4/F6.5 mechanism that lets Thalyn
+stay recognizable across projects and across time: a user-level
+preference written months ago surfaces back into context when the
+current turn references it, without forcing the user to re-state it.
+The same heuristic that gates eternal-transcript recall gates the
+personal-memory pull, so quiet turns never round-trip the store.
 
 This module is the boundary the eternal thread folds into the existing
 chat orchestration: callers ask for an ``AssembledContext`` and pass
@@ -19,6 +27,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from thalyn_brain.memory import MemoryEntry, MemoryStore
 from thalyn_brain.threads import (
     SessionDigest,
     ThreadsStore,
@@ -28,6 +37,7 @@ from thalyn_brain.threads import (
 
 DEFAULT_RECENT_LIMIT = 40
 DEFAULT_EPISODIC_LIMIT = 3
+DEFAULT_PERSONAL_MEMORY_LIMIT = 3
 EPISODIC_TOKEN_REGEX = re.compile(r"[A-Za-z][A-Za-z0-9_'-]{2,}")
 # Tokens shorter than 3 chars or in this stop list don't earn an
 # episodic-recall round-trip. The list is small on purpose — the goal
@@ -81,9 +91,9 @@ class AssembledContext:
     """Everything ``thread.send`` needs to hand the runner.
 
     ``system_prompt`` is the assembled string (digest + recent +
-    episodic hits + caller-supplied system prompt). The other fields
-    are kept for telemetry and tests — the runner only reads
-    ``system_prompt`` and ``user_message``.
+    episodic hits + personal-memory hits + caller-supplied system
+    prompt). The other fields are kept for telemetry and tests — the
+    runner only reads ``system_prompt`` and ``user_message``.
     """
 
     system_prompt: str
@@ -91,6 +101,7 @@ class AssembledContext:
     digest: SessionDigest | None
     recent_turns: list[ThreadTurn]
     episodic_hits: list[ThreadTurnSearchHit] = field(default_factory=list)
+    personal_memory_hits: list[MemoryEntry] = field(default_factory=list)
 
 
 async def assemble_context(
@@ -101,14 +112,18 @@ async def assemble_context(
     base_system_prompt: str | None = None,
     recent_limit: int = DEFAULT_RECENT_LIMIT,
     episodic_limit: int = DEFAULT_EPISODIC_LIMIT,
+    memory_store: MemoryStore | None = None,
+    personal_memory_limit: int = DEFAULT_PERSONAL_MEMORY_LIMIT,
 ) -> AssembledContext:
     """Build the per-turn context bundle.
 
-    The function reads three sources from the store: the latest
-    rolling digest (``digest.latest``), the recent verbatim window
-    (``thread.recent``-equivalent), and — when the user's message
-    contains tokens that didn't appear in the recent window —
-    a small episodic search to pull historical turns into context.
+    Reads three sources from ``store``: the latest rolling digest, the
+    recent verbatim window, and — when the user's message contains
+    tokens that didn't appear in the recent window — a small episodic
+    search over the eternal transcript. When ``memory_store`` is
+    supplied, the same trigger fans out to ``personal``-scope memory
+    so cross-project preferences and recurring decisions stay visible
+    when the current turn references them.
     """
     digest = await store.latest_digest(thread_id)
     recent_turns = await store.list_recent(
@@ -122,6 +137,7 @@ async def assemble_context(
     # text — anything that didn't show up recently is the candidate
     # search query. This is the §9.4 step-4 "conditional" rule.
     episodic_hits: list[ThreadTurnSearchHit] = []
+    personal_memory_hits: list[MemoryEntry] = []
     extra_query = _episodic_query_for(user_message, recent_turns)
     if extra_query:
         try:
@@ -140,11 +156,19 @@ async def assemble_context(
         recent_ids = {t.turn_id for t in recent_turns}
         episodic_hits = [h for h in episodic_hits if h.turn.turn_id not in recent_ids]
 
+        if memory_store is not None:
+            personal_memory_hits = await _personal_memory_hits(
+                memory_store,
+                tokens=extra_query.split(),
+                limit=personal_memory_limit,
+            )
+
     system_prompt = _render_system_prompt(
         base=base_system_prompt,
         digest=digest,
         recent_turns=recent_turns,
         episodic_hits=episodic_hits,
+        personal_memory_hits=personal_memory_hits,
     )
     return AssembledContext(
         system_prompt=system_prompt,
@@ -152,7 +176,45 @@ async def assemble_context(
         digest=digest,
         recent_turns=recent_turns,
         episodic_hits=episodic_hits,
+        personal_memory_hits=personal_memory_hits,
     )
+
+
+async def _personal_memory_hits(
+    memory_store: MemoryStore,
+    *,
+    tokens: list[str],
+    limit: int,
+) -> list[MemoryEntry]:
+    """Fan a per-token LIKE search across personal-scope memory.
+
+    Each distinctive token earns one search; results are merged
+    keeping the first occurrence so repeats don't crowd the prompt.
+    The memory layer caps each call at ``limit`` rows; the merged
+    result is also capped at ``limit`` so a token cluster can't
+    blow the prompt out.
+    """
+    if not tokens or limit <= 0:
+        return []
+    seen_ids: set[str] = set()
+    merged: list[MemoryEntry] = []
+    for token in tokens:
+        try:
+            hits = await memory_store.search(
+                token,
+                scopes=("personal",),
+                limit=limit,
+            )
+        except Exception:
+            continue
+        for entry in hits:
+            if entry.memory_id in seen_ids:
+                continue
+            seen_ids.add(entry.memory_id)
+            merged.append(entry)
+            if len(merged) >= limit:
+                return merged
+    return merged
 
 
 def _episodic_query_for(user_message: str, recent_turns: list[ThreadTurn]) -> str:
@@ -200,13 +262,15 @@ def _render_system_prompt(
     digest: SessionDigest | None,
     recent_turns: list[ThreadTurn],
     episodic_hits: list[ThreadTurnSearchHit],
+    personal_memory_hits: list[MemoryEntry],
 ) -> str:
     """Compose the assembled system prompt as plain text.
 
     Section ordering matches §9.4: caller's base system prompt first
     (Thalyn identity), then the rolling digest, then the recent
-    verbatim window, then episodic hits. Each section is omitted when
-    empty so a fresh thread doesn't paste empty headers.
+    verbatim window, then episodic transcript hits, then personal
+    memory references. Each section is omitted when empty so a fresh
+    thread doesn't paste empty headers.
     """
     parts: list[str] = []
     if base:
@@ -220,6 +284,9 @@ def _render_system_prompt(
     if episodic_hits:
         parts.append("# Earlier in the eternal thread")
         parts.append(_format_episodic(episodic_hits))
+    if personal_memory_hits:
+        parts.append("# Personal memory references")
+        parts.append(_format_personal_memory(personal_memory_hits))
     return "\n\n".join(parts)
 
 
@@ -255,4 +322,11 @@ def _format_episodic(hits: list[ThreadTurnSearchHit]) -> str:
     for hit in hits:
         snippet = hit.snippet or hit.turn.body
         lines.append(f"[{hit.turn.role} @ turn {hit.turn.turn_id}] {snippet}")
+    return "\n".join(lines)
+
+
+def _format_personal_memory(hits: list[MemoryEntry]) -> str:
+    lines: list[str] = []
+    for entry in hits:
+        lines.append(f"[{entry.kind} · by {entry.author}] {entry.body}")
     return "\n".join(lines)

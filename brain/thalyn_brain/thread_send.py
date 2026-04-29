@@ -44,6 +44,7 @@ from thalyn_brain.lead_delegation import (
     find_addressed_lead,
     sanity_check_lead_reply,
 )
+from thalyn_brain.memory import MemoryStore
 from thalyn_brain.provider import (
     ChatChunk,
     ChatErrorChunk,
@@ -83,6 +84,7 @@ def register_thread_send_methods(
     registry: ProviderRegistry,
     agent_records: AgentRecordsStore | None = None,
     routing_actions: RoutingActionsDispatcher | None = None,
+    memory_store: MemoryStore | None = None,
 ) -> None:
     """Register ``thread.send`` and the recovery helpers.
 
@@ -104,6 +106,13 @@ def register_thread_send_methods(
     phrases like "route coding to ollama in this project" before
     delegating, dispatches the action, and replies with the
     confirmation directly.
+
+    ``memory_store`` enables personal-memory recall during context
+    assembly: when a turn references tokens that didn't resolve in
+    the recent window, the assembler fans out to ``personal``-scope
+    rows so cross-project preferences surface back into context. The
+    parameter is optional so legacy tests that only exercise the
+    eternal-thread plumbing keep their narrow setup.
     """
 
     async def thread_send(params: RpcParams, notify: Notifier) -> JsonValue:
@@ -114,6 +123,7 @@ def register_thread_send_methods(
             registry,
             agent_records,
             routing_actions,
+            memory_store,
         )
 
     async def thread_recovery_status(params: RpcParams) -> JsonValue:
@@ -138,6 +148,7 @@ async def _handle_thread_send(
     registry: ProviderRegistry,
     agent_records: AgentRecordsStore | None,
     routing_actions: RoutingActionsDispatcher | None = None,
+    memory_store: MemoryStore | None = None,
 ) -> JsonValue:
     thread_id = _require_str(params, "threadId")
     provider_id = _require_str(params, "providerId")
@@ -202,12 +213,14 @@ async def _handle_thread_send(
     brain_turn_id = new_turn_id()
 
     # 6. Assemble the per-turn context bundle (rolling digest + recent
-    # turns + conditional episodic recall) per §9.4.
+    # turns + conditional episodic recall + personal-memory recall)
+    # per §9.4 / F6.4 / F6.5.
     assembled = await assemble_context(
         store,
         thread_id=thread_id,
         user_message=prompt,
         base_system_prompt=base_system_prompt,
+        memory_store=memory_store,
     )
 
     # 6a. Routing-edit intent (per ADR-0023). Recognise "route X to Y
@@ -621,6 +634,10 @@ def _context_summary(assembled: AssembledContext) -> dict[str, Any]:
         "recentTurnCount": len(assembled.recent_turns),
         "episodicHits": [
             {"turnId": h.turn.turn_id, "rank": h.rank} for h in assembled.episodic_hits
+        ],
+        "personalMemoryHits": [
+            {"memoryId": entry.memory_id, "kind": entry.kind}
+            for entry in assembled.personal_memory_hits
         ],
     }
 

@@ -132,6 +132,7 @@ def main() -> int:
         registry=registry,
         agent_records=agent_records_store,
         routing_actions=routing_actions,
+        memory_store=memory_store,
     )
 
     # Auth-backend surface (ADR-0020). Real handlers replace the v2

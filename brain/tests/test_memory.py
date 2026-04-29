@@ -275,3 +275,47 @@ async def test_rpc_search_via_dispatcher(tmp_path: Path) -> None:
     entries = response["result"]["entries"]
     assert len(entries) == 1
     assert "tabs" in entries[0]["body"]
+
+
+async def test_search_scope_filter_narrows_results(tmp_path: Path) -> None:
+    """Explicit recall against ``personal`` memory should not pull
+    project-scoped rows even when they match the query."""
+    store = MemoryStore(data_dir=tmp_path)
+    await store.insert(_entry(scope="personal", body="auto-merge: never"))
+    await store.insert(
+        _entry(
+            scope="project",
+            body="auto-merge: enabled for docs repo",
+            project_id="proj_default",
+        )
+    )
+
+    personal = await store.search("auto-merge", scopes=["personal"])
+    assert [e.scope for e in personal] == ["personal"]
+
+    project = await store.search("auto-merge", scopes=["project"])
+    assert [e.scope for e in project] == ["project"]
+
+
+async def test_rpc_search_accepts_scopes_filter(tmp_path: Path) -> None:
+    store = MemoryStore(data_dir=tmp_path)
+    dispatcher = Dispatcher()
+    register_memory_methods(dispatcher, store)
+    await store.insert(_entry(scope="personal", body="prefers tabs"))
+    await store.insert(_entry(scope="project", body="repo prefers tabs"))
+
+    async def notify(method: str, params: Any) -> None:
+        del method, params
+
+    response = await dispatcher.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "memory.search",
+            "params": {"query": "tabs", "scopes": ["personal"]},
+        },
+        notify,
+    )
+    assert response is not None
+    entries = response["result"]["entries"]
+    assert {e["scope"] for e in entries} == {"personal"}
