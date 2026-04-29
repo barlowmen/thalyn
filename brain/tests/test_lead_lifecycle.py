@@ -41,7 +41,7 @@ async def _seed_project(
     *,
     name: str = "Alpha",
     slug: str = "alpha",
-    provider_config: dict | None = None,
+    provider_config: dict[str, object] | None = None,
 ) -> Project:
     project = Project(
         project_id=new_project_id(),
