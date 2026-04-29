@@ -26,6 +26,9 @@ def register_runs_methods(
         project_id = params.get("projectId")
         if project_id is not None and not isinstance(project_id, str):
             raise RpcError(code=INVALID_PARAMS, message="projectId must be a string")
+        parent_lead_id = params.get("parentLeadId")
+        if parent_lead_id is not None and not isinstance(parent_lead_id, str):
+            raise RpcError(code=INVALID_PARAMS, message="parentLeadId must be a string")
         statuses = params.get("statuses")
         if statuses is not None and not (
             isinstance(statuses, list) and all(isinstance(s, str) for s in statuses)
@@ -36,6 +39,7 @@ def register_runs_methods(
             raise RpcError(code=INVALID_PARAMS, message="limit must be a positive integer")
         rows = await store.list_runs(
             project_id=project_id,
+            parent_lead_id=parent_lead_id,
             statuses=statuses,
             limit=limit_raw,
         )

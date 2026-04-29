@@ -132,6 +132,7 @@ export type ApprovalResult = {
 export function listRuns(options?: {
   statuses?: RunStatus[];
   limit?: number;
+  parentLeadId?: string;
 }): Promise<{ runs: RunHeader[] }> {
   return invoke<{ runs: RunHeader[] }>("list_runs", options ?? {});
 }

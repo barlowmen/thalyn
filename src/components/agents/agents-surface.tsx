@@ -1,4 +1,4 @@
-import { Bot, Compass, RefreshCw, UserCog } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, Compass, RefreshCw, UserCog } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { BudgetMeter } from "@/components/inspector/budget-meter";
@@ -226,7 +226,7 @@ export function AgentsView({
           <p className="text-sm text-muted-foreground">Loading agents…</p>
         ) : (
           <div className="space-y-6">
-            <LeadsSection leads={liveLeads} />
+            <LeadsSection leads={liveLeads} onOpenRun={onOpen} />
             {runs.length === 0 ? (
               <EmptyState />
             ) : (
@@ -251,7 +251,13 @@ export function AgentsView({
   );
 }
 
-function LeadsSection({ leads }: { leads: LeadAgent[] }) {
+function LeadsSection({
+  leads,
+  onOpenRun,
+}: {
+  leads: LeadAgent[];
+  onOpenRun?: (runId: string) => void;
+}) {
   return (
     <section aria-label={`Project leads (${leads.length})`}>
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -265,7 +271,7 @@ function LeadsSection({ leads }: { leads: LeadAgent[] }) {
         <ul className="space-y-2">
           {leads.map((lead) => (
             <li key={lead.agentId}>
-              <LeadRow lead={lead} />
+              <LeadRow lead={lead} onOpenRun={onOpenRun} />
             </li>
           ))}
         </ul>
@@ -274,28 +280,113 @@ function LeadsSection({ leads }: { leads: LeadAgent[] }) {
   );
 }
 
-function LeadRow({ lead }: { lead: LeadAgent }) {
+function LeadRow({
+  lead,
+  onOpenRun,
+}: {
+  lead: LeadAgent;
+  onOpenRun?: (runId: string) => void;
+}) {
   const status = (
     lead.status === "active" || lead.status === "paused" || lead.status === "archived"
       ? lead.status
       : "active"
   ) as LeadStatus;
+  const [expanded, setExpanded] = useState(false);
+  const [recent, setRecent] = useState<RunHeader[] | null>(null);
+  const [drillError, setDrillError] = useState<string | null>(null);
+
+  // Lazy-load on first expand. The agents inspector is already busy
+  // on mount; deferring the parent_lead_id query until the user
+  // actually drills keeps the initial render cheap.
+  useEffect(() => {
+    if (!expanded || recent !== null) return;
+    let cancelled = false;
+    listRuns({ parentLeadId: lead.agentId, limit: 25 })
+      .then((result) => {
+        if (cancelled) return;
+        setRecent(result.runs);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setDrillError(err instanceof Error ? err.message : String(err));
+        setRecent([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, lead.agentId, recent]);
+
   return (
-    <div className="rounded-md border border-border bg-card p-3">
-      <div className="flex items-center gap-2">
-        <UserCog aria-hidden className="size-4 text-muted-foreground" />
-        <span className="text-sm font-medium">{lead.displayName}</span>
-        <Badge tone={LEAD_STATUS_TONE[status]}>
-          {LEAD_STATUS_LABEL[status]}
-        </Badge>
-      </div>
-      <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-        {lead.agentId}
-      </p>
-      {lead.projectId ? (
-        <p className="text-xs text-muted-foreground">
-          Project: {lead.projectId}
-        </p>
+    <div className="rounded-md border border-border bg-card">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-controls={`lead-drill-${lead.agentId}`}
+        className="flex w-full items-start gap-2 rounded-md p-3 text-left transition-colors hover:border-muted-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {expanded ? (
+          <ChevronDown aria-hidden className="mt-0.5 size-4 text-muted-foreground" />
+        ) : (
+          <ChevronRight aria-hidden className="mt-0.5 size-4 text-muted-foreground" />
+        )}
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <UserCog aria-hidden className="size-4 text-muted-foreground" />
+            <span className="text-sm font-medium">{lead.displayName}</span>
+            <Badge tone={LEAD_STATUS_TONE[status]}>
+              {LEAD_STATUS_LABEL[status]}
+            </Badge>
+          </div>
+          <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+            {lead.agentId}
+          </p>
+          {lead.projectId ? (
+            <p className="text-xs text-muted-foreground">
+              Project: {lead.projectId}
+            </p>
+          ) : null}
+        </div>
+      </button>
+      {expanded ? (
+        <div
+          id={`lead-drill-${lead.agentId}`}
+          className="border-t border-border/50 px-3 py-3"
+        >
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Recent runs under this lead
+          </h4>
+          {drillError ? (
+            <p className="text-xs text-destructive">{drillError}</p>
+          ) : recent === null ? (
+            <p className="text-xs text-muted-foreground">Loading…</p>
+          ) : recent.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No runs yet — this lead hasn't been asked to do anything.
+            </p>
+          ) : (
+            <ul className="space-y-1">
+              {recent.map((run) => (
+                <li key={run.runId}>
+                  <button
+                    type="button"
+                    onClick={() => onOpenRun?.(run.runId)}
+                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-xs hover:bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <Bot aria-hidden className="size-3 text-muted-foreground" />
+                    <span className="flex-1 truncate">
+                      {run.title || run.runId}
+                    </span>
+                    <Badge tone={STATUS_TONE[run.status]}>
+                      {STATUS_LABEL[run.status]}
+                    </Badge>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       ) : null}
     </div>
   );

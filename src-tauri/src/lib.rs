@@ -197,6 +197,7 @@ async fn list_runs(
     state: State<'_, AppState>,
     statuses: Option<Vec<String>>,
     limit: Option<u32>,
+    parent_lead_id: Option<String>,
 ) -> Result<Value, String> {
     let mut params = serde_json::Map::new();
     if let Some(statuses) = statuses {
@@ -204,6 +205,9 @@ async fn list_runs(
     }
     if let Some(limit) = limit {
         params.insert("limit".into(), Value::from(limit));
+    }
+    if let Some(p) = parent_lead_id {
+        params.insert("parentLeadId".into(), Value::from(p));
     }
     state
         .brain
