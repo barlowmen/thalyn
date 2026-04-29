@@ -50,6 +50,15 @@ jobs:
         shell: bash
         run: scripts/scan-identity-strings.sh
 
+  retired-models-scan:
+    name: retired models scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Scan codebase for retired Anthropic model ids
+        shell: bash
+        run: scripts/scan-retired-models.sh
+
   frontend:
     name: frontend
     runs-on: ubuntu-latest
