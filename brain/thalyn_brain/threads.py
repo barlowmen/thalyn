@@ -282,24 +282,48 @@ class ThreadsStore:
         *,
         user_turn_id: str,
         brain_turn: ThreadTurn,
+        extra_turns: list[ThreadTurn] | None = None,
     ) -> None:
         """Atomically flip the user turn to completed and insert the
-        brain reply.
+        brain reply, plus any extra turns the caller wants in the
+        same transaction.
 
-        The two writes share one transaction: a crash inside it rolls
-        both back, so search and the recent-window list never see a
-        half-completed pair. The FTS triggers in migration 006 mirror
-        both rows into ``thread_turn_index`` inside this transaction
-        as well, so the index stays consistent at every commit point.
+        ``extra_turns`` covers the lead-delegation case from §6.3:
+        the lead's raw reply lands as a ``role='lead'`` row in the
+        same transaction that lands the brain's surfaced reply, so
+        the renderer's drill-down (F1.10) sees an atomic pair.
+
+        The writes share one transaction: a crash inside it rolls
+        them all back, so search and the recent-window list never
+        see a half-completed pair. The FTS triggers in migration 006
+        mirror every committed row into ``thread_turn_index`` inside
+        this transaction as well, so the index stays consistent at
+        every commit point.
         """
         if brain_turn.role not in {"brain", "lead", "system"}:
             raise ValueError("complete_turn_pair: brain turn role must be brain|lead|system")
         if brain_turn.status != "completed":
             raise ValueError("complete_turn_pair: brain turn must arrive completed")
+        for extra in extra_turns or ():
+            if extra.role not in THREAD_TURN_ROLES:
+                allowed = sorted(THREAD_TURN_ROLES)
+                raise ValueError(f"complete_turn_pair: extra turn role must be one of {allowed}")
+            if extra.status != "completed":
+                raise ValueError("complete_turn_pair: extra turns must arrive completed")
         async with self._lock:
-            await asyncio.to_thread(self._complete_turn_pair_sync, user_turn_id, brain_turn)
+            await asyncio.to_thread(
+                self._complete_turn_pair_sync,
+                user_turn_id,
+                brain_turn,
+                list(extra_turns or ()),
+            )
 
-    def _complete_turn_pair_sync(self, user_turn_id: str, brain_turn: ThreadTurn) -> None:
+    def _complete_turn_pair_sync(
+        self,
+        user_turn_id: str,
+        brain_turn: ThreadTurn,
+        extra_turns: list[ThreadTurn],
+    ) -> None:
         with self._open() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
@@ -315,6 +339,11 @@ class ThreadsStore:
                         f"complete_turn_pair: user turn {user_turn_id!r} "
                         "not found or already completed"
                     )
+                # Extra turns commit before the brain turn so the
+                # brain turn can reference them by id in its
+                # provenance without a deferred-constraint dance.
+                for extra in extra_turns:
+                    self._exec_insert_turn(conn, extra)
                 self._exec_insert_turn(conn, brain_turn)
                 conn.execute("COMMIT")
             except Exception:

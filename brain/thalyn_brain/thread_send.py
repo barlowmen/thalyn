@@ -28,12 +28,22 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
+from thalyn_brain.agents import AgentRecordsStore
 from thalyn_brain.digest_runner import (
     maybe_compress_old_digests,
     maybe_run_idle_digest,
     run_digest,
 )
 from thalyn_brain.identity import THALYN_SYSTEM_PROMPT
+from thalyn_brain.lead_delegation import (
+    LEAD_INTRO_TEMPLATE,
+    LEAD_REPLY_PREFIX_TEMPLATE,
+    AddressedLead,
+    SanityCheckVerdict,
+    collect_lead_reply,
+    find_addressed_lead,
+    sanity_check_lead_reply,
+)
 from thalyn_brain.provider import (
     ChatChunk,
     ChatErrorChunk,
@@ -70,6 +80,7 @@ def register_thread_send_methods(
     *,
     threads_store: ThreadsStore,
     registry: ProviderRegistry,
+    agent_records: AgentRecordsStore | None = None,
 ) -> None:
     """Register ``thread.send`` and the recovery helpers.
 
@@ -80,10 +91,21 @@ def register_thread_send_methods(
     ``thread.recovery_resolve``. (Notifications can't be emitted
     before the renderer attaches the stdio channel, so a poll is the
     right primitive.)
+
+    ``agent_records`` is optional so the v0.21 tests that don't
+    exercise the lead path can keep their narrow setup. When the
+    store is wired in, ``thread.send`` runs the lead-delegation
+    classify-and-route step before assembling the brain's reply.
     """
 
     async def thread_send(params: RpcParams, notify: Notifier) -> JsonValue:
-        return await _handle_thread_send(params, notify, threads_store, registry)
+        return await _handle_thread_send(
+            params,
+            notify,
+            threads_store,
+            registry,
+            agent_records,
+        )
 
     async def thread_recovery_status(params: RpcParams) -> JsonValue:
         return await _handle_recovery_status(params, threads_store)
@@ -105,6 +127,7 @@ async def _handle_thread_send(
     notify: Notifier,
     store: ThreadsStore,
     registry: ProviderRegistry,
+    agent_records: AgentRecordsStore | None,
 ) -> JsonValue:
     thread_id = _require_str(params, "threadId")
     provider_id = _require_str(params, "providerId")
@@ -176,6 +199,22 @@ async def _handle_thread_send(
         user_message=prompt,
         base_system_prompt=base_system_prompt,
     )
+
+    # 6a. Classify-and-route: if the user is addressing an active
+    # lead, run the delegation flow instead of a direct brain reply.
+    addressed = await _maybe_address_lead(prompt, agent_records)
+    if addressed is not None:
+        return await _handle_delegated_reply(
+            notify=notify,
+            store=store,
+            registry=registry,
+            thread_id=thread_id,
+            user_turn=user_turn,
+            project_id=project_id,
+            brain_turn_id=brain_turn_id,
+            addressed=addressed,
+            assembled=assembled,
+        )
 
     # 7. Stream the brain's reply chunk-by-chunk. Buffer text deltas
     # so the brain reply turn's body matches what the user saw.
@@ -259,6 +298,161 @@ async def _handle_thread_send(
         "finalResponse": final_response,
         "context": _context_summary(assembled),
     }
+
+
+async def _maybe_address_lead(
+    prompt: str,
+    agent_records: AgentRecordsStore | None,
+) -> AddressedLead | None:
+    """Look up active leads (if the registry is wired) and check
+    whether the user is addressing one.
+
+    Returns ``None`` when no registry is configured, when the
+    matcher finds no unambiguous match, or when no active lead exists.
+    The caller falls back to a direct brain reply on ``None``.
+    """
+    if agent_records is None:
+        return None
+    leads = await agent_records.list_all(kind="lead", status="active")
+    if not leads:
+        return None
+    return find_addressed_lead(prompt, leads)
+
+
+async def _handle_delegated_reply(
+    *,
+    notify: Notifier,
+    store: ThreadsStore,
+    registry: ProviderRegistry,
+    thread_id: str,
+    user_turn: ThreadTurn,
+    project_id: str | None,
+    brain_turn_id: str,
+    addressed: AddressedLead,
+    assembled: AssembledContext,
+) -> JsonValue:
+    """Delegate the turn to a project lead and stream the reply.
+
+    Persists three rows in one transaction: the user turn (flipped
+    to completed), the lead's raw reply (``role='lead'``,
+    ``agent_id=lead.agent_id``), and the brain's surfaced reply
+    (``role='brain'``, ``agent_id=brain``, with provenance pointing
+    at the lead's turn id). The renderer's drill-down (F1.10) then
+    has a real source row to navigate to.
+    """
+    lead = addressed.lead
+    lead_provider = registry.get(lead.default_provider_id)
+
+    # Stream the start chunk immediately so the renderer reflects
+    # activity, then surface the brain's preamble and the wrapped
+    # lead reply as text deltas. The provider start chunk is the
+    # brain's own — the lead's underlying call is silent on the wire.
+    await notify(
+        THREAD_CHUNK,
+        {"turnId": brain_turn_id, "chunk": {"kind": "start", "model": "thalyn-relay"}},
+    )
+
+    intro_text = LEAD_INTRO_TEMPLATE.format(name=lead.display_name)
+    await notify(
+        THREAD_CHUNK,
+        {"turnId": brain_turn_id, "chunk": {"kind": "text", "delta": intro_text}},
+    )
+
+    lead_reply, lead_error = await collect_lead_reply(
+        lead_provider,
+        lead=lead,
+        user_message=addressed.body,
+    )
+    if lead_error is not None:
+        # The lead's provider surfaced an error — leave the user turn
+        # in_progress so the renderer can offer recovery, mirroring
+        # the direct-reply error path's contract.
+        await notify(
+            THREAD_CHUNK,
+            {
+                "turnId": brain_turn_id,
+                "chunk": {"kind": "error", "message": lead_error},
+            },
+        )
+        raise RpcError(code=INTERNAL_ERROR, message=lead_error)
+
+    verdict = sanity_check_lead_reply(lead_reply)
+    wrapped = LEAD_REPLY_PREFIX_TEMPLATE.format(name=lead.display_name) + lead_reply
+    if verdict.note is not None:
+        wrapped = wrapped + "\n\n" + verdict.note
+    delta = "\n\n" + wrapped
+    await notify(
+        THREAD_CHUNK,
+        {"turnId": brain_turn_id, "chunk": {"kind": "text", "delta": delta}},
+    )
+    await notify(
+        THREAD_CHUNK,
+        {"turnId": brain_turn_id, "chunk": {"kind": "stop", "reason": "end_turn"}},
+    )
+
+    now_ms = int(time.time() * 1000)
+    lead_turn_id = new_turn_id()
+    lead_turn = ThreadTurn(
+        turn_id=lead_turn_id,
+        thread_id=thread_id,
+        project_id=lead.project_id or project_id,
+        agent_id=lead.agent_id,
+        role="lead",
+        body=lead_reply,
+        provenance={
+            "leadId": lead.agent_id,
+            "providerId": lead.default_provider_id,
+        },
+        confidence={"sanityCheck": _verdict_to_wire(verdict)},
+        episodic_index_ptr=None,
+        at_ms=now_ms,
+        status="completed",
+    )
+    final_text = intro_text + delta
+    brain_turn = ThreadTurn(
+        turn_id=brain_turn_id,
+        thread_id=thread_id,
+        project_id=lead.project_id or project_id,
+        agent_id=DEFAULT_BRAIN_AGENT_ID,
+        role="brain",
+        body=final_text,
+        provenance={
+            "delegatedTo": lead.agent_id,
+            "leadDisplayName": lead.display_name,
+            "leadTurnId": lead_turn_id,
+        },
+        confidence={"sanityCheck": _verdict_to_wire(verdict)},
+        episodic_index_ptr=None,
+        at_ms=now_ms,
+        status="completed",
+    )
+    await store.complete_turn_pair(
+        user_turn_id=user_turn.turn_id,
+        brain_turn=brain_turn,
+        extra_turns=[lead_turn],
+    )
+    await store.touch_thread(thread_id, now_ms)
+
+    return {
+        "threadId": thread_id,
+        "userTurnId": user_turn.turn_id,
+        "turnId": brain_turn_id,
+        "agentId": DEFAULT_BRAIN_AGENT_ID,
+        "projectId": lead.project_id or project_id,
+        "status": "completed",
+        "finalResponse": final_text,
+        "context": _context_summary(assembled),
+        "delegation": {
+            "leadId": lead.agent_id,
+            "leadTurnId": lead_turn_id,
+            "leadDisplayName": lead.display_name,
+            "sanityCheck": _verdict_to_wire(verdict),
+        },
+    }
+
+
+def _verdict_to_wire(verdict: SanityCheckVerdict) -> dict[str, Any]:
+    return {"ok": verdict.ok, "note": verdict.note}
 
 
 async def _handle_recovery_status(

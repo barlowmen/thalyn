@@ -110,6 +110,7 @@ def main() -> int:
         dispatcher,
         threads_store=threads_store,
         registry=registry,
+        agent_records=agent_records_store,
     )
 
     # Auth-backend surface (ADR-0020). Real handlers replace the v2
