@@ -32,6 +32,36 @@ export async function getBrowserStatus(): Promise<BrowserState> {
 }
 
 /**
+ * Window-relative rectangle (in CSS pixels / macOS points — equal at
+ * the typical Retina devicePixelRatio of 2) the bundled CEF child
+ * window should overlap. The renderer reports the drawer's content
+ * rect via this command; the OS-specific parenting impl applies it
+ * to the child window every time it changes.
+ */
+export type BrowserWindowRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+/**
+ * Forward the latest content-rect of the drawer's host div so the
+ * macOS / Windows / X11 parenting layer keeps the CEF child window
+ * positioned on top of it. Best-effort: when the Tauri bridge isn't
+ * available (Storybook, tests) the call no-ops.
+ */
+export async function setBrowserWindowRect(rect: BrowserWindowRect): Promise<void> {
+  try {
+    await invoke("cef_set_window_rect", { rect });
+  } catch (err) {
+    if (typeof window !== "undefined") {
+      console.debug("cef_set_window_rect failed", err);
+    }
+  }
+}
+
+/**
  * Friendly label for the active state. Used in the panel header and
  * the activity-rail badge so the user sees a single word at a
  * glance.

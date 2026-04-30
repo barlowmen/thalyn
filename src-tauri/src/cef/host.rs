@@ -24,11 +24,12 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{oneshot, watch, RwLock};
+use tokio::sync::{oneshot, watch, Mutex, RwLock};
 use tokio::task::JoinHandle;
 
 use super::port_file::{wait_for_port_file, DevToolsEndpoint, PortFileError};
@@ -46,6 +47,24 @@ const CHILD_BINARY_BASENAME: &str = "thalyn-cef-host";
 /// developers to hot-swap a separately-built binary without
 /// reinstalling the app bundle.
 const CHILD_BINARY_ENV: &str = "THALYN_CEF_HOST_BIN";
+
+/// Drawer-host rectangle the renderer reports via
+/// `cef_set_window_rect`. Coordinates are in CSS pixels relative to
+/// the Tauri main window's content view (which equal macOS points at
+/// the typical Retina devicePixelRatio of 2). The OS-specific
+/// parenting layer converts this to its native frame as needed —
+/// macOS `NSWindow.addChildWindow:`, Windows `SetParent`, X11
+/// `XReparentWindow`. Stored on [`CefSession`] so the parenting
+/// layer always has the latest rect, and so a session that starts
+/// after the renderer has already pushed a rect can apply it
+/// immediately.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct HostWindowRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
 
 /// Public state of the CEF engine. Mirrors v1's `BrowserState` shape
 /// so the renderer can render a consistent panel through the
@@ -112,6 +131,11 @@ pub struct CefSession {
     kill_tx: Option<oneshot::Sender<()>>,
     /// Set once by the watcher task when the child exits.
     exit_rx: watch::Receiver<Option<SessionExit>>,
+    /// Latest drawer-host rect the renderer has reported, shared with
+    /// the OS-specific parenting layer. Held in an `Arc<Mutex<...>>`
+    /// so the parenting layer can read it without taking the
+    /// host-level write lock.
+    window_rect: Arc<Mutex<Option<HostWindowRect>>>,
     _watcher: JoinHandle<()>,
 }
 
@@ -136,6 +160,20 @@ impl CefSession {
     /// the manager to surface unexpected death without blocking.
     pub fn current_exit(&self) -> Option<SessionExit> {
         self.exit_rx.borrow().clone()
+    }
+
+    /// Read the latest drawer-host rect the renderer has reported,
+    /// if any. The OS-specific parenting layer consumes this when
+    /// applying its native parent-child relationship.
+    pub async fn current_window_rect(&self) -> Option<HostWindowRect> {
+        *self.window_rect.lock().await
+    }
+
+    /// Update the drawer-host rect. Called from the
+    /// `cef_set_window_rect` Tauri command; idempotent and safe to
+    /// call before, during, or after the parenting layer wires up.
+    pub async fn set_window_rect(&self, rect: HostWindowRect) {
+        *self.window_rect.lock().await = Some(rect);
     }
 
     /// Ask the child to exit and wait for the watcher to confirm.
@@ -173,6 +211,11 @@ pub struct CefHost {
     state_tx: watch::Sender<HostState>,
     /// Held so consumers can subscribe before any session starts.
     _state_rx: watch::Receiver<HostState>,
+    /// Latest rect the renderer has pushed before a session existed.
+    /// On `start`, the new session adopts this rect so the parenting
+    /// layer can apply it immediately rather than waiting for the
+    /// next renderer tick.
+    pending_rect: Mutex<Option<HostWindowRect>>,
 }
 
 impl CefHost {
@@ -183,7 +226,20 @@ impl CefHost {
             inner: RwLock::new(None),
             state_tx: tx,
             _state_rx: rx,
+            pending_rect: Mutex::new(None),
         }
+    }
+
+    /// Update the drawer-host rect. Routed from the
+    /// `cef_set_window_rect` Tauri command. If a session is live the
+    /// rect lands on it; otherwise it is held as the
+    /// next-session pending rect so a fresh session adopts it
+    /// without a renderer round-trip.
+    pub async fn set_window_rect(&self, rect: HostWindowRect) {
+        if let Some(session) = self.inner.read().await.as_ref() {
+            session.set_window_rect(rect).await;
+        }
+        *self.pending_rect.lock().await = Some(rect);
     }
 
     /// Subscribe to state transitions. Each subscriber sees the
@@ -257,12 +313,14 @@ impl CefHost {
         let watcher = spawn_exit_watcher(child, kill_rx, exit_tx);
 
         let ws_url = endpoint.ws_url();
+        let pending_rect = *self.pending_rect.lock().await;
         let session = CefSession {
             sdk: sdk.clone(),
             profile: profile.clone(),
             endpoint,
             kill_tx: Some(kill_tx),
             exit_rx,
+            window_rect: Arc::new(Mutex::new(pending_rect)),
             _watcher: watcher,
         };
 
@@ -527,6 +585,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pending_rect_is_held_until_a_session_starts() {
+        let host = CefHost::new(temp_root("rect-pending"));
+        let rect = HostWindowRect {
+            x: 12.0,
+            y: 84.0,
+            width: 640.0,
+            height: 480.0,
+        };
+        host.set_window_rect(rect).await;
+        assert_eq!(*host.pending_rect.lock().await, Some(rect));
+    }
+
+    #[tokio::test]
     async fn stop_when_idle_is_a_typed_error() {
         let host = CefHost::new(temp_root("stop-idle"));
         let err = host.stop().await.unwrap_err();
@@ -588,6 +659,52 @@ mod tests {
             }
             other => panic!("expected Running, got {other:?}"),
         }
+        stop_result.expect("stop should succeed");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn set_window_rect_lands_on_a_running_session() {
+        let root = temp_root("rect-session");
+        let cef_path = root.join("cef-cache");
+        lay_out_synthetic_sdk(&cef_path);
+        let bin_dir = root.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let script = write_synthetic_child(
+            &bin_dir,
+            "printf '47100\\n/devtools/browser/rect\\n' > \"$PROFILE_DIR/DevToolsActivePort\"\n\
+             sleep 30",
+        );
+
+        let host = CefHost::new(root.join("profile-root"));
+        let _guard = env_lock().lock().await;
+        std::env::set_var("CEF_PATH", &cef_path);
+        std::env::set_var(CHILD_BINARY_ENV, &script);
+
+        host.start().await.expect("start should succeed");
+        let rect = HostWindowRect {
+            x: 4.0,
+            y: 88.0,
+            width: 720.0,
+            height: 540.0,
+        };
+        host.set_window_rect(rect).await;
+
+        let observed = {
+            let guard = host.inner.read().await;
+            guard
+                .as_ref()
+                .expect("session live")
+                .current_window_rect()
+                .await
+        };
+
+        let stop_result = host.stop().await;
+        std::env::remove_var(CHILD_BINARY_ENV);
+        std::env::remove_var("CEF_PATH");
+        drop(_guard);
+
+        assert_eq!(observed, Some(rect));
         stop_result.expect("stop should succeed");
     }
 

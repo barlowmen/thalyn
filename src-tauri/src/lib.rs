@@ -685,6 +685,22 @@ async fn browser_status(state: State<'_, AppState>) -> Result<Value, String> {
     serde_json::to_value(state.cef.state()).map_err(|err| err.to_string())
 }
 
+/// Forward the latest drawer-host rect from the renderer to the
+/// bundled-CEF host. The OS-specific parenting layer reads the
+/// stored rect when applying its native parent/child relationship
+/// (`NSWindow.addChildWindow:` on macOS, `SetParent` on Windows,
+/// `XReparentWindow` on X11). Idempotent and safe to call before,
+/// during, or after a session is running — the rect is held for
+/// the next session if no session is live.
+#[tauri::command]
+async fn cef_set_window_rect(
+    state: State<'_, AppState>,
+    rect: crate::cef::HostWindowRect,
+) -> Result<(), String> {
+    state.cef.set_window_rect(rect).await;
+    Ok(())
+}
+
 #[tauri::command]
 async fn terminal_open(
     app: AppHandle,
@@ -1719,6 +1735,7 @@ pub fn run() {
             browser_start,
             browser_stop,
             browser_status,
+            cef_set_window_rect,
             save_observability_secret,
             clear_observability_secret,
             observability_status,

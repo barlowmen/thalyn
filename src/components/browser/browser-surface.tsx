@@ -5,15 +5,17 @@ import {
   Globe,
   RefreshCw,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   type BrowserState,
+  type BrowserWindowRect,
   browserStateLabel,
   getBrowserStatus,
+  setBrowserWindowRect,
   startBrowser,
   stopBrowser,
 } from "@/lib/browser";
@@ -96,6 +98,7 @@ export function BrowserSurface({
         // commit. Here we expose the input so the chrome is testable
         // in isolation.
       }}
+      onRectChange={(rect) => void setBrowserWindowRect(rect)}
     />
   );
 }
@@ -109,6 +112,15 @@ export type BrowserViewProps = {
   onStart: () => void;
   onStop: () => void;
   onSubmit: () => void;
+  /**
+   * Fires whenever the drawer's CEF host rect changes (resize,
+   * drawer-width drag, parent-window resize). Storybook stories
+   * leave it unset so the view stays purely presentational; the
+   * connected `BrowserSurface` wires it to `setBrowserWindowRect`
+   * so the OS-level parenting layer can keep the bundled CEF child
+   * window aligned with the drawer.
+   */
+  onRectChange?: (rect: BrowserWindowRect) => void;
 };
 
 /**
@@ -124,7 +136,43 @@ export function BrowserView({
   onStart,
   onStop,
   onSubmit,
+  onRectChange,
 }: BrowserViewProps) {
+  const rectHostRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!onRectChange) return;
+    const node = rectHostRef.current;
+    if (!node) return;
+    if (typeof window === "undefined" || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    let frameId: number | null = null;
+    const push = () => {
+      frameId = null;
+      const current = rectHostRef.current;
+      if (!current) return;
+      const r = current.getBoundingClientRect();
+      onRectChange({ x: r.left, y: r.top, width: r.width, height: r.height });
+    };
+    const schedule = () => {
+      if (frameId !== null) return;
+      frameId = window.requestAnimationFrame(push);
+    };
+
+    const observer = new ResizeObserver(schedule);
+    observer.observe(node);
+    window.addEventListener("resize", schedule);
+    schedule();
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", schedule);
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+    };
+  }, [onRectChange]);
+
   const kind = state?.kind ?? "idle";
   const running = kind === "running";
   const startable = kind === "idle" || kind === "exited";
@@ -256,6 +304,7 @@ export function BrowserView({
         </div>
       ) : null}
       <div
+        ref={rectHostRef}
         data-thalyn-cef-host-rect
         className={cn(
           "relative flex-1 overflow-hidden",

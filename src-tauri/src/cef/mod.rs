@@ -27,7 +27,7 @@ pub mod port_file;
 pub mod profile;
 pub mod sdk;
 
-pub use host::{CefHost, CefSession, HostError, HostState};
+pub use host::{CefHost, CefSession, HostError, HostState, HostWindowRect};
 pub use port_file::{parse_port_file, wait_for_port_file, DevToolsEndpoint, PortFileError};
 pub use profile::{CefProfile, ProfileError};
 pub use sdk::{pinned_cef_version, CefSdk, SdkResolveError};
