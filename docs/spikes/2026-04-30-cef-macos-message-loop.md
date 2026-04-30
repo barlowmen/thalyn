@@ -296,3 +296,73 @@ human review before the next code commit lands.
   Not retired. Becomes the new v0.30's load-bearing exit criterion.
 - **Heuristic OAuth IdP detection of CEF.** Unchanged from the
   prior spike; CEF child binary doesn't change the UA fingerprint.
+
+## Refinement (post-investigation)
+
+After the report above was filed and the v0.29 phase started
+landing the child-binary scaffolding, the macOS implementation
+of step 7b surfaced a deeper limit that retires Option D:
+**modern macOS does not support cross-process window hosting**.
+F6's recommendation rested on the unverified assumption that
+`[parent_window addChildWindow:child_window ordered:NSWindowAbove]`
+works when `parent_window` and `child_window` belong to
+different processes. It does not.
+
+Evidence:
+
+- **CEF maintainer** Marshall Greenblatt on the [CEF Forum](https://magpcss.org/ceforum/viewtopic.php?f=6&t=19593)
+  ("[MacOS] embedding cefsimple browser into another window"):
+  cross-process CEF embedding on macOS may be possible "but
+  likely complicated"; the NSView/NSWindow handle-passing
+  pattern that works on Linux/Windows does not work on macOS.
+  Recommended fallbacks: consolidate to one process, IPC-driven
+  event forwarding with rendering still in CEF's own window, or
+  IOSurface-shared-memory rendering.
+- **Chromium engineer** Nico Weber on [chromium-dev](https://groups.google.com/a/chromium.org/g/chromium-dev/c/H5fQcXllT3E)
+  ("multi-process hosted browser window on Mac/Linux"):
+  *"I don't think OS X supports cross-process window hosting."*
+  Stuart Morgan adds that Apple's own Java Plugin2 attempted it
+  and abandoned the approach.
+- **Apple's `NSWindow.addChildWindow(_:ordered:)`** takes an
+  `NSWindow*` instance. `NSWindow*` is owned by the calling
+  process's `NSApp` window list — there is no public API that
+  hands you an `NSWindow*` for a window owned by another
+  process. The CGS / Quartz private APIs (`CGSConnection`,
+  `CGSWindowID`, `CGSSetWindowParent`) exist but are
+  Apple-private and not a path for shipping software.
+
+This invalidates Option D's recommendation. Three credible
+unblocks remain:
+
+1. **Frame-tracking IPC fallback** (option 1 in the
+   investigation write-up). Parent observes its NSWindow's
+   move/resize/miniaturize/key notifications, forwards deltas
+   over IPC; child applies via `setFrame:` /
+   `orderOut:` / `orderFront:`. Combined with the child
+   binary's activation policy set to `Accessory` /
+   `LSUIElement = true`. ~2-3 days of work, but throwaway when
+   in-process embedding lands.
+2. **Pull the in-process embedding work forward** (option 2).
+   Skip the child binary entirely; do the combined
+   `ThalynApplication` NSApplication subclass + tao integration
+   (runtime swizzle / vendored fork / upstream API). Multi-week,
+   but the literal end-state ADR-0019 specified.
+3. **OSR-only on macOS** (option 3). CEF renders to an
+   IOSurface; parent composites. Cheap (~1 week) but loses
+   F4.3 capabilities (passkeys, IME, DRM, drag-drop) — the
+   exact reasons the 2026-04-27 spike retired OSR-as-primary.
+
+**Decision: option 2.** v0.29 keeps its phase number for the
+foundation work that landed (ADR ratification, lifecycle
+scaffold, drawer surface, rect plumbing) and is reusable; v0.30
+is reframed as the engine-swap-ship phase that lands the
+in-process embedding. The phase split this report originally
+recommended is unwound. ADR-0019's refinement section is
+revised to reflect the single-phase shape; ``
+§19 and §20 carry the new phase scopes.
+
+The risks-not-retired list above stands except for "Cross-process
+child window UX on Linux X11/XWayland" — Linux X11 *does*
+support cross-process embedding via XEmbed, so v0.30's Linux
+path can pursue it directly. The macOS portion of that risk
+moves into v0.30's tao-integration risk row.

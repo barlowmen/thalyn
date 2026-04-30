@@ -199,51 +199,72 @@ A second spike (`docs/spikes/2026-04-30-cef-macos-message-loop.md`)
 surfaced a structural conflict the engine-swap spike did not anticipate:
 **tao** (Tauri's windowing crate) and **CEF** both register their own
 `NSApplication` subclass and override `sendEvent:`, and macOS allows
-exactly one such subclass per process. Resolving it cleanly requires
-either a combined `ThalynApplication` subclass + tao integration
-(runtime swizzle, vendored fork, or upstream API), runtime objc
-swizzling onto `TaoApp` (fragile), or accepting separate processes —
-all of them either multi-week work or capability-degrading.
+exactly one such subclass per process. Resolving it requires a
+combined `ThalynApplication` subclass that satisfies both contracts,
+plus a tao integration path that lets the host inject the subclass
+instead of letting tao register its own `TaoApp`. The work is
+multi-week.
+
+The spike originally recommended deferring this work by splitting
+the engine swap into two phases: v0.29 ships a `thalyn-cef-host`
+child binary parented to the Tauri main window via OS child-window
+APIs (`NSWindow.addChildWindow:` on macOS, `SetParent` on Windows,
+`XReparentWindow` on Linux X11), and v0.30 collapses the two-process
+arrangement into the literal in-process embedding this ADR specifies.
+
+That split has been **unwound**. The child-binary path's load-bearing
+assumption — that `NSWindow.addChildWindow:` works cross-process on
+macOS — is incorrect. Modern macOS does not support cross-process
+window hosting (CEF maintainer Marshall Greenblatt on the [CEF
+Forum](https://magpcss.org/ceforum/viewtopic.php?f=6&t=19593),
+Chromium engineer Nico Weber on [chromium-dev](https://groups.google.com/a/chromium.org/g/chromium-dev/c/H5fQcXllT3E),
+Apple's own Java Plugin2 abandonment all align). The credible
+alternatives on macOS are a frame-tracking IPC fallback (throwaway
+when in-process lands) or doing the in-process work upfront. The
+build-cadence bias (*build it right, no dates*) made the choice
+clear: do the in-process work upfront.
 
 The decision below is **unchanged** — bundled Chromium via
-`tauri-apps/cef-rs` remains the engine for both user and agent. What
-changes is the *process topology* and how it ships:
+`tauri-apps/cef-rs` remains the engine for both user and agent,
+embedded in-process inside the Tauri main window. What changes is
+the *phase decomposition*:
 
-- **v0.29 (ships first).** A `thalyn-cef-host` child binary (cefsimple-
-  shaped, our crate) owns its own NSApplication subclass with the CEF
-  protocols, runs CEF, and exposes `--remote-debugging-port=0`. The
-  parent-side CEF host (in `src-tauri/src/cef/`) spawns and supervises
-  the child, and uses OS child-window APIs (`NSWindow.addChildWindow:`
-  on macOS, `SetParent` on Windows, X11 toplevel reparenting on Linux)
-  to attach the CEF window to the Tauri main window. The user perceives
-  one app: one dock entry, one alt-tab target, windows that move
-  together. The hard rule (*user never **forced** to leave the app*)
-  is honored. The CEF binary is bundled — it is not the user's installed
-  Chromium — so v1's system-Chromium discovery retires.
-- **v0.30 (follow-on).** A combined `ThalynApplication` NSApplication
-  subclass implements both tao's CMD-key-up `sendEvent:` workaround
-  and CEF's `CefAppProtocol` / `CrAppProtocol` / `CrAppControlProtocol`
-  (with `terminate:` rerouted through CEF's `CloseAllBrowsers`). tao
-  is patched (runtime swizzle, vendored fork, or an upstream
-  `EventLoopBuilder::with_application_class(...)` API — choice made
-  in v0.30) to reuse our class instead of registering its own
-  `TaoApp`. Pre-`tauri::Builder` initialization in `main()` runs
-  `library_loader::LibraryLoader::load`, registers our class, calls
-  `[ThalynApplication sharedApplication]`, runs
+- **v0.29 (foundation, landed).** ADR-0019 ratification +
+  ADR-0010 supersede flip; `cef` Cargo feature pinned to CEF 147
+  with a CI build job; `src-tauri/src/cef/{sdk,profile,port_file,
+  host}.rs` lifecycle scaffold; per-Thalyn Chromium profile under
+  the canonical data dir; `DevToolsActivePort` watcher; renderer
+  browser-drawer surface with engine-lifecycle chrome and rect
+  plumbing; the `thalyn-cef-host` `[[bin]]` scaffold *as a
+  transitional artifact* (its `CefAppProtocol` / `CrAppProtocol` /
+  `CrAppControlProtocol` impls are the substrate v0.30's combined
+  `ThalynApplication` builds on, but the `[[bin]]` itself
+  retires).
+- **v0.30 (engine swap, in-process).** A combined
+  `ThalynApplication` NSApplication subclass implements both
+  tao's CMD-key-up `sendEvent:` workaround and CEF's three
+  protocols (with `terminate:` rerouted through
+  `CloseAllBrowsers`). tao is patched (runtime swizzle, vendored
+  fork, or upstream `EventLoopBuilder::with_application_class(...)`
+  API — choice made early in v0.30) to reuse our class instead of
+  registering `TaoApp`. Pre-`tauri::Builder` initialization in
+  `main()` runs `library_loader::LibraryLoader::load`, registers
+  our class, calls `[ThalynApplication sharedApplication]`, runs
   `cef::execute_process` (helper processes return early), runs
-  `cef::initialize`, then hands off to `tauri::Builder::default().run`.
-  CEF Browser instances are parented to a child `NSView` / `HWND` /
-  `GtkWidget` of the Tauri main window's drawer-host region — the
-  literal in-process embedding shape this ADR specified. The
-  `thalyn-cef-host` child binary retires; the parent-side supervisor
-  retires; the `cef` Cargo feature flips from optional to default-on.
-  ADR-0029 documents the integration in detail.
+  `cef::initialize`, then hands off to
+  `tauri::Builder::default().run`. CEF Browser instances are
+  parented to a child `NSView` / `HWND` / `GtkWidget` of the
+  Tauri main window's drawer-host region — the literal in-process
+  embedding shape this ADR specified. v1's system-Chromium
+  sidecar code retires; v0.29's `thalyn-cef-host` `[[bin]]`
+  retires; the `cef` Cargo feature flips from optional to
+  default-on. ADR-0029 documents the integration in detail.
 
-The brain CDP transport is unchanged in either shape — the brain
-attaches over WebSocket to the URL surfaced by `DevToolsActivePort`,
-and the five `browser_*` tools and per-step capture pipeline carry
-forward unchanged. The only thing the user-facing shape change moves
-is whether the engine lives in our process or in a child process.
+The brain CDP transport is unchanged — the brain attaches over
+WebSocket to the URL surfaced by `DevToolsActivePort`, and the
+five `browser_*` tools and per-step capture pipeline carry forward
+unchanged. The user-visible browser arrives in v0.30; v0.29 is
+substrate-only.
 
 The going-public-checklist rows from this ADR's original draft are
 unchanged. ADR-0010's *Superseded by ADR-0019* status remains.
