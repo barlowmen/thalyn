@@ -11,6 +11,7 @@ const DRAWER_LABEL: Record<DrawerKind, string> = {
   "file-tree": "Files",
   connectors: "Connectors",
   logs: "Logs",
+  browser: "Browser",
   worker: "Worker",
   lead: "Lead",
   "lead-chat": "Lead chat",

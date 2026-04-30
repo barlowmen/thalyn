@@ -2,6 +2,7 @@ import {
   Brain,
   Code2,
   FolderTree,
+  Globe,
   Inbox,
   type LucideIcon,
   MessageSquare,
@@ -54,6 +55,7 @@ const DRAWER_OPEN_ITEMS: ReadonlyArray<{
   { kind: "file-tree", label: "Open files", icon: FolderTree },
   { kind: "connectors", label: "Open connectors", icon: Plug },
   { kind: "logs", label: "Open logs", icon: ScrollText },
+  { kind: "browser", label: "Open browser", icon: Globe },
 ];
 
 /**

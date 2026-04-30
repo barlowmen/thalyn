@@ -37,6 +37,11 @@ const LogsSurface = lazy(() =>
     default: m.LogsSurface,
   })),
 );
+const BrowserSurface = lazy(() =>
+  import("@/components/browser/browser-surface").then((m) => ({
+    default: m.BrowserSurface,
+  })),
+);
 const WorkerSurface = lazy(() =>
   import("@/components/worker/worker-surface").then((m) => ({
     default: m.WorkerSurface,
@@ -116,6 +121,14 @@ export function resolveDrawer<K extends DrawerKind>(
           <LogsSurface />
         </Suspense>
       );
+    case "browser": {
+      const browserParams = (params ?? {}) as DrawerParams["browser"];
+      return (
+        <Suspense fallback={<Fallback label="browser" />}>
+          <BrowserSurface initialUrl={browserParams.url} />
+        </Suspense>
+      );
+    }
     case "worker": {
       const workerParams = (params ?? {}) as DrawerParams["worker"];
       return (

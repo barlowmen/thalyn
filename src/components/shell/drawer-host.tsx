@@ -18,11 +18,11 @@ import { cn } from "@/lib/utils";
 
 /**
  * The drawer kinds. Tools (editor / terminal / email / file-tree /
- * connectors / logs) plus the v0.28 agent surfaces (worker plan +
- * action-log detail). The browser drawer is reserved but doesn't
- * materialise until v0.29 (the cef-rs swap); the ``DrawerKind`` type
- * stays honest about the eventual surface set without forcing every
- * consumer to special-case its absence.
+ * connectors / logs / browser) plus the v0.28 agent surfaces
+ * (worker plan + action-log detail). The browser drawer hosts the
+ * bundled CEF child window, parented over the drawer's content
+ * rect by the OS (per ADR-0019's v0.29 refinement); the chrome
+ * lives in React, the web content lives in Chromium.
  */
 export type DrawerKind =
   | "editor"
@@ -31,6 +31,7 @@ export type DrawerKind =
   | "file-tree"
   | "connectors"
   | "logs"
+  | "browser"
   | "worker"
   | "lead"
   | "lead-chat";
@@ -48,6 +49,7 @@ export type DrawerParams = {
   "file-tree": { root?: string };
   connectors: Record<string, never>;
   logs: { runId?: string };
+  browser: { url?: string };
   worker: { runId: string };
   lead: { agentId: string };
   "lead-chat": { agentId: string; displayName?: string };
