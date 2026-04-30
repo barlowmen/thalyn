@@ -19,6 +19,7 @@ use tokio::sync::{Mutex, RwLock};
 
 use crate::brain::{BrainSupervisor, SpawnConfig};
 use crate::browser::BrowserManager;
+use crate::cef::CefHost;
 use crate::power::{AssertionToken, PowerManager};
 use crate::provider::{builtin_providers, ProviderMeta, ProviderRegistry};
 use crate::sandbox::SandboxManager;
@@ -48,10 +49,16 @@ struct AppState {
     /// Consumed by Tauri commands in subsequent commits.
     #[allow(dead_code)]
     sandboxes: Arc<SandboxManager>,
-    /// Headed-Chromium sidecar manager. The renderer drives lifecycle
-    /// via the `browser_*` Tauri commands; the brain attaches via
-    /// JSON-RPC `browser.attach` once Chromium is up.
+    /// v1 system-Chromium sidecar manager. Retained for the
+    /// engine-swap transition; the in-app `browser_*` commands now
+    /// drive [`CefHost`] instead. v1 retires when the bundled-CEF
+    /// path is the only shipped engine.
+    #[allow(dead_code)]
     browser: Arc<BrowserManager>,
+    /// Bundled CEF child-binary host. The renderer drives lifecycle
+    /// via the `browser_*` Tauri commands; the brain attaches via
+    /// JSON-RPC `browser.attach` once the DevTools endpoint comes up.
+    cef: Arc<CefHost>,
     power: Arc<PowerManager>,
     /// run id → outstanding power-assertion token. Lets the
     /// notification forwarder release a previously-acquired
@@ -636,8 +643,8 @@ async fn lsp_list(state: State<'_, AppState>) -> Result<Value, String> {
 
 #[tauri::command]
 async fn browser_start(state: State<'_, AppState>) -> Result<Value, String> {
-    let new_state = state.browser.start().await.map_err(|err| err.to_string())?;
-    if let crate::browser::BrowserState::Running { ws_url, .. } = &new_state {
+    let new_state = state.cef.start().await.map_err(|err| err.to_string())?;
+    if let crate::cef::HostState::Running { ws_url, .. } = &new_state {
         // Tell the brain to attach to this WS URL. If the attach
         // fails the renderer still gets back the running state — the
         // user can retry, or the next attempt to drive an agent tool
@@ -660,8 +667,8 @@ async fn browser_start(state: State<'_, AppState>) -> Result<Value, String> {
 #[tauri::command]
 async fn browser_stop(state: State<'_, AppState>) -> Result<(), String> {
     // Detach the brain first so its CDP socket closes cleanly before
-    // we kill Chromium under it. We swallow any detach error — if the
-    // brain is in a weird state it shouldn't block the stop path.
+    // we tear the child binary down. We swallow any detach error — if
+    // the brain is in a weird state it shouldn't block the stop path.
     let _ = state
         .brain
         .call(
@@ -670,12 +677,12 @@ async fn browser_stop(state: State<'_, AppState>) -> Result<(), String> {
             BRAIN_CALL_TIMEOUT,
         )
         .await;
-    state.browser.stop().await.map_err(|err| err.to_string())
+    state.cef.stop().await.map_err(|err| err.to_string())
 }
 
 #[tauri::command]
 async fn browser_status(state: State<'_, AppState>) -> Result<Value, String> {
-    serde_json::to_value(state.browser.state()).map_err(|err| err.to_string())
+    serde_json::to_value(state.cef.state()).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -1616,7 +1623,8 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
         providers: RwLock::new(registry),
         secrets,
         sandboxes: Arc::new(SandboxManager::new()),
-        browser: Arc::new(BrowserManager::new(profile_root)),
+        browser: Arc::new(BrowserManager::new(profile_root.clone())),
+        cef: Arc::new(CefHost::new(profile_root)),
         power: Arc::new(PowerManager::new()),
         assertions: Arc::new(Mutex::new(HashMap::new())),
         terminals: Arc::new(TerminalManager::new()),

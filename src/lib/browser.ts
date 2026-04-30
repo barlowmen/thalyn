@@ -1,22 +1,27 @@
 import { invoke } from "@tauri-apps/api/core";
 
 /**
- * Wire-typed mirror of `crate::browser::BrowserState`. The Rust core
- * picks the variant based on the manager's lifecycle; the renderer's
- * panel reads `kind` and switches on it.
+ * Wire-typed mirror of `crate::cef::HostState`. The Rust core picks
+ * the variant based on the bundled-CEF host's lifecycle; the
+ * renderer's panel reads `kind` and switches on it.
  */
 export type BrowserState =
   | { kind: "idle" }
-  | { kind: "starting"; binary: string }
-  | { kind: "running"; binary: string; ws_url: string; profile_dir: string }
+  | { kind: "starting"; profile_dir: string }
+  | {
+      kind: "running";
+      ws_url: string;
+      profile_dir: string;
+      sdk_version: string;
+    }
   | { kind: "exited"; reason: string };
 
-/** Spawn the headed Chromium sidecar and attach the brain. */
+/** Spawn the bundled-CEF child binary and attach the brain. */
 export async function startBrowser(): Promise<BrowserState> {
   return await invoke<BrowserState>("browser_start");
 }
 
-/** Detach the brain and kill the Chromium child. */
+/** Detach the brain and stop the bundled-CEF child. */
 export async function stopBrowser(): Promise<void> {
   await invoke("browser_stop");
 }
