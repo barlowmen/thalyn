@@ -20,6 +20,8 @@
 
 #![allow(dead_code, unused_imports)]
 
+#[cfg(feature = "cef")]
+pub mod child;
 pub mod host;
 pub mod port_file;
 pub mod profile;
