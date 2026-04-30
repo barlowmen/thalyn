@@ -1,5 +1,4 @@
 mod brain;
-mod browser;
 pub mod cef;
 mod data_dir;
 mod power;
@@ -18,7 +17,6 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::brain::{BrainSupervisor, SpawnConfig};
-use crate::browser::BrowserManager;
 use crate::cef::CefHost;
 use crate::power::{AssertionToken, PowerManager};
 use crate::provider::{builtin_providers, ProviderMeta, ProviderRegistry};
@@ -49,12 +47,6 @@ struct AppState {
     /// Consumed by Tauri commands in subsequent commits.
     #[allow(dead_code)]
     sandboxes: Arc<SandboxManager>,
-    /// v1 system-Chromium sidecar manager. Retained for the
-    /// engine-swap transition; the in-app `browser_*` commands now
-    /// drive [`CefHost`] instead. v1 retires when the bundled-CEF
-    /// path is the only shipped engine.
-    #[allow(dead_code)]
-    browser: Arc<BrowserManager>,
     /// In-process CEF engine state machine (ADR-0029). The engine
     /// itself is initialised in the Tauri setup hook via
     /// `cef::embed::runtime::initialize_cef_engine`; this `CefHost`
@@ -1642,7 +1634,6 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
         providers: RwLock::new(registry),
         secrets,
         sandboxes: Arc::new(SandboxManager::new()),
-        browser: Arc::new(BrowserManager::new(profile_root.clone())),
         cef: Arc::new(CefHost::new(profile_root)),
         power: Arc::new(PowerManager::new()),
         assertions: Arc::new(Mutex::new(HashMap::new())),
