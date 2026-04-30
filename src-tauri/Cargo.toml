@@ -14,9 +14,32 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # consumes the CEF SDK directly; default builds skip it cleanly.
 # The parent-side `CefHost` spawns this binary, reads its
 # `DevToolsActivePort`, and surfaces the WebSocket URL to the brain.
+# Retires alongside the engine swap.
 [[bin]]
 name = "thalyn-cef-host"
 path = "src/bin/thalyn-cef-host.rs"
+required-features = ["cef"]
+
+# macOS CEF helper-subprocess entry point per ADR-0029. Each
+# `<App>.app/Contents/Frameworks/Thalyn Helper*.app` bundle's
+# executable is a copy of this binary. CEF re-execs the helper
+# bundles for renderer / GPU / utility / plugin / alerts
+# subprocesses; this binary loads the framework and routes to
+# `cef::execute_process`. Sized to be tiny so the five helper
+# bundles don't bloat the produced `.app`.
+[[bin]]
+name = "thalyn-cef-helper"
+path = "src/bin/thalyn-cef-helper.rs"
+required-features = ["cef"]
+
+# Stages the macOS CEF helper-bundle layout under
+# `target/cef-helpers/` for `tauri build` to copy into the
+# produced `.app` via `bundle.macOS.frameworks` and
+# `bundle.macOS.files`. Invoked from `scripts/stage-cef-helpers.sh`,
+# which is the `beforeBundleCommand` hook in `tauri.conf.json`.
+[[bin]]
+name = "bundle-cef-helpers"
+path = "src/bin/bundle-cef-helpers.rs"
 required-features = ["cef"]
 
 [build-dependencies]
