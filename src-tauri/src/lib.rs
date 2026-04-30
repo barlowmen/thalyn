@@ -1688,6 +1688,16 @@ pub fn run() {
 
     tauri::Builder::default()
         .setup(|app| {
+            // Tauri has built its EventLoop at this point — tao has
+            // registered `TaoApp` as an `NSApplication` subclass and
+            // `[NSApp sharedApplication]` has locked it in as the
+            // principal class — but the run loop has not yet spun.
+            // This is the only safe window to graft CEF's NSApp
+            // protocol contracts onto `TaoApp` (ADR-0029) before the
+            // engine starts driving events.
+            #[cfg(feature = "cef")]
+            crate::cef::embed::runtime::install_swizzle_inside_setup_hook();
+
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(err) = init_app_state(&handle).await {

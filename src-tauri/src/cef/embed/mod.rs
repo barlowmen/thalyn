@@ -29,5 +29,7 @@
 
 #![allow(dead_code)]
 
+#[cfg(feature = "cef")]
+pub mod runtime;
 #[cfg(all(feature = "cef", target_os = "macos"))]
 pub mod tao_app;
