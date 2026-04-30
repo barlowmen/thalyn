@@ -250,3 +250,98 @@ when codesigning lands."
   Thalyn needs CEF's own resource bundle (locales,
   icudtl.dat) re-copied is part of the framework copy — should
   Just Work but worth confirming via a real run.
+
+## Refinement (post-investigation)
+
+After this spike was filed, a follow-up audit of `tauri-bundler`'s
+macOS source (`crates/tauri-bundler/src/bundle/macos/app.rs` on
+the `dev` branch) and a survey of community CEF-on-Tauri-2 work
+overturned the spike's original recommendation in two ways.
+
+**1. `bundle.macOS.frameworks` rejects `.app` paths.**
+`copy_frameworks_to_bundle` validates extensions with
+`ends_with(".framework")` and `ends_with(".dylib")`; a
+`.app` path errors with "Framework path should have .framework
+extension". So the spike's Option A reading ("frameworks accepts
+helper apps") was wrong; the framework field is for the
+Chromium framework only.
+
+**2. `bundle.macOS.files` accepts directory entries.**
+`copy_custom_files_to_bundle` takes `HashMap<dest, source>` and
+recursively copies both files *and directories*. A single entry
+like `"Frameworks/Thalyn Helper.app": "target/cef-helpers/Thalyn
+Helper.app"` copies the entire helper bundle directory tree. We
+do not need to enumerate every file inside — the spike's
+"painful manifest enumeration" objection to Option B was based
+on misreading the API.
+
+**Updated recommendation: Option B-as-corrected.** Land a
+`beforeBundleCommand` script that stages the framework + the
+five helper `.app` bundles into `src-tauri/target/cef-helpers/`,
+then declare them in `tauri.conf.json`:
+
+```json
+"bundle": {
+  "macOS": {
+    "frameworks": [
+      "target/cef-helpers/Chromium Embedded Framework.framework"
+    ],
+    "files": {
+      "Frameworks/Thalyn Helper.app":
+        "target/cef-helpers/Thalyn Helper.app",
+      "Frameworks/Thalyn Helper (GPU).app":
+        "target/cef-helpers/Thalyn Helper (GPU).app",
+      "Frameworks/Thalyn Helper (Renderer).app":
+        "target/cef-helpers/Thalyn Helper (Renderer).app",
+      "Frameworks/Thalyn Helper (Plugin).app":
+        "target/cef-helpers/Thalyn Helper (Plugin).app",
+      "Frameworks/Thalyn Helper (Alerts).app":
+        "target/cef-helpers/Thalyn Helper (Alerts).app"
+    }
+  }
+}
+```
+
+`pnpm tauri build --features cef` becomes the single command
+that produces a complete bundled `.app` with helpers in place;
+no manual second step.
+
+**Helper executable: separate `[[bin]]`, not symlinks.** The
+spike's symlink recommendation was scoped to "v0.30 dev" with a
+codesigning rotation in front of it. The audit changed that
+calculus: a separate `thalyn-cef-helper` `[[bin]]` target —
+~15 lines of Rust that calls `LibraryLoader::new(.., helper =
+true)` and `cef::execute_process` — is small enough that
+landing it now beats deferring. Production-ready shape from the
+start; codesigning isolation works without a follow-on rotation;
+helper bundles are tiny (~few-MB helper binary instead of
+copies/symlinks of the ~80MB parent). The v0.29 `thalyn-cef-host`
+`[[bin]]` was a different shape (full Chromium engine in a child
+process); the helper `[[bin]]` is a pure subprocess entry point.
+
+**Caveats not retired** by the audit:
+
+- **Codesigning ordering.** When signing lands (post-v1),
+  helpers must be signed before the outer `.app`,
+  deepest-first. tauri-bundler signs `.framework` entries from
+  the `frameworks` field but its behaviour on `.app` directories
+  copied via `files` needs a real verification run. May need a
+  pre-signing step in the `beforeBundleCommand` or a manual
+  signing pass before notarisation.
+- **Cross-platform parity.** Windows / Linux helper layouts are
+  different (Windows has flat `Helper.exe` files; Linux is
+  similar). The `bundle.macOS.files` shape is macOS-only; the
+  Windows / Linux paths follow the same staging pattern but
+  with platform-specific destinations. v0.30 lands macOS first;
+  Windows / Linux follow.
+- **Resources copy.** CEF's `Resources/` directory inside the
+  framework (locales, icudtl.dat) is part of the framework
+  itself; the recursive copy of
+  `Chromium Embedded Framework.framework/` brings them along.
+  Confirmed on inspection but worth eyeballing on the first
+  real `tauri build` run.
+
+The **community-status** of CEF-on-Tauri-2 integration is "no
+prior art." cef-rs ships `bundle-cef-app` for standalone CEF
+apps; nothing documents the cef-rs + Tauri 2 combination. We
+are setting the pattern.
