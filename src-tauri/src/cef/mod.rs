@@ -1,4 +1,4 @@
-//! Bundled-Chromium engine (ADR-0019).
+//! Bundled-Chromium engine (ADR-0019, refined by ADR-0029).
 //!
 //! Owns the CEF lifecycle inside the Rust core: SDK resolution
 //! (where on disk the binary distribution lives), per-Thalyn
@@ -6,22 +6,27 @@
 //! the WS URL the brain attaches to over CDP, and the [`CefHost`]
 //! state machine that wraps it all.
 //!
-//! This module is the v2 replacement for the v1 sidecar Chromium
-//! supervisor (`crate::browser`). The v1 path stays in tree until
-//! the renderer drawer is wired through and the brain has been
-//! migrated to the in-process WS URL — see `` §19.
+//! Engine model (v0.30):
+//!
+//! - `main()` → [`embed::runtime::run_pre_tauri_setup`] maps the
+//!   framework on macOS and short-circuits CEF helper subprocesses.
+//! - Tauri setup hook → [`embed::runtime::install_swizzle_inside_setup_hook`]
+//!   grafts CEF's NSApplication-protocol contracts onto tao's
+//!   `TaoApp` class, then [`embed::runtime::initialize_cef_engine`]
+//!   calls `cef::initialize` against the per-Thalyn profile.
+//! - `init_app_state` constructs [`CefHost`] and spawns an async
+//!   task that calls [`CefHost::attach_to_active_engine`] to read
+//!   `DevToolsActivePort` and surface the WS URL.
 //!
 //! Module gating: the cef-rs crate itself sits behind the `cef`
 //! Cargo feature, so any code that calls into `cef::initialize` /
 //! `cef::Browser` lives under `#[cfg(feature = "cef")]`. The
-//! supporting infrastructure here (SDK resolve, profile, port-file
-//! watcher) is engine-agnostic and compiles in every configuration
-//! — that lets the brain CDP path migrate ahead of the engine init.
+//! supporting infrastructure here (profile, port-file watcher,
+//! `CefHost` state machine) is engine-agnostic and compiles in
+//! every configuration.
 
 #![allow(dead_code, unused_imports)]
 
-#[cfg(feature = "cef")]
-pub mod child;
 pub mod embed;
 pub mod host;
 pub mod port_file;

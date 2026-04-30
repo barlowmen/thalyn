@@ -55,9 +55,12 @@ struct AppState {
     /// path is the only shipped engine.
     #[allow(dead_code)]
     browser: Arc<BrowserManager>,
-    /// Bundled CEF child-binary host. The renderer drives lifecycle
-    /// via the `browser_*` Tauri commands; the brain attaches via
-    /// JSON-RPC `browser.attach` once the DevTools endpoint comes up.
+    /// In-process CEF engine state machine (ADR-0029). The engine
+    /// itself is initialised in the Tauri setup hook via
+    /// `cef::embed::runtime::initialize_cef_engine`; this `CefHost`
+    /// reads `DevToolsActivePort` once the engine is up and surfaces
+    /// the WS URL the brain attaches to via JSON-RPC
+    /// `browser.attach`.
     cef: Arc<CefHost>,
     power: Arc<PowerManager>,
     /// run id → outstanding power-assertion token. Lets the
@@ -1693,15 +1696,46 @@ pub fn run() {
             // `[NSApp sharedApplication]` has locked it in as the
             // principal class — but the run loop has not yet spun.
             // This is the only safe window to graft CEF's NSApp
-            // protocol contracts onto `TaoApp` (ADR-0029) before the
-            // engine starts driving events.
+            // protocol contracts onto `TaoApp` (ADR-0029) and run
+            // `cef::initialize` before the engine starts driving
+            // events.
             #[cfg(feature = "cef")]
-            crate::cef::embed::runtime::install_swizzle_inside_setup_hook();
+            {
+                crate::cef::embed::runtime::install_swizzle_inside_setup_hook();
+                let data_dir = data_dir::resolve();
+                let profile_root = data_dir.join("cef-profile");
+                if let Err(err) = crate::cef::embed::runtime::initialize_cef_engine(&profile_root) {
+                    tracing::error!(?err, "cef::initialize failed; engine will not be available");
+                }
+            }
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(err) = init_app_state(&handle).await {
-                    tracing::error!(?err, "failed to init app state");
+                match init_app_state(&handle).await {
+                    Err(err) => {
+                        tracing::error!(?err, "failed to init app state");
+                    }
+                    Ok(()) => {
+                        #[cfg(feature = "cef")]
+                        {
+                            let app_state = handle.state::<AppState>();
+                            match app_state.cef.attach_to_active_engine().await {
+                                Ok(_) => {}
+                                Err(crate::cef::HostError::EngineNotInitialized) => {
+                                    // Expected when the helper-bundle
+                                    // layout is absent (unbundled dev
+                                    // runs); the setup hook above
+                                    // logged the failure already.
+                                }
+                                Err(err) => {
+                                    tracing::error!(
+                                        ?err,
+                                        "CefHost failed to attach to the in-process CEF engine"
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
             });
             Ok(())

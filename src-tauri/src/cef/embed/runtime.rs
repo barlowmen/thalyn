@@ -18,16 +18,19 @@
 //!   swizzle adds CEF's protocol contracts to `TaoApp` — see
 //!   [`super::tao_app`] for the runtime-Objective-C surface.
 //!
-//! `cef::initialize` is *not* called from this module today. The
-//! follow-on commit that retires v0.29's `thalyn-cef-host`
-//! `[[bin]]` and reshapes [`crate::cef::CefHost::start`] is where
-//! the engine actually starts running in the parent process. This
-//! module establishes the load-bearing scaffolding so that commit
-//! is purely about engine semantics, not about wiring discipline.
+//! [`initialize_cef_engine`] is the load-bearing one-shot:
+//! resolves the SDK, opens the per-Thalyn profile, runs the swizzle,
+//! and calls `cef::initialize` against the active `NSApp`. After
+//! this returns successfully, the CEF runtime is process-global
+//! and the brain attaches over CDP via the WS URL surfaced by
+//! [`crate::cef::CefHost`].
 
 #![cfg(feature = "cef")]
 
+use std::path::Path;
 use std::sync::OnceLock;
+
+use crate::cef::profile::{CefProfile, ProfileError};
 
 /// Holds the CEF library loader for the lifetime of the process so
 /// the framework stays mapped. Dropping the loader unmaps the
@@ -145,4 +148,113 @@ fn run_execute_process() -> Option<i32> {
     } else {
         None
     }
+}
+
+/// Errors returned by [`initialize_cef_engine`]. Each variant maps
+/// to a discrete failure mode that callers can recover from
+/// differently — most paths just log and continue without an
+/// engine, so the renderer's browser drawer surfaces an "engine
+/// not available" state instead of crashing.
+#[derive(Debug, thiserror::Error)]
+pub enum InitializeError {
+    #[error(
+        "CEF framework is not loaded; the helper-bundle layout under \
+         `<App>.app/Contents/Frameworks/` was not present next to the \
+         parent exe. Run `pnpm tauri build --features cef` to produce \
+         a complete bundled .app, or set the layout up manually for an \
+         unbundled dev run."
+    )]
+    FrameworkNotLoaded,
+    #[cfg(target_os = "macos")]
+    #[error("ThalynApplication swizzle failed: {0}")]
+    Swizzle(#[from] super::tao_app::SwizzleError),
+    #[error("could not open the per-Thalyn CEF profile: {0}")]
+    Profile(#[from] ProfileError),
+    #[error("cef::initialize returned {0} (expected 1)")]
+    CefInitializeFailed(i32),
+}
+
+/// Holds the live `CefProfile` so the OS-level handles
+/// `cef::initialize` opens against it stay valid for the process
+/// lifetime. Dropping a `CefProfile` is harmless today (it's a
+/// `PathBuf` wrapper), but parking it in a static keeps the
+/// invariant explicit if profile internals grow.
+static ACTIVE_PROFILE: OnceLock<CefProfile> = OnceLock::new();
+
+/// Run `cef::initialize` against the per-Thalyn profile in
+/// `profile_root`. Idempotent: a second call after success returns
+/// `Ok(())` without re-initializing (CEF is process-global; multiple
+/// init calls are an error).
+///
+/// Must be called on the main thread, from inside Tauri's setup
+/// callback, *after* [`install_swizzle_inside_setup_hook`] has
+/// installed the protocol contracts on `TaoApp`. The
+/// `cef::execute_process` short-circuit in [`run_pre_tauri_setup`]
+/// must already have gated out helper-process invocations of the
+/// parent binary.
+///
+/// On macOS, `LIBRARY_LOADER` must already be populated by
+/// [`run_pre_tauri_setup`] (which only happens when the helper
+/// bundle layout is present); without that, `cef::initialize`
+/// would crash trying to reach symbols from the framework. We
+/// fail fast with [`InitializeError::FrameworkNotLoaded`] in that
+/// case so the renderer can surface an engine-unavailable state
+/// instead of the app dying on startup.
+pub fn initialize_cef_engine(profile_root: &Path) -> Result<(), InitializeError> {
+    if ACTIVE_PROFILE.get().is_some() {
+        // Engine already initialised in this process. CEF rejects
+        // double-init; nothing useful to do but bail cleanly.
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    if LIBRARY_LOADER.get().is_none() {
+        return Err(InitializeError::FrameworkNotLoaded);
+    }
+
+    #[cfg(target_os = "macos")]
+    super::tao_app::install_thalyn_application_swizzle()?;
+
+    let profile = CefProfile::open(profile_root)?;
+    profile.clear_stale_port_file()?;
+
+    let profile_dir_str = profile.dir().to_string_lossy().into_owned();
+    let settings = cef::Settings {
+        no_sandbox: 1,
+        remote_debugging_port: 0,
+        cache_path: cef::CefString::from(profile_dir_str.as_str()),
+        root_cache_path: cef::CefString::from(profile_dir_str.as_str()),
+        ..Default::default()
+    };
+
+    let cef_args = cef::args::Args::new();
+    let init_ret = cef::initialize(
+        Some(cef_args.as_main_args()),
+        Some(&settings),
+        None::<&mut cef::App>,
+        std::ptr::null_mut(),
+    );
+    if init_ret != 1 {
+        return Err(InitializeError::CefInitializeFailed(init_ret));
+    }
+
+    let _ = ACTIVE_PROFILE.set(profile);
+    tracing::info!(
+        target = "thalyn::cef",
+        profile_dir = %profile_dir_str,
+        "CEF engine initialised in-process"
+    );
+    Ok(())
+}
+
+/// Whether the engine has been initialised in this process.
+pub fn is_engine_initialized() -> bool {
+    ACTIVE_PROFILE.get().is_some()
+}
+
+/// Path of the active profile, if [`initialize_cef_engine`] has
+/// run successfully. Used by `CefHost` to read
+/// `DevToolsActivePort` and surface the WS URL.
+pub fn active_profile_dir() -> Option<&'static Path> {
+    ACTIVE_PROFILE.get().map(|p| p.dir())
 }

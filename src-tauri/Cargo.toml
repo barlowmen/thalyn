@@ -9,17 +9,6 @@ rust-version = "1.78"
 name = "thalyn_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-# Bundled CEF child binary parented to the Tauri main window per
-# ADR-0019's v0.29 refinement. Gated on `cef` because the binary
-# consumes the CEF SDK directly; default builds skip it cleanly.
-# The parent-side `CefHost` spawns this binary, reads its
-# `DevToolsActivePort`, and surfaces the WebSocket URL to the brain.
-# Retires alongside the engine swap.
-[[bin]]
-name = "thalyn-cef-host"
-path = "src/bin/thalyn-cef-host.rs"
-required-features = ["cef"]
-
 # macOS CEF helper-subprocess entry point per ADR-0029. Each
 # `<App>.app/Contents/Frameworks/Thalyn Helper*.app` bundle's
 # executable is a copy of this binary. CEF re-execs the helper
