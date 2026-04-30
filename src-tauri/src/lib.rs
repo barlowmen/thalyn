@@ -1,5 +1,6 @@
 mod brain;
 mod browser;
+mod cef;
 mod data_dir;
 mod power;
 mod provider;
