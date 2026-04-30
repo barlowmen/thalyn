@@ -22,6 +22,7 @@
 
 #[cfg(feature = "cef")]
 pub mod child;
+pub mod embed;
 pub mod host;
 pub mod port_file;
 pub mod profile;
