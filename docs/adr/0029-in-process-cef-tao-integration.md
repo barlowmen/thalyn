@@ -1,6 +1,6 @@
 # ADR-0029 — In-process CEF embedding: tao integration via runtime swizzle
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-04-30
 - **Deciders:** Barlow
 - **Supersedes:** —
@@ -121,19 +121,38 @@ is added on top.
 ### 2. Class registration at runtime, before `cef::initialize`
 
 The principal class is registered **after** tao registers `TaoApp`
-and **before** `cef::initialize` runs. The registration uses
-`objc2::declare::ClassBuilder` (the modern wrapper around
-`class_addMethod` / `class_addIvar`) to:
+and **before** `cef::initialize` runs. The registration uses raw
+Objective-C runtime calls (`class_addMethod`,
+`class_addProtocol`, `method_setImplementation`,
+`objc_setAssociatedObject` / `objc_getAssociatedObject`) to:
 
 1. Look up the `TaoApp` class object that tao has already created.
-2. Add the `handling_send_event` instance variable.
+2. Store the `handling_send_event` boolean in an **associated
+   object** keyed by a static address. The Objective-C runtime
+   only allows `class_addIvar` between `objc_allocateClassPair`
+   and `objc_registerClassPair`; tao has long since registered
+   `TaoApp` by the time the swizzle runs, so a real ivar is not
+   reachable. Associated objects are the runtime-supported
+   sidecar for this exact case — every call to
+   `setHandlingSendEvent:` / `isHandlingSendEvent` performs one
+   hash-table lookup keyed by the (object, key) pair, which is
+   negligible against the per-event cost CEF already pays.
 3. Add the `setHandlingSendEvent:` / `isHandlingSendEvent`
-   methods (the `CrAppControlProtocol` / `CrAppProtocol` impls).
-4. Add the conformance to `CefAppProtocol` (zero-method protocol;
-   conformance alone is enough for CEF's runtime check).
+   methods (the `CrAppControlProtocol` / `CrAppProtocol` impls)
+   that read and write the associated object.
+4. Add conformance to `CefAppProtocol`, `CrAppProtocol`, and
+   `CrAppControlProtocol`. The CEF runtime check uses
+   `conformsToProtocol:`, which walks the registered protocol
+   list — `class_addProtocol` is enough; method-level
+   conformance is established by step 3.
 5. Replace `sendEvent:` with the combined override
-   (`method_setImplementation`).
-6. Replace `terminate:` with the `CloseAllBrowsers` reroute.
+   (`method_setImplementation` against the existing IMP, with the
+   replacement IMP wrapping `super::sendEvent:` in the CEF
+   flag-toggle while preserving tao's CMD-key-up workaround). The
+   original IMP is captured via `class_getMethodImplementation`
+   before replacement so the new body can call it as `super`.
+6. Replace `terminate:` with the `CloseAllBrowsers` reroute (same
+   `method_setImplementation` shape).
 
 The hook fires in `tauri::Builder::setup`. By that point Tauri's
 runtime has built the EventLoop (so `TaoApp` exists and `NSApp` is
