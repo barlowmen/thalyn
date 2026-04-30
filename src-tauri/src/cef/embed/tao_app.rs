@@ -142,16 +142,40 @@ pub fn install_thalyn_application_swizzle() -> Result<(), SwizzleError> {
         return Ok(());
     }
 
+    // Phase A — read-only lookups. Every failure mode that can
+    // surface in practice (TaoApp absent, framework not mapped,
+    // tao changing its layout) shows up here. Nothing in this
+    // phase mutates `TaoApp`'s vtable or method list.
     let tao_app = AnyClass::get(TAO_APP_CLASS_NAME).ok_or(SwizzleError::TaoAppNotFound)?;
-    let tao_app_ptr = tao_app as *const _ as *mut AnyClass;
-
-    // Step 1: replace TaoApp's sendEvent: with our wrapper. Capture
-    // the original IMP so the wrapper can delegate to tao's body.
+    let nsapp_class = class!(NSApplication);
     let original_send_event = unsafe { lookup_imp(tao_app, sel!(sendEvent:)) }
         .ok_or(SwizzleError::SendEventMethodMissing)?;
+    let original_terminate = unsafe { lookup_imp(nsapp_class, sel!(terminate:)) }
+        .ok_or(SwizzleError::TerminateMethodMissing)?;
+    let cef_app_proto = <dyn CefAppProtocol>::protocol()
+        .ok_or(SwizzleError::ProtocolNotLinked("CefAppProtocol"))?;
+    let cr_app_proto =
+        <dyn CrAppProtocol>::protocol().ok_or(SwizzleError::ProtocolNotLinked("CrAppProtocol"))?;
+    let cr_app_control_proto = <dyn CrAppControlProtocol>::protocol()
+        .ok_or(SwizzleError::ProtocolNotLinked("CrAppControlProtocol"))?;
+
+    // Phase B — mutations. From here on the function is committed:
+    // every operation either succeeds or panics. Reaching this point
+    // means tao registered TaoApp, the standard methods we need to
+    // capture all exist, and the CEF framework is mapped (so the
+    // protocol pointers above are non-null). The remaining FFI
+    // calls (`class_replaceMethod` / `class_addMethod` /
+    // `class_addProtocol`) cannot fail in interesting ways given
+    // those preconditions; the assertions below are belt-and-braces.
+    let tao_app_ptr = tao_app as *const _ as *mut AnyClass;
+
     ORIGINAL_SEND_EVENT
         .set(original_send_event)
         .expect("ORIGINAL_SEND_EVENT set after the INSTALLED guard");
+    ORIGINAL_TERMINATE
+        .set(original_terminate)
+        .expect("ORIGINAL_TERMINATE set after the INSTALLED guard");
+
     unsafe {
         // class_replaceMethod returns the previous IMP; we already
         // have it via class_getInstanceMethod above, so we ignore.
@@ -163,16 +187,6 @@ pub fn install_thalyn_application_swizzle() -> Result<(), SwizzleError> {
         );
     }
 
-    // Step 2: capture NSApplication's original terminate: IMP and
-    // override it on TaoApp (TaoApp inherits terminate: but does
-    // not override it; class_addMethod installs a TaoApp-specific
-    // override without touching NSApplication's vtable).
-    let nsapp_class = class!(NSApplication);
-    let original_terminate = unsafe { lookup_imp(nsapp_class, sel!(terminate:)) }
-        .ok_or(SwizzleError::TerminateMethodMissing)?;
-    ORIGINAL_TERMINATE
-        .set(original_terminate)
-        .expect("ORIGINAL_TERMINATE set after the INSTALLED guard");
     let added_terminate = unsafe {
         class_addMethod(
             tao_app_ptr,
@@ -182,11 +196,12 @@ pub fn install_thalyn_application_swizzle() -> Result<(), SwizzleError> {
         )
     }
     .as_bool();
-    if !added_terminate {
-        return Err(SwizzleError::AddMethodFailed("terminate:"));
-    }
+    assert!(
+        added_terminate,
+        "class_addMethod failed for TaoApp.terminate: after a successful read-only \
+         lookup phase — TaoApp may have been mutated by another swizzler"
+    );
 
-    // Step 3: add isHandlingSendEvent (returns BOOL).
     let added_is_handling = unsafe {
         class_addMethod(
             tao_app_ptr,
@@ -196,11 +211,12 @@ pub fn install_thalyn_application_swizzle() -> Result<(), SwizzleError> {
         )
     }
     .as_bool();
-    if !added_is_handling {
-        return Err(SwizzleError::AddMethodFailed("isHandlingSendEvent"));
-    }
+    assert!(
+        added_is_handling,
+        "class_addMethod failed for TaoApp.isHandlingSendEvent — see TaoApp.terminate: \
+         note above"
+    );
 
-    // Step 4: add setHandlingSendEvent: (takes BOOL, returns void).
     let added_set_handling = unsafe {
         class_addMethod(
             tao_app_ptr,
@@ -210,28 +226,24 @@ pub fn install_thalyn_application_swizzle() -> Result<(), SwizzleError> {
         )
     }
     .as_bool();
-    if !added_set_handling {
-        return Err(SwizzleError::AddMethodFailed("setHandlingSendEvent:"));
-    }
+    assert!(
+        added_set_handling,
+        "class_addMethod failed for TaoApp.setHandlingSendEvent: — see TaoApp.terminate: \
+         note above"
+    );
 
-    // Step 5: record protocol conformance. CEF queries
-    // `conformsToProtocol:` against the active NSApp before
-    // proceeding past the message-pump observer check.
-    let cef_app_proto = <dyn CefAppProtocol>::protocol()
-        .ok_or(SwizzleError::ProtocolNotLinked("CefAppProtocol"))?;
-    let cr_app_proto =
-        <dyn CrAppProtocol>::protocol().ok_or(SwizzleError::ProtocolNotLinked("CrAppProtocol"))?;
-    let cr_app_control_proto = <dyn CrAppControlProtocol>::protocol()
-        .ok_or(SwizzleError::ProtocolNotLinked("CrAppControlProtocol"))?;
-    if !unsafe { class_addProtocol(tao_app_ptr, cef_app_proto) }.as_bool() {
-        return Err(SwizzleError::AddProtocolFailed("CefAppProtocol"));
-    }
-    if !unsafe { class_addProtocol(tao_app_ptr, cr_app_proto) }.as_bool() {
-        return Err(SwizzleError::AddProtocolFailed("CrAppProtocol"));
-    }
-    if !unsafe { class_addProtocol(tao_app_ptr, cr_app_control_proto) }.as_bool() {
-        return Err(SwizzleError::AddProtocolFailed("CrAppControlProtocol"));
-    }
+    assert!(
+        unsafe { class_addProtocol(tao_app_ptr, cef_app_proto) }.as_bool(),
+        "class_addProtocol failed for CefAppProtocol after a successful read-only lookup"
+    );
+    assert!(
+        unsafe { class_addProtocol(tao_app_ptr, cr_app_proto) }.as_bool(),
+        "class_addProtocol failed for CrAppProtocol after a successful read-only lookup"
+    );
+    assert!(
+        unsafe { class_addProtocol(tao_app_ptr, cr_app_control_proto) }.as_bool(),
+        "class_addProtocol failed for CrAppControlProtocol after a successful read-only lookup"
+    );
 
     INSTALLED.store(true, Ordering::Release);
     Ok(())
