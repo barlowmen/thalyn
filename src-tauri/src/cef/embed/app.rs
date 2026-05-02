@@ -155,8 +155,18 @@ fn build_window_info() -> WindowInfo {
         }
         WindowInfo::default().set_as_child(parent, &placeholder_bounds)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
+        // `cef_window_handle_t` is `HWND` on Windows; until the
+        // Windows path lands proper parent-window discovery, fall
+        // back to a null parent so the build continues to compile.
         WindowInfo::default().set_as_child(std::ptr::null_mut(), &placeholder_bounds)
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        // `cef_window_handle_t` is the X11 `Window` (ulong/u64) on
+        // Linux. A zero handle stands in until the GtkSocket /
+        // XEmbed wiring lands.
+        WindowInfo::default().set_as_child(0, &placeholder_bounds)
     }
 }
