@@ -4,6 +4,13 @@ version = "0.0.0"
 description = "Thalyn desktop runtime"
 edition = "2021"
 rust-version = "1.78"
+# `cargo`'s auto-bin discovery picks up `src/main.rs` as the
+# `thalyn` binary, but adding `[[bin]]` entries for the macOS CEF
+# helpers below means cargo (and `tauri build`) can no longer
+# infer which binary is the app's main entry point. Pin it
+# explicitly so `pnpm tauri build` resolves the parent-app bundle
+# without an ambiguous-binary error.
+default-run = "thalyn"
 
 [lib]
 name = "thalyn_lib"
