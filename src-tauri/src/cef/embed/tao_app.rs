@@ -66,9 +66,10 @@ use std::sync::OnceLock;
 use cef::application_mac::{CefAppProtocol, CrAppControlProtocol, CrAppProtocol};
 use objc2::ffi::{
     class_addMethod, class_addProtocol, class_getInstanceMethod, class_replaceMethod,
-    method_getImplementation,
+    method_getImplementation, objc_allocateProtocol, objc_getProtocol, objc_registerProtocol,
+    protocol_addProtocol,
 };
-use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, Sel};
+use objc2::runtime::{AnyClass, AnyObject, AnyProtocol, Bool, Imp, Sel};
 use objc2::{class, sel, ProtocolType};
 use thiserror::Error;
 
@@ -152,12 +153,27 @@ pub fn install_thalyn_application_swizzle() -> Result<(), SwizzleError> {
         .ok_or(SwizzleError::SendEventMethodMissing)?;
     let original_terminate = unsafe { lookup_imp(nsapp_class, sel!(terminate:)) }
         .ok_or(SwizzleError::TerminateMethodMissing)?;
-    let cef_app_proto = <dyn CefAppProtocol>::protocol()
-        .ok_or(SwizzleError::ProtocolNotLinked("CefAppProtocol"))?;
+    // CrAppProtocol + CrAppControlProtocol are declared in Chromium's
+    // own headers and emitted into `Chromium Embedded Framework`'s
+    // `__DATA_CONST,__objc_protolist` section. dlopen registers them
+    // with the runtime when LibraryLoader maps the framework, so the
+    // lookup must succeed once `cef::initialize` has been reached.
     let cr_app_proto =
         <dyn CrAppProtocol>::protocol().ok_or(SwizzleError::ProtocolNotLinked("CrAppProtocol"))?;
     let cr_app_control_proto = <dyn CrAppControlProtocol>::protocol()
         .ok_or(SwizzleError::ProtocolNotLinked("CrAppControlProtocol"))?;
+    // CefAppProtocol is the umbrella marker the embedding application
+    // is *expected to define* — Chromium's framework binary does not
+    // ship it (only its parents). cef-rs's `extern_protocol!` macro
+    // declares the Rust trait shape but emits no Objective-C metadata,
+    // so `<dyn CefAppProtocol>::protocol()` returns None until we
+    // register the protocol ourselves with the runtime. Allocate +
+    // register on first use, then cache.
+    let cef_app_proto = match <dyn CefAppProtocol>::protocol() {
+        Some(proto) => proto,
+        None => synthesize_cef_app_protocol(cr_app_control_proto)
+            .ok_or(SwizzleError::ProtocolNotLinked("CefAppProtocol"))?,
+    };
 
     // Phase B — mutations. From here on the function is committed:
     // every operation either succeeds or panics. Reaching this point
@@ -232,18 +248,16 @@ pub fn install_thalyn_application_swizzle() -> Result<(), SwizzleError> {
          note above"
     );
 
-    assert!(
-        unsafe { class_addProtocol(tao_app_ptr, cef_app_proto) }.as_bool(),
-        "class_addProtocol failed for CefAppProtocol after a successful read-only lookup"
-    );
-    assert!(
-        unsafe { class_addProtocol(tao_app_ptr, cr_app_proto) }.as_bool(),
-        "class_addProtocol failed for CrAppProtocol after a successful read-only lookup"
-    );
-    assert!(
-        unsafe { class_addProtocol(tao_app_ptr, cr_app_control_proto) }.as_bool(),
-        "class_addProtocol failed for CrAppControlProtocol after a successful read-only lookup"
-    );
+    // `class_addProtocol` returns false when the class already
+    // conforms — and adding `CefAppProtocol` also marks the class
+    // as conforming to its parents (`CrAppControlProtocol`,
+    // `CrAppProtocol`) for free. The follow-on `CrAppProtocol` /
+    // `CrAppControlProtocol` adds are belt-and-braces in case the
+    // umbrella protocol's parent chain isn't visible to the
+    // runtime; either way, "already conforms" is success.
+    unsafe { class_addProtocol(tao_app_ptr, cef_app_proto) };
+    unsafe { class_addProtocol(tao_app_ptr, cr_app_proto) };
+    unsafe { class_addProtocol(tao_app_ptr, cr_app_control_proto) };
 
     INSTALLED.store(true, Ordering::Release);
     Ok(())
@@ -326,6 +340,38 @@ extern "C" fn thalyn_set_handling_send_event_imp_thunk(
 }
 
 // --- Helpers ------------------------------------------------------
+
+/// Allocate `CefAppProtocol` in the runtime if it isn't already
+/// present, with `CrAppControlProtocol` as its parent (per CEF's
+/// header `cef_application_mac.h`). Returns `None` only if the
+/// runtime refuses to register the protocol — every other path
+/// (already registered, freshly allocated, freshly registered)
+/// returns `Some`. Idempotent: a second call after success looks
+/// the protocol up via `objc_getProtocol` and reuses it.
+///
+/// CEF's framework binary ships `CrAppProtocol` and
+/// `CrAppControlProtocol` in `__objc_protolist` (the application
+/// inherits them via dlopen), but `CefAppProtocol` is the umbrella
+/// marker that *the embedding application* is expected to define
+/// — chromium's tree includes it via its own `.mm` files in the
+/// app target. We register it ourselves at runtime so cef-rs's
+/// type-only `extern_protocol!` declaration becomes reachable via
+/// `objc_getProtocol`.
+fn synthesize_cef_app_protocol(parent: &'static AnyProtocol) -> Option<&'static AnyProtocol> {
+    const NAME: &CStr = c"CefAppProtocol";
+    unsafe {
+        if let Some(existing) = objc_getProtocol(NAME.as_ptr()).as_ref() {
+            return Some(existing);
+        }
+        let raw = objc_allocateProtocol(NAME.as_ptr());
+        if raw.is_null() {
+            return None;
+        }
+        protocol_addProtocol(raw, parent);
+        objc_registerProtocol(raw);
+        objc_getProtocol(NAME.as_ptr()).as_ref()
+    }
+}
 
 /// Look up an instance method's IMP on a given class.
 ///

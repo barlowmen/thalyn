@@ -145,6 +145,21 @@ Objective-C runtime calls (`class_addMethod`,
    `conformsToProtocol:`, which walks the registered protocol
    list — `class_addProtocol` is enough; method-level
    conformance is established by step 3.
+
+   **Caveat — `CefAppProtocol` is application-defined.** Chromium's
+   framework binary ships `CrAppProtocol` and `CrAppControlProtocol`
+   in `__DATA_CONST,__objc_protolist`, so dlopen registers them with
+   the runtime. `CefAppProtocol` is the umbrella marker every CEF
+   embedder is *expected to define itself* (it appears in
+   `cef_application_mac.h` only as `@protocol CefAppProtocol
+   <CrAppControlProtocol> @end`). cef-rs's `extern_protocol!` macro
+   declares the Rust trait shape but emits no Objective-C metadata,
+   so `<dyn CefAppProtocol>::protocol()` returns `None` until the
+   embedder allocates the protocol via `objc_allocateProtocol` /
+   `protocol_addProtocol(parent = CrAppControlProtocol)` /
+   `objc_registerProtocol`. The swizzle does that before
+   `class_addProtocol(CefAppProtocol)` — without it CEF aborts on
+   the first event.
 5. Replace `sendEvent:` with the combined override
    (`method_setImplementation` against the existing IMP, with the
    replacement IMP wrapping `super::sendEvent:` in the CEF
