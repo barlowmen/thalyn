@@ -131,6 +131,15 @@ fn load_cef_framework_macos() -> bool {
     if !loader.load() {
         return false;
     }
+    // Negotiate the API version with the freshly loaded framework.
+    // CEF's wrapper structs carry an inline `size = sizeof(_cef_*_t)`
+    // header that the framework cross-checks against the version it
+    // was compiled with; the cross-check returns `-1` ("invalid
+    // version") until `cef_api_hash` runs at least once. Without
+    // this, `cef::initialize` accepts an `App` pointer but the
+    // first internal call into it aborts with
+    // `CefApp_0_CToCpp called with invalid version -1`.
+    let _ = cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
     let _ = LIBRARY_LOADER.set(loader);
     true
 }
@@ -227,11 +236,17 @@ pub fn initialize_cef_engine(profile_root: &Path) -> Result<(), InitializeError>
         ..Default::default()
     };
 
+    // Construct the App + BrowserProcessHandler so CEF has somewhere
+    // to call back when the context is up. The handler reads the
+    // host-view pointer the setup hook installed and parents the
+    // user-facing Browser to it.
+    let mut app = super::app::ThalynApp::build();
+
     let cef_args = cef::args::Args::new();
     let init_ret = cef::initialize(
         Some(cef_args.as_main_args()),
         Some(&settings),
-        None::<&mut cef::App>,
+        Some(&mut app),
         std::ptr::null_mut(),
     );
     if init_ret != 1 {

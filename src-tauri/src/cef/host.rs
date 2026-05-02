@@ -188,11 +188,18 @@ impl CefHost {
     /// the rect lands on it; otherwise it is held as the
     /// next-session pending rect so a fresh session adopts it
     /// without a renderer round-trip.
+    ///
+    /// On macOS the rect is also forwarded to the
+    /// [`crate::cef::embed::host_view`] module so the parented
+    /// `NSView` resizes in lockstep with the drawer chrome. The
+    /// host-view path is feature-gated; default builds skip it.
     pub async fn set_window_rect(&self, rect: HostWindowRect) {
         if let Some(session) = self.inner.read().await.as_ref() {
             session.set_window_rect(rect).await;
         }
         *self.pending_rect.lock().await = Some(rect);
+        #[cfg(all(feature = "cef", target_os = "macos"))]
+        crate::cef::embed::host_view::set_frame(rect);
     }
 
     /// Subscribe to state transitions. Each subscriber sees the

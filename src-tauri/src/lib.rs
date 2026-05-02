@@ -1693,6 +1693,39 @@ pub fn run() {
             #[cfg(feature = "cef")]
             {
                 crate::cef::embed::runtime::install_swizzle_inside_setup_hook();
+
+                // Install the host NSView under Tauri's main-window
+                // contentView before cef::initialize runs. CEF's
+                // BrowserProcessHandler::on_context_initialized fires
+                // shortly after init, reads the host view via
+                // `host_view::current_handle`, and calls
+                // `browser_host_create_browser` with parent_view set.
+                #[cfg(target_os = "macos")]
+                if let Some(window) = app.get_webview_window("main") {
+                    match window.ns_view() {
+                        Ok(ns_view_ptr) => {
+                            // SAFETY: `setup` runs on the main thread —
+                            // the safe window for AppKit mutations
+                            // before the run loop spins.
+                            let mtm = objc2::MainThreadMarker::new()
+                                .expect("Tauri setup hook is on the main thread");
+                            match crate::cef::embed::host_view::install(ns_view_ptr, mtm) {
+                                Ok(_handle) => tracing::debug!(
+                                    "host NSView installed for parented CEF Browser"
+                                ),
+                                Err(err) => tracing::error!(
+                                    ?err,
+                                    "failed to install host NSView; the Browser will not be parented"
+                                ),
+                            }
+                        }
+                        Err(err) => tracing::error!(
+                            ?err,
+                            "Tauri main window has no usable NSView pointer"
+                        ),
+                    }
+                }
+
                 let data_dir = data_dir::resolve();
                 let profile_root = data_dir.join("cef-profile");
                 if let Err(err) = crate::cef::embed::runtime::initialize_cef_engine(&profile_root) {

@@ -194,6 +194,14 @@ fn main() {
     );
     assert!(_library_loader.load());
 
+    // 1a. Negotiate the API version with the framework. CEF's
+    //     wrapper structs carry an inline size header that the
+    //     framework cross-checks against; without an `api_hash` call
+    //     after `LibraryLoader::load` the first internal call into
+    //     a wrapped App / Client / handler fails with `CefApp_0_CToCpp
+    //     called with invalid version -1`.
+    let _ = cef::api_hash(cef::sys::CEF_API_VERSION_LAST as i32, 0);
+
     // 2. Helper-process branch. Returns -1 in the browser process;
     //    helpers run their subprocess work and exit here. Helpers
     //    must NOT continue on to tauri::Builder.
@@ -255,6 +263,20 @@ Tauri main window's drawer-host region. Per platform:
   paints into it via the platform compositor; passkey UI, IME
   preedit, drag-drop, and DRM video all use the platform input
   client / GPU surface they need.
+
+  Implementation notes. The host view is owned by a process-global
+  `OnceLock` in `crate::cef::embed::host_view`, installed once from
+  inside the Tauri setup hook (the only safe AppKit-mutation point
+  before the run loop spins). A `cef::App` handler reads the host
+  view via `current_handle()` from
+  `BrowserProcessHandler::on_context_initialized` and calls
+  `browser_host_create_browser`. Subsequent rect updates from
+  `CefHost::set_window_rect` are dispatched to the main thread via
+  `dispatch_async_f` against `_dispatch_main_q` (libdispatch's
+  `dispatch_get_main_queue()` macro is not a real symbol, so we
+  bind to the queue object directly). The y-axis is flipped from
+  HTML's top-origin to AppKit's bottom-origin using the parent
+  view's current bounds height, read on the main thread.
 - **Windows.** Equivalent path with `HWND` child via `SetParent`.
   `cef_window_info_t::parent_window` carries the parent handle.
 - **Linux X11.** XEmbed protocol via `GtkSocket`. Cross-process
