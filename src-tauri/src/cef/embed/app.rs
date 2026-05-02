@@ -28,8 +28,8 @@ use std::cell::RefCell;
 use cef::rc::Rc;
 use cef::{
     browser_host_create_browser, currently_on, wrap_app, wrap_browser_process_handler, wrap_client,
-    App, BrowserProcessHandler, BrowserSettings, CefString, Client, ImplApp,
-    ImplBrowserProcessHandler, ImplClient, Rect, ThreadId, WindowInfo, WrapApp,
+    App, BrowserProcessHandler, BrowserSettings, CefString, Client, CommandLine, ImplApp,
+    ImplBrowserProcessHandler, ImplClient, ImplCommandLine, Rect, ThreadId, WindowInfo, WrapApp,
     WrapBrowserProcessHandler, WrapClient,
 };
 
@@ -103,6 +103,45 @@ wrap_app! {
     }
 
     impl App {
+        fn on_before_command_line_processing(
+            &self,
+            process_type: Option<&CefString>,
+            command_line: Option<&mut CommandLine>,
+        ) {
+            // CEF's `cef_settings_t::remote_debugging_port` field is
+            // documented to require a value between 1024 and 65535;
+            // anything else (including the default 0) disables the
+            // DevTools server outright. The brain's CDP path is the
+            // user-facing consumer of `DevToolsActivePort`, so the
+            // server has to be on. Inject the Chromium command-line
+            // switch instead — Chromium accepts
+            // `--remote-debugging-port=0` as "pick an ephemeral port
+            // and write it to <user-data-dir>/DevToolsActivePort,"
+            // which is exactly the v1 contract `wait_for_port_file`
+            // already parses.
+            //
+            // CEF calls this for every process; only the browser
+            // process hosts DevTools. The browser process surfaces
+            // `process_type` as None or empty.
+            let is_browser_process = match process_type {
+                None => true,
+                Some(s) => s.to_string().is_empty(),
+            };
+            if !is_browser_process {
+                return;
+            }
+            let Some(cl) = command_line else {
+                return;
+            };
+            // If a switch is already present (set by tests, by an
+            // operator running with `--remote-debugging-port=…`, or
+            // by a future diagnostics path), respect it.
+            let switch = CefString::from("remote-debugging-port");
+            if cl.has_switch(Some(&switch)) == 0 {
+                cl.append_switch_with_value(Some(&switch), Some(&CefString::from("0")));
+            }
+        }
+
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
             // CEF calls this once during initialisation and caches
             // the result. Build the handler lazily so the App can be

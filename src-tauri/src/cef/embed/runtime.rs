@@ -228,9 +228,15 @@ pub fn initialize_cef_engine(profile_root: &Path) -> Result<(), InitializeError>
     profile.clear_stale_port_file()?;
 
     let profile_dir_str = profile.dir().to_string_lossy().into_owned();
+    // DevTools server is enabled via the
+    // `--remote-debugging-port=0` switch injected from
+    // `ThalynApp::on_before_command_line_processing`. The
+    // `cef_settings_t::remote_debugging_port` field requires
+    // 1024-65535 and disables the server otherwise — useless for
+    // ephemeral-port mode, which is the contract the brain's CDP
+    // path expects.
     let settings = cef::Settings {
         no_sandbox: 1,
-        remote_debugging_port: 0,
         cache_path: cef::CefString::from(profile_dir_str.as_str()),
         root_cache_path: cef::CefString::from(profile_dir_str.as_str()),
         ..Default::default()

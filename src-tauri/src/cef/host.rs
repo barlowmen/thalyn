@@ -281,10 +281,16 @@ impl CefHost {
         *self.inner.write().await = Some(session);
 
         let state = HostState::Running {
-            ws_url,
-            profile_dir,
+            ws_url: ws_url.clone(),
+            profile_dir: profile_dir.clone(),
             sdk_version: super::pinned_cef_version().to_owned(),
         };
+        tracing::info!(
+            target = "thalyn::cef",
+            %ws_url,
+            %profile_dir,
+            "CefHost attached to in-process engine"
+        );
         let _ = self.state_tx.send(state.clone());
         Ok(state)
     }
