@@ -38,6 +38,13 @@ dev = [
     "ruff>=0.7",
     "mypy>=1.13",
 ]
+# Tooling for producing a standalone brain executable that ships
+# inside the desktop bundle. Held in its own group so contributors
+# only pay the install cost when packaging — `uv sync` (default) and
+# the `dev` group both stay lean.
+bundle = [
+    "pyinstaller>=6.11,<7",
+]
 
 [tool.ruff]
 line-length = 100
