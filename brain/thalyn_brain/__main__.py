@@ -31,6 +31,7 @@ from thalyn_brain.orchestration.storage import (
     apply_pending_migrations,
     default_data_dir,
 )
+from thalyn_brain.parent_watchdog import watch_parent
 from thalyn_brain.projects import ProjectsStore
 from thalyn_brain.provider import AnthropicProvider, build_registry
 from thalyn_brain.provider.auth import AuthBackend
@@ -204,9 +205,15 @@ def main() -> int:
         # exited before opening the stdio surface to new traffic.
         await resume_unfinished_runs(runs_store, runner)
         scheduler.start()
+        # Background watchdog: bail out if the parent Rust process
+        # disappears. Defense-in-depth on top of stdin EOF — covers
+        # the case where the brain is busy in a non-readline path
+        # when the desktop app force-quits.
+        watchdog_task = asyncio.create_task(watch_parent())
         try:
             await serve_stdio(dispatcher)
         finally:
+            watchdog_task.cancel()
             await scheduler.stop()
             await lsp_manager.shutdown()
             await mcp_manager.shutdown()
