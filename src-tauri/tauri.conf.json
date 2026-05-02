@@ -7,7 +7,7 @@
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm build",
-    "beforeBundleCommand": "scripts/stage-cef-helpers.sh",
+    "beforeBundleCommand": "scripts/before-bundle.sh",
     "frontendDist": "../dist"
   },
   "app": {
@@ -41,7 +41,8 @@
         "Frameworks/Thalyn Helper (GPU).app": "target/cef-helpers/Thalyn Helper (GPU).app",
         "Frameworks/Thalyn Helper (Renderer).app": "target/cef-helpers/Thalyn Helper (Renderer).app",
         "Frameworks/Thalyn Helper (Plugin).app": "target/cef-helpers/Thalyn Helper (Plugin).app",
-        "Frameworks/Thalyn Helper (Alerts).app": "target/cef-helpers/Thalyn Helper (Alerts).app"
+        "Frameworks/Thalyn Helper (Alerts).app": "target/cef-helpers/Thalyn Helper (Alerts).app",
+        "Resources/thalyn-brain": "target/brain-sidecar/thalyn-brain"
       }
     }
   }

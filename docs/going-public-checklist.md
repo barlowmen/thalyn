@@ -62,6 +62,13 @@ Each item links to the requirement / ADR it overrides or extends.
   the engine swap is documented at ~130 MB compressed / ~250 MB on
   disk per platform. Re-measure at release-cut and compare against
   the documented budget; surface if it has drifted.
+- [ ] **Brain-sidecar bundle-size review at release.** PyInstaller's
+  one-folder bundle of the brain comes in at ~260 MB on disk on
+  macOS arm64 — about 2.5× ADR-0018's ~100 MB estimate, driven by
+  the langgraph + claude-agent-sdk + opentelemetry stack. Re-measure
+  at release-cut; the obvious mitigations are
+  `--collect-submodules`'d binaries we don't actually use at
+  runtime and dropping unused submodules of the heavy deps.
 - [ ] **CEF profile encryption-at-rest.** v1 stores the per-Thalyn
   Chromium profile (cookies, login state, form history) as
   plaintext under the app data dir. Public-release bar is

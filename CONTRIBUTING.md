@@ -30,6 +30,21 @@ pnpm tauri dev
 If `pnpm tauri dev` brings up a window and `Ping brain` returns a pong,
 you're set up.
 
+### Brain sidecar packaging
+
+`pnpm tauri dev` runs the brain via `uv run python -m thalyn_brain`
+from the in-tree `brain/` directory — no packaging step. `pnpm tauri
+build` runs an extra `beforeBundleCommand` step that PyInstallers
+the brain into a one-folder bundle at
+`<target>/brain-sidecar/thalyn-brain/` (per ADR-0018) and copies it
+into `<App>.app/Contents/Resources/thalyn-brain/`. The bundle takes
+~30s on a warm cache; set `THALYN_SKIP_BRAIN_BUNDLE=1` to reuse the
+existing staged bundle if you're iterating on Rust-only changes.
+
+PyInstaller installs from the brain's `bundle` dependency group
+(`uv sync --group bundle --frozen`); contributors who only run the
+dev path don't pay the install cost.
+
 ### CEF (bundled Chromium)
 
 The bundled-Chromium engine (ADR-0019, ADR-0029) is on by default.

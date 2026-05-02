@@ -1,6 +1,6 @@
 # ADR-0018 — Python sidecar packaging: PyInstaller (uv-managed venv during early phases)
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-04-26
 - **Supersedes:** ADR-0006
 
@@ -45,3 +45,13 @@ During development and early phases we **continue to use a `uv`-managed venv** (
 A PyInstaller spike is the first technical task of the packaging phase. If the spike fails on macOS / Linux / Windows for any reason that isn't a fixable spec-file issue, the fallback is Briefcase + uv-managed venv shipped alongside the app — same fallback ADR-0006 documented, just bumped one slot up the preference list.
 
 The parent-process watchdog (brain exits when its parent Rust process disappears) lands in the same packaging phase regardless of whether we end up on PyInstaller or Briefcase, because it's the right behavior either way.
+
+### Notes from the macOS spike
+
+The PyInstaller path landed on macOS via `brain/thalyn-brain.spec`, `scripts/build-brain-sidecar.sh`, and a `bundle` dependency group on the brain (so PyInstaller only installs when packaging — `dev` and the default `uv sync` stay lean).
+
+Three things worth carrying forward when the Linux + Windows paths follow:
+
+- **Heavy deps need `collect_all`, not enumerated `hiddenimports`.** `claude-agent-sdk`, `langgraph`, `opentelemetry`, `sentry-sdk`, `yoyo`, `websockets`, `croniter`, and `httpx` all use dynamic imports / runtime discovery that the static analyzer misses. `PyInstaller.utils.hooks.collect_all` walks each package for hidden imports, data files, and bundled native binaries — far more reliable than maintaining a list by hand.
+- **Yoyo migrations must ship as filesystem data.** The migration loader resolves `Path(__file__).parent.parent / "migrations"` and exec's `.sql` and `.py` files from disk. PyInstaller defaults to compiling `.py` into the archive, so the spec explicitly stages every file in `thalyn_brain/migrations/` as a data entry under `thalyn_brain/migrations/`.
+- **One-folder bundle is ~260 MB on disk** with the current dep tree — about 2.5× the ~100 MB this ADR's "Consequences" section estimated. The langgraph + claude-agent-sdk + opentelemetry stack is heavier than the original guess assumed; logged on the going-public checklist for a release-cut review of bundle size.

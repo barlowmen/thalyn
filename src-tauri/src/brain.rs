@@ -18,7 +18,7 @@
 //! forward server-pushed events without holding open a streaming call.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -118,9 +118,7 @@ impl SpawnConfig {
     /// thalyn_brain` rather than the console-script entry point because
     /// the latter is wrapped in a thin .pth-dependent shim that Python
     /// 3.13 quietly ignores when uv installs in editable mode (see
-    /// brain/README.md). Production configurations will replace this
-    /// shape with a packaged binary discovered via Tauri's resource
-    /// paths.
+    /// brain/README.md).
     pub fn dev_default() -> Self {
         let working_dir = std::env::current_dir()
             .ok()
@@ -137,6 +135,39 @@ impl SpawnConfig {
             working_dir,
             env: HashMap::new(),
         }
+    }
+
+    /// Production configuration: a PyInstaller'd one-folder bundle
+    /// staged at `<resource_dir>/thalyn-brain/thalyn-brain` per
+    /// ADR-0018. Returns `None` when the binary isn't present, which
+    /// is the normal case for `pnpm tauri dev` runs (no
+    /// `beforeBundleCommand` ran, no resources copied) — callers
+    /// fall back to [`Self::dev_default`].
+    pub fn bundled(resource_dir: &Path) -> Option<Self> {
+        let exe_name = if cfg!(windows) {
+            "thalyn-brain.exe"
+        } else {
+            "thalyn-brain"
+        };
+        let exe = resource_dir.join("thalyn-brain").join(exe_name);
+        if !exe.is_file() {
+            return None;
+        }
+        Some(Self {
+            program: exe.to_string_lossy().into_owned(),
+            args: Vec::new(),
+            working_dir: None,
+            env: HashMap::new(),
+        })
+    }
+
+    /// Pick the right spawn shape for the current runtime: bundled
+    /// binary if a resource dir is provided and the binary exists
+    /// there, otherwise the in-tree `uv run` development default.
+    pub fn for_runtime(resource_dir: Option<&Path>) -> Self {
+        resource_dir
+            .and_then(Self::bundled)
+            .unwrap_or_else(Self::dev_default)
     }
 
     /// Override an environment variable for the spawn.

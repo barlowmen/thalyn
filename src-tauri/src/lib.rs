@@ -1591,7 +1591,14 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
     let secrets = Arc::new(SecretsManager::with_default_store());
     let registry = ProviderRegistry::new(builtin_providers(secrets.has_api_key("anthropic")));
 
-    let mut config = SpawnConfig::dev_default();
+    // In a packaged build the brain is a PyInstaller'd one-folder
+    // bundle copied into `<App>.app/Contents/Resources/thalyn-brain/`
+    // by Tauri's bundler; in `pnpm tauri dev` the resource dir holds
+    // no such binary and we fall back to running the in-tree brain
+    // via `uv run python -m thalyn_brain`. ADR-0018 picks PyInstaller
+    // as the packaging path; the dev shape is unchanged from v1.
+    let resource_dir = app.path().resource_dir().ok();
+    let mut config = SpawnConfig::for_runtime(resource_dir.as_deref());
     // Forward the canonical data directory so the brain and the Rust
     // core agree on where state lives. Per ADR-0028, the brain owns
     // every SQLite store; this env var is the single knob both
