@@ -74,6 +74,18 @@ Each item links to the requirement / ADR it overrides or extends.
   plaintext under the app data dir. Public-release bar is
   encryption-at-rest parity with the user's main browser; OS-keychain-
   wrapped DEK is the likely shape.
+- [ ] **Windows native-view parenting (real impl).** macOS ships
+  the parented `NSView` path; Windows currently compiles as a
+  cfg-gated stub (no `SetParent` call, null `HWND`). Real wiring
+  reads the Tauri main window's `HWND` via
+  `WebviewWindow::hwnd()`, passes it as
+  `cef_window_info_t::parent_window`, and tracks the drawer-host
+  rect via `SetWindowPos`. Verification needs a Windows box.
+- [ ] **Linux X11 native-view parenting (real impl).** Same shape
+  as Windows: cfg-gated stub today (zero `Window` handle). Real
+  wiring is GtkSocket/XEmbed under the Tauri main window's GTK
+  widget; ADR-0029 §5 describes it. Verification needs a Linux
+  desktop environment, not just the CI Linux build.
 
 ### Eternal-thread durability
 - [ ] **30-min duration-based soak gate.** The per-push CI gate runs the randomized-kill soak count-bounded (default 200 iterations, ~30s); a public release needs the same harness scheduled nightly with `THALYN_SOAK_DURATION_SECS=1800` so the 30-minute exposure window the v2 build plan calls for is exercised continuously. (ADR-0022's "Alternatives considered" section captures the trade-off.)
