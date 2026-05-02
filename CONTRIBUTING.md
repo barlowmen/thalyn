@@ -12,10 +12,16 @@ Install:
 - Node.js ≥ 22 with pnpm ≥ 10 (`corepack enable pnpm`).
 - uv for the Python sidecar.
 - Tauri's [platform prerequisites](https://v2.tauri.app/start/prerequisites/).
+- **cmake** and **ninja** (for the bundled CEF build).
 
 Then:
 
 ```sh
+# Where cef-dll-sys caches the downloaded CEF SDK across builds.
+# `~/.cache/thalyn-cef` is the conventional location; pick anywhere
+# writable. First `cargo build` populates it (~130 MB compressed).
+export CEF_PATH="$HOME/.cache/thalyn-cef"
+
 pnpm install
 ( cd brain && uv sync )
 pnpm tauri dev
@@ -24,26 +30,24 @@ pnpm tauri dev
 If `pnpm tauri dev` brings up a window and `Ping brain` returns a pong,
 you're set up.
 
-### CEF feature (optional during the engine swap)
+### CEF (bundled Chromium)
 
-The bundled-Chromium engine (ADR-0019) lives behind the optional `cef`
-Cargo feature so trunk builds stay light during the implementation
-phase. Enable it locally only when you're working on browser-engine
-code:
+The bundled-Chromium engine (ADR-0019, ADR-0029) is on by default.
+The first `cargo build` downloads the pinned CEF SDK to `$CEF_PATH`
+and runs cmake/ninja against `libcef_dll_wrapper`; subsequent builds
+hit the cache. The pinned version lives in
+[`src-tauri/cef-version.txt`](src-tauri/cef-version.txt) and CI keeps a
+matching cache keyed on the same file.
+
+If you specifically need a CEF-free build (e.g., bisecting a non-CEF
+regression), pass `--no-default-features` to cargo:
 
 ```sh
-# One-time tools (in addition to the Tauri prerequisites above):
-#   - cmake
-#   - ninja
-# The cef-dll-sys build script downloads the pinned CEF SDK
-# (~130 MB compressed) under $CEF_PATH on first build and caches it.
-export CEF_PATH="$HOME/.cache/thalyn-cef"
-cargo check --manifest-path src-tauri/Cargo.toml --features cef
+cargo check --manifest-path src-tauri/Cargo.toml --no-default-features
 ```
 
-The pinned CEF version lives in [`src-tauri/cef-version.txt`](src-tauri/cef-version.txt);
-the CI `cef build (linux)` job runs the same command with the SDK
-cached across runs.
+The renderer's browser drawer falls back to an "engine not available"
+state in that build.
 
 ## Where things live
 

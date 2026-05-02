@@ -42,13 +42,14 @@ required-features = ["cef"]
 tauri-build = { version = "2", features = [] }
 
 [features]
-default = []
+default = ["cef"]
 # Pulls in `cef` and links against a downloaded CEF binary distribution.
-# Off by default during the engine-swap implementation phase so trunk
-# builds don't depend on a CEF SDK or the cmake/ninja toolchain. The
-# pinned CEF version lives in `cef-version.txt`. Local opt-in:
-# `cargo build --features cef` after sourcing the env vars from the
-# README under "CEF feature" — CI's `cef` job runs this end-to-end.
+# Default-on as of v0.30: the in-process engine ships in trunk and the
+# default `cargo` invocation pulls in cef-rs. Toolchain prerequisites
+# (cmake, ninja, the CEF SDK at `$CEF_PATH`) are documented in
+# `CONTRIBUTING.md`. The pinned CEF version lives in `cef-version.txt`.
+# Pass `--no-default-features` for a lean, CEF-free build (the
+# user-facing browser surface will not be available).
 cef = [
     "dep:cef",
     "dep:objc2",

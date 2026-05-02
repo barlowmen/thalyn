@@ -131,9 +131,18 @@ jobs:
   rust:
     name: rust
     runs-on: ubuntu-latest
+    env:
+      CEF_PATH: /home/runner/.cache/thalyn-cef
     steps:
       - uses: actions/checkout@v5
-      - name: Install Tauri system deps
+      - name: Read pinned CEF version
+        id: cef
+        run: echo "version=$(cat src-tauri/cef-version.txt)" >> "$GITHUB_OUTPUT"
+      - name: Install Tauri + CEF system deps
+        # `cef` is default-on as of v0.30, so even the lint/test path
+        # links against the bundled CEF SDK and uses cmake/ninja to
+        # build `libcef_dll_wrapper`. Mirrors the CONTRIBUTING.md
+        # one-time setup developers run locally.
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -143,6 +152,8 @@ jobs:
             librsvg2-dev \
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev \
+            cmake \
+            ninja-build \
             build-essential \
             curl \
             wget \
@@ -154,6 +165,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          key: cef-${{ steps.cef.outputs.version }}
+      - name: Cache CEF binary distribution
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/thalyn-cef
+          key: cef-binaries-linux-${{ steps.cef.outputs.version }}
       - name: cargo fmt
         working-directory: src-tauri
         run: cargo fmt --check
@@ -163,6 +180,9 @@ jobs:
       - name: cargo test (lib only — sidecar round-trip is gated by uv)
         working-directory: src-tauri
         run: cargo test --lib -- --skip pings_real_sidecar
+      - name: cargo check --no-default-features (lean build is supported)
+        working-directory: src-tauri
+        run: cargo check --no-default-features
 
   python:
     name: brain
@@ -182,52 +202,3 @@ jobs:
       - run: uv run mypy
       - run: uv run pytest
 
-  cef-build:
-    # Builds the Rust core with `--features cef` against the pinned CEF
-    # binary distribution. Linux X11/XWayland is the v1 platform per
-    # ADR-0019; cross-platform CEF CI lands as the engine-swap work
-    # progresses. The CEF SDK download (~130 MB compressed) is cached
-    # under `~/.cache/thalyn-cef` and keyed on
-    # `src-tauri/cef-version.txt` so most runs are cache-hits and
-    # never hit the upstream CDN. `cargo check` does not run the
-    # binary, so `LD_LIBRARY_PATH` is unnecessary — that lands when
-    # tests actually exercise CEF.
-    name: cef build (linux)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - name: Read pinned CEF version
-        id: cef
-        run: echo "version=$(cat src-tauri/cef-version.txt)" >> "$GITHUB_OUTPUT"
-      - name: Install Tauri + CEF system deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev \
-            cmake \
-            ninja-build \
-            build-essential \
-            curl \
-            wget \
-            file \
-            patchelf
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          key: cef-${{ steps.cef.outputs.version }}
-      - name: Cache CEF binary distribution
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/thalyn-cef
-          key: cef-binaries-linux-${{ steps.cef.outputs.version }}
-      - name: cargo check (cef feature)
-        working-directory: src-tauri
-        env:
-          CEF_PATH: /home/runner/.cache/thalyn-cef
-        run: cargo check --features cef
