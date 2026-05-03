@@ -95,7 +95,7 @@ Concrete shape:
   this project", "make this project local-only") and dispatches to the
   routing-actions module that wraps `RoutingOverridesStore` and
   `ProjectsStore`. The parser is regex-based today; the LLM tool-use
-  path lands when the action registry (v0.32) materializes.
+  path lands when the action registry (v0.34) materializes.
 
 The IPC surface — `routing.get`, `routing.set`, `routing.clear` — is
 the programmatic edit path. The conversational path is sugar on top of
@@ -115,7 +115,7 @@ the same actions; both write through `RoutingOverridesStore`.
     provider for `local_only`, and the spawn path asserts the
     invariant even if it did. The "secrets adapter refusal" framing
     in F3.8 is upheld.
-  - **Recursive case stays simple.** When sub-leads land in v0.34,
+  - **Recursive case stays simple.** When sub-leads land in v0.36,
     they spawn workers through the same routing layer — there is no
     sub-lead-specific code path.
 - **Negative.**

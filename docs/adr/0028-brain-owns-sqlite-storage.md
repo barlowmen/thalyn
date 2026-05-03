@@ -119,7 +119,7 @@ Concrete shape:
 
 - **Rust core takes ownership of `app.db` per `02-architecture.md` §5's
   literal claim.** Rejected. No stage in `` from
-  v0.20 through v0.36 functionally requires Rust-side SQL access.
+  v0.20 through v0.37 functionally requires Rust-side SQL access.
   Adopting this would force a large infrastructure expansion — adding
   `sqlx` or `rusqlite`, a migration runner crate, and porting the
   read/write paths for v2 tables to Rust — for a benefit no planned
