@@ -1,7 +1,6 @@
 """JSON-RPC bindings for the project lifecycle surface.
 
-Five methods replace the v0.20 ``NOT_IMPLEMENTED`` stubs (the
-``project.classify`` stub is kept until the classifier work lands):
+Six methods replace the v0.20 ``NOT_IMPLEMENTED`` stubs:
 
 - ``project.create``  — create a new active project.
 - ``project.list``    — enumerate projects (filterable by status).
@@ -9,6 +8,9 @@ Five methods replace the v0.20 ``NOT_IMPLEMENTED`` stubs (the
 - ``project.archive`` — retire a project. Archives the active lead
   too so the project's pointer doesn't dangle.
 - ``project.pause`` / ``project.resume`` — flip the lifecycle state.
+- ``project.classify`` — ask the wired classifier which active
+  project a message belongs to. Used by tests and by future
+  affordances that surface "this seems to be about X" prompts.
 
 The handlers thin-wrap ``ProjectsStore`` plus ``LeadLifecycle`` for
 the lead-archival cascade. The state machine itself owns the
@@ -24,6 +26,7 @@ from thalyn_brain.lead_lifecycle import (
     LeadLifecycle,
     LeadLifecycleError,
 )
+from thalyn_brain.project_classifier import Classifier, classify_for_routing
 from thalyn_brain.projects import Project, ProjectsStore
 from thalyn_brain.rpc import (
     INVALID_PARAMS,
@@ -39,6 +42,7 @@ def register_project_methods(
     *,
     projects: ProjectsStore,
     lead_lifecycle: LeadLifecycle | None = None,
+    classifier: Classifier | None = None,
 ) -> None:
     """Wire the ``project.*`` methods onto ``dispatcher``.
 
@@ -46,6 +50,10 @@ def register_project_methods(
     project surface without a full agent registry. When wired,
     ``project.archive`` cascades into the lead's archive transition
     so the project's pointer doesn't dangle at a still-active lead.
+
+    ``classifier`` is optional for the same reason — when omitted
+    ``project.classify`` returns the foreground project unchanged
+    (the no-classifier sticky-foreground default per F3.5).
     """
 
     async def project_create(params: RpcParams) -> JsonValue:
@@ -144,12 +152,39 @@ def register_project_methods(
         assert refreshed is not None
         return {"project": refreshed.to_wire()}
 
+    async def project_classify(params: RpcParams) -> JsonValue:
+        message = _require_str(params, "message")
+        foreground_project_id = _optional_str(params, "foregroundProjectId")
+        active = await projects.list_all(status="active")
+        # The full verdict (when the classifier is wired) is useful
+        # for "this seems to be about X" surfaces. The resolved
+        # routing target collapses the threshold check into a single
+        # ``projectId`` the renderer can act on without re-running
+        # the policy in the frontend.
+        if classifier is None:
+            verdict_wire: dict[str, Any] | None = None
+        else:
+            verdict = await classifier.classify(
+                message,
+                active,
+                foreground_project_id=foreground_project_id,
+            )
+            verdict_wire = verdict.to_wire()
+        resolved = await classify_for_routing(
+            classifier,
+            message,
+            active,
+            foreground_project_id=foreground_project_id,
+        )
+        return {"projectId": resolved, "verdict": verdict_wire}
+
     dispatcher.register("project.create", project_create)
     dispatcher.register("project.list", project_list)
     dispatcher.register("project.update", project_update)
     dispatcher.register("project.pause", project_pause)
     dispatcher.register("project.resume", project_resume)
     dispatcher.register("project.archive", project_archive)
+    dispatcher.register("project.classify", project_classify)
 
 
 def _require_str(params: RpcParams, key: str) -> str:

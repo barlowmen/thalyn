@@ -32,6 +32,7 @@ from thalyn_brain.orchestration.storage import (
     default_data_dir,
 )
 from thalyn_brain.parent_watchdog import watch_parent
+from thalyn_brain.project_classifier import LlmJudgeClassifier
 from thalyn_brain.project_rpc import register_project_methods
 from thalyn_brain.projects import ProjectsStore
 from thalyn_brain.provider import AnthropicProvider, build_registry
@@ -128,6 +129,13 @@ def main() -> int:
         projects_store=projects_store,
         valid_provider_ids={meta.id for meta in registry.list_meta()},
     )
+    # F3.5 default classifier: the brain's provider judges which
+    # active project an untagged turn belongs to. The classifier is
+    # advisory — ``classify_for_routing`` keeps the foreground bias
+    # sticky unless the verdict clears the confidence threshold. v1.x
+    # will register user-supplied declarative classifiers without
+    # touching this wiring.
+    project_classifier = LlmJudgeClassifier(registry.get("anthropic"))
     register_thread_send_methods(
         dispatcher,
         threads_store=threads_store,
@@ -136,6 +144,7 @@ def main() -> int:
         routing_actions=routing_actions,
         memory_store=memory_store,
         projects_store=projects_store,
+        classifier=project_classifier,
     )
 
     # Auth-backend surface (ADR-0020). Real handlers replace the v2
@@ -166,6 +175,7 @@ def main() -> int:
         dispatcher,
         projects=projects_store,
         lead_lifecycle=lead_lifecycle,
+        classifier=project_classifier,
     )
     # Worker-routing surface (ADR-0023). Real handlers replace the v2
     # ``routing.*`` stubs; backed by ``RoutingOverridesStore`` plus the

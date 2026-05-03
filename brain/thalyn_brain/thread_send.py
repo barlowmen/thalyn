@@ -47,6 +47,10 @@ from thalyn_brain.lead_delegation import (
     sanity_check_lead_reply,
 )
 from thalyn_brain.memory import MemoryStore
+from thalyn_brain.project_classifier import (
+    Classifier,
+    classify_for_routing,
+)
 from thalyn_brain.project_context import ProjectContext, load_project_context
 from thalyn_brain.projects import ProjectsStore
 from thalyn_brain.provider import (
@@ -91,6 +95,7 @@ def register_thread_send_methods(
     routing_actions: RoutingActionsDispatcher | None = None,
     memory_store: MemoryStore | None = None,
     projects_store: ProjectsStore | None = None,
+    classifier: Classifier | None = None,
 ) -> None:
     """Register ``thread.send`` and the recovery helpers.
 
@@ -125,6 +130,12 @@ def register_thread_send_methods(
     lead's system prompt at the moment of the hop. Optional for the
     same reason — narrow tests that don't drive a delegation flow
     keep their existing wiring.
+
+    ``classifier`` (per F3.5) populates ``THREAD_TURN.project_id``
+    when the renderer didn't supply a foreground project and the
+    user didn't address a specific lead. Optional so single-project
+    tests can keep the simpler shape; when omitted the foreground
+    bias is the only signal and untagged turns stay untagged.
     """
 
     async def thread_send(params: RpcParams, notify: Notifier) -> JsonValue:
@@ -137,6 +148,7 @@ def register_thread_send_methods(
             routing_actions,
             memory_store,
             projects_store,
+            classifier,
         )
 
     async def thread_recovery_status(params: RpcParams) -> JsonValue:
@@ -163,12 +175,16 @@ async def _handle_thread_send(
     routing_actions: RoutingActionsDispatcher | None = None,
     memory_store: MemoryStore | None = None,
     projects_store: ProjectsStore | None = None,
+    classifier: Classifier | None = None,
 ) -> JsonValue:
     thread_id = _require_str(params, "threadId")
     provider_id = _require_str(params, "providerId")
     prompt = _require_str(params, "prompt")
     project_id_value = params.get("projectId")
-    project_id: str | None = project_id_value if isinstance(project_id_value, str) else None
+    foreground_project_id: str | None = (
+        project_id_value if isinstance(project_id_value, str) and project_id_value else None
+    )
+    project_id: str | None = foreground_project_id
     base_system_prompt_value = params.get("systemPrompt")
     # Default to Thalyn's identity prompt when the caller doesn't supply
     # one. Per F1.2 the brain has a stable identity across every turn;
@@ -202,7 +218,28 @@ async def _handle_thread_send(
     await maybe_run_idle_digest(provider, store, thread_id=thread_id)
     await maybe_compress_old_digests(provider, store, thread_id=thread_id)
 
-    # 4. Persist the user turn FIRST, status='in_progress' (ADR-0022 §1).
+    # 4. Resolve the project the turn belongs to before persistence so
+    # ``THREAD_TURN.project_id`` reflects the routing verdict. Routing
+    # precedence (per F1.5 / F3.7):
+    #   1. Explicit ``Lead-X, …`` address wins over both classifier and
+    #      foreground — the user named the lead deliberately.
+    #   2. Classifier verdict at ``threshold`` confidence overrides the
+    #      foreground bias for messages that clearly reference another
+    #      project.
+    #   3. Foreground attention from the renderer is the sticky default.
+    addressed = await _maybe_address_lead(prompt, agent_records)
+    if addressed is not None:
+        project_id = addressed.lead.project_id or project_id
+    elif classifier is not None and projects_store is not None:
+        active_projects = await projects_store.list_all(status="active")
+        project_id = await classify_for_routing(
+            classifier,
+            prompt,
+            active_projects,
+            foreground_project_id=foreground_project_id,
+        )
+
+    # 5. Persist the user turn, status='in_progress' (ADR-0022 §1).
     now_ms = int(time.time() * 1000)
     user_turn = ThreadTurn(
         turn_id=new_turn_id(),
@@ -219,14 +256,18 @@ async def _handle_thread_send(
     )
     await store.begin_user_turn(user_turn)
     await store.touch_thread(thread_id, now_ms)
+    if project_id is not None and projects_store is not None:
+        # Stamp last-active so the switcher's recency sort sees this
+        # project at the top after a routed turn lands.
+        await projects_store.touch_active_at(project_id, now_ms)
 
-    # 5. Pre-compute the brain reply turn's id so streamed chunks can
+    # 6. Pre-compute the brain reply turn's id so streamed chunks can
     # reference it. The id flows back to the renderer in the response;
     # if the run errors mid-stream the renderer can still correlate
     # the partial chunks with a turn-shaped row that never lands.
     brain_turn_id = new_turn_id()
 
-    # 6. Assemble the per-turn context bundle (rolling digest + recent
+    # 7. Assemble the per-turn context bundle (rolling digest + recent
     # turns + conditional episodic recall + personal-memory recall)
     # per §9.4 / F6.4 / F6.5.
     assembled = await assemble_context(
@@ -237,7 +278,7 @@ async def _handle_thread_send(
         memory_store=memory_store,
     )
 
-    # 6a. Routing-edit intent (per ADR-0023). Recognise "route X to Y
+    # 7a. Routing-edit intent (per ADR-0023). Recognise "route X to Y
     # in this project" before delegating; on a hit the action lands
     # against the per-project routing table and the brain's reply is
     # the dispatcher's confirmation. Misses fall through.
@@ -257,9 +298,9 @@ async def _handle_thread_send(
                 assembled=assembled,
             )
 
-    # 6b. Classify-and-route: if the user is addressing an active
-    # lead, run the delegation flow instead of a direct brain reply.
-    addressed = await _maybe_address_lead(prompt, agent_records)
+    # 7b. Run the delegation flow when the user addressed an active
+    # lead (resolved up at step 4 so the user-turn's project_id is
+    # already aligned).
     if addressed is not None:
         project_context = await _load_lead_project_context(
             addressed.lead.project_id,
@@ -278,7 +319,7 @@ async def _handle_thread_send(
             project_context=project_context,
         )
 
-    # 7. Stream the brain's reply chunk-by-chunk. Buffer text deltas
+    # 8. Stream the brain's reply chunk-by-chunk. Buffer text deltas
     # so the brain reply turn's body matches what the user saw.
     text_parts: list[str] = []
     error_message: str | None = None
@@ -322,13 +363,13 @@ async def _handle_thread_send(
         )
         raise RpcError(code=INTERNAL_ERROR, message=str(exc)) from exc
 
-    # 8. If the provider surfaced an error chunk, leave the user turn
+    # 9. If the provider surfaced an error chunk, leave the user turn
     # in_progress so recovery can replay. Surface the error to the
     # caller as INTERNAL_ERROR rather than swallowing it.
     if error_message is not None:
         raise RpcError(code=INTERNAL_ERROR, message=error_message)
 
-    # 9. Persist the brain reply turn at the completed boundary,
+    # 10. Persist the brain reply turn at the completed boundary,
     # atomically with flipping the user turn to completed (ADR-0022 §1).
     final_response = "".join(text_parts)
     brain_turn = ThreadTurn(
