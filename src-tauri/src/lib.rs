@@ -1629,6 +1629,7 @@ async fn approve_plan(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn send_chat(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1637,6 +1638,7 @@ async fn send_chat(
     prompt: String,
     system_prompt: Option<String>,
     lead_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<ChatSummary, String> {
     if !state.secrets.has_api_key(&provider_id) {
         return Err(format!("provider {provider_id} has no API key configured",));
@@ -1655,6 +1657,9 @@ async fn send_chat(
     }
     if let Some(id) = lead_id {
         params["leadId"] = Value::String(id);
+    }
+    if let Some(pid) = project_id {
+        params["projectId"] = Value::String(pid);
     }
 
     let result = state

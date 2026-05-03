@@ -45,6 +45,12 @@ export type SendChatParams = {
   prompt: string;
   systemPrompt?: string;
   leadId?: string;
+  /** Foreground project the run should be scoped to. The brain
+   *  records ``project_id`` on the run header and (when the lead's
+   *  project differs) the delegation hop. Optional so legacy
+   *  Storybook fixtures and tests that don't care about projects
+   *  keep working unchanged. */
+  projectId?: string;
 };
 
 export function sendChat(params: SendChatParams): Promise<ChatSummary> {

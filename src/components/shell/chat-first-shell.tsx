@@ -25,6 +25,10 @@ import {
   TransientProgressStrip,
 } from "@/components/shell/transient-progress-strip";
 import {
+  readActiveProject,
+  subscribeActiveProject,
+} from "@/lib/active-project";
+import {
   readActiveProvider,
   subscribeActiveProvider,
 } from "@/lib/active-provider";
@@ -65,6 +69,9 @@ export function ChatFirstShell() {
 
 function ShellInner() {
   const [providerId, setProviderId] = useState<string>(() => readActiveProvider());
+  const [activeProjectId, setActiveProjectId] = useState<string>(() =>
+    readActiveProject(),
+  );
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [pendingSwap, setPendingSwap] = useState<{
     from: ProviderMeta;
@@ -76,13 +83,14 @@ function ShellInner() {
    *  for the inline card). */
   const [editingApproval, setEditingApproval] = useState(false);
 
-  const { messages, status, send } = useChat({ providerId });
+  const { messages, status, send } = useChat({ providerId, projectId: activeProjectId });
   const approval = useApprovalGate();
   const drift = useDriftGate();
   const escalation = useLeadEscalation();
   const drawerHost = useDrawerHost();
 
   useEffect(() => subscribeActiveProvider(setProviderId), []);
+  useEffect(() => subscribeActiveProject(setActiveProjectId), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,7 +163,7 @@ function ShellInner() {
         brainName="Thalyn"
         activeProviderId={providerId}
         configured={configured}
-        projectName="Thalyn"
+        activeProjectId={activeProjectId}
         onOpenSettings={() => setSettingsOpen(true)}
       />
 

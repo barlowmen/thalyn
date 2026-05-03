@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { ProjectSwitcher } from "@/components/shell/project-switcher";
 import { Button } from "@/components/ui/button";
 import {
   emitActiveProviderChange,
@@ -42,16 +43,11 @@ type Props = {
   /** Whether the active provider has a key on file. ``null`` means
    *  the check is still pending; the badge tones itself accordingly. */
   configured: boolean | null;
-  /** Active project's display name. Single-project for now; v0.30
-   *  introduces the multi-project popover. */
-  projectName: string;
+  /** Foreground project id — the pill renders this project's name
+   *  and the switcher popover marks it as the active option. */
+  activeProjectId: string;
   /** Open the settings dialog (the cog on the right). */
   onOpenSettings: () => void;
-  /** Optional callback when the project switcher pill is activated.
-   *  Until the multi-project popover lands, the pill is a clickable
-   *  surface that flashes a "More projects coming soon" hint via
-   *  ``onClick``. The shell wires it; tests can supply a stub. */
-  onOpenProjectSwitcher?: () => void;
 };
 
 /**
@@ -72,9 +68,8 @@ export function TopBar({
   brainName,
   activeProviderId,
   configured,
-  projectName,
+  activeProjectId,
   onOpenSettings,
-  onOpenProjectSwitcher,
 }: Props) {
   const [providerOpen, setProviderOpen] = useState(false);
   const [providers, setProviders] = useState<ProviderMeta[]>([]);
@@ -241,18 +236,7 @@ export function TopBar({
       </div>
 
       <div className="flex min-w-0 items-center justify-center">
-        <button
-          type="button"
-          onClick={onOpenProjectSwitcher}
-          aria-label={`Project: ${projectName}. Open project switcher.`}
-          className="group flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-        >
-          <span className="truncate">{projectName}</span>
-          <ChevronDown
-            aria-hidden
-            className="h-3 w-3 text-muted-foreground transition-transform group-aria-expanded:rotate-180"
-          />
-        </button>
+        <ProjectSwitcher activeProjectId={activeProjectId} />
       </div>
 
       <div className="flex items-center gap-1">

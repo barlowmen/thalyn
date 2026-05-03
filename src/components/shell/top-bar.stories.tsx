@@ -20,9 +20,8 @@ const meta = {
     brainName: "Thalyn",
     activeProviderId: "anthropic",
     configured: true,
-    projectName: "Thalyn",
+    activeProjectId: "proj_default",
     onOpenSettings: () => undefined,
-    onOpenProjectSwitcher: () => undefined,
   },
 } satisfies Meta<typeof TopBar>;
 
@@ -40,11 +39,5 @@ export const Unconfigured: Story = {
 export const ConfigPending: Story = {
   args: {
     configured: null,
-  },
-};
-
-export const LongProjectName: Story = {
-  args: {
-    projectName: "Thalyn — frontend chat-first pivot working notes",
   },
 };

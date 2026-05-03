@@ -27,6 +27,7 @@ export function useChat({
   systemPrompt,
   leadId,
   leadDisplayName,
+  projectId,
 }: {
   providerId: string;
   systemPrompt?: string;
@@ -35,6 +36,12 @@ export function useChat({
    *  and the response surfaces leadId for the attribution chip. */
   leadId?: string;
   leadDisplayName?: string;
+  /** Foreground project — passed through to ``chat.send`` so the
+   *  run is scoped to the active project. The brain's classifier
+   *  (per F3.5) treats this as the bias the next turn defaults to
+   *  unless an ``@Lead-X`` mention or a high-confidence verdict
+   *  routes elsewhere. */
+  projectId?: string;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
@@ -164,6 +171,7 @@ export function useChat({
           prompt: trimmed,
           systemPrompt,
           leadId,
+          projectId,
         });
         // Stamp the active assistant message with the lead the brain
         // delegated to, so the bubble can render the attribution
@@ -190,7 +198,7 @@ export function useChat({
         setStatus({ kind: "error", message });
       }
     },
-    [providerId, systemPrompt, leadId, leadDisplayName],
+    [providerId, systemPrompt, leadId, leadDisplayName, projectId],
   );
 
   return { messages, status, send };
