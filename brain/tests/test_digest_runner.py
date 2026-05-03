@@ -18,6 +18,7 @@ from thalyn_brain.digest_runner import (
     maybe_run_idle_digest,
     run_digest,
 )
+from thalyn_brain.projects import ProjectsStore
 from thalyn_brain.provider import AnthropicProvider, ProviderRegistry
 from thalyn_brain.rpc import Dispatcher
 from thalyn_brain.thread_send import register_thread_send_methods
@@ -56,12 +57,13 @@ async def _add_completed_turn(
     *,
     role: str = "user",
     at_ms: int,
+    project_id: str | None = None,
 ) -> None:
     await store.insert_turn(
         ThreadTurn(
             turn_id=new_turn_id(),
             thread_id=thread_id,
-            project_id=None,
+            project_id=project_id,
             agent_id=None,
             role=role,
             body=body,
@@ -370,3 +372,109 @@ async def test_digest_run_ipc_returns_null_for_short_thread(tmp_path: Path) -> N
     )
     assert response is not None
     assert response["result"]["digest"] is None
+
+
+# ---------------------------------------------------------------------------
+# Per-project breakdown
+# ---------------------------------------------------------------------------
+
+
+async def test_run_digest_emits_project_breakdown_when_window_spans_two_projects(
+    tmp_path: Path,
+) -> None:
+    """When the digest window covers turns tagged to two or more
+    projects, the structured summary carries a ``project_breakdown``
+    list — one entry per project with that project's own
+    topics/decisions/open_threads."""
+    rolled_up = '{"topics": ["mixed"], "decisions": ["ship monday"], "open_threads": []}'
+    per_thalyn = (
+        '{"topics": ["auth refactor"], "decisions": ["land tonight"], '
+        '"open_threads": ["doc the rollback"]}'
+    )
+    per_taxprep = (
+        '{"topics": ["forms intake"], "decisions": [], "open_threads": ["chase the 1099"]}'
+    )
+    _, factory = factory_for(
+        [
+            text_message(rolled_up),
+            result_message(),
+            text_message(per_thalyn),
+            result_message(),
+            text_message(per_taxprep),
+            result_message(),
+        ]
+    )
+    provider = AnthropicProvider(client_factory=factory)
+    store = ThreadsStore(data_dir=tmp_path)
+    projects = ProjectsStore(data_dir=tmp_path)
+    thalyn = await projects.create(name="Thalyn")
+    taxprep = await projects.create(name="Tax Prep 2026")
+    thread = await _seed_thread(store)
+
+    base = 1_000
+    await _add_completed_turn(
+        store, thread.thread_id, "auth refactor", at_ms=base, project_id=thalyn.project_id
+    )
+    await _add_completed_turn(
+        store,
+        thread.thread_id,
+        "shipped overnight",
+        role="brain",
+        at_ms=base + 1,
+        project_id=thalyn.project_id,
+    )
+    await _add_completed_turn(
+        store,
+        thread.thread_id,
+        "1099 came in",
+        at_ms=base + 2,
+        project_id=taxprep.project_id,
+    )
+    await _add_completed_turn(
+        store,
+        thread.thread_id,
+        "logged the form",
+        role="brain",
+        at_ms=base + 3,
+        project_id=taxprep.project_id,
+    )
+
+    digest = await run_digest(provider, store, thread_id=thread.thread_id, projects_store=projects)
+
+    assert digest is not None
+    breakdown = digest.structured_summary.get("project_breakdown")
+    assert isinstance(breakdown, list)
+    by_id = {section["projectId"]: section for section in breakdown}
+    assert thalyn.project_id in by_id
+    assert taxprep.project_id in by_id
+    assert by_id[thalyn.project_id]["projectName"] == "Thalyn"
+    assert by_id[thalyn.project_id]["topics"] == ["auth refactor"]
+    assert by_id[taxprep.project_id]["topics"] == ["forms intake"]
+
+
+async def test_run_digest_omits_breakdown_with_single_project(tmp_path: Path) -> None:
+    """One project in the window doesn't earn a breakdown — the
+    rolled-up summary already says everything."""
+    payload = '{"topics": ["solo"], "decisions": [], "open_threads": []}'
+    _, factory = factory_for([text_message(payload), result_message()])
+    provider = AnthropicProvider(client_factory=factory)
+    store = ThreadsStore(data_dir=tmp_path)
+    projects = ProjectsStore(data_dir=tmp_path)
+    project = await projects.create(name="Sole")
+    thread = await _seed_thread(store)
+    base = 1_000
+    await _add_completed_turn(
+        store, thread.thread_id, "alone", at_ms=base, project_id=project.project_id
+    )
+    await _add_completed_turn(
+        store,
+        thread.thread_id,
+        "okay",
+        role="brain",
+        at_ms=base + 1,
+        project_id=project.project_id,
+    )
+
+    digest = await run_digest(provider, store, thread_id=thread.thread_id, projects_store=projects)
+    assert digest is not None
+    assert "project_breakdown" not in digest.structured_summary

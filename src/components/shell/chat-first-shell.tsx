@@ -33,9 +33,15 @@ import {
   subscribeActiveProvider,
 } from "@/lib/active-provider";
 import {
+  listProjects,
+  type Project,
+} from "@/lib/projects";
+import {
   isProviderConfigured,
   type ProviderMeta,
 } from "@/lib/providers";
+
+import type { ProjectsById } from "@/components/chat/message-list";
 
 /**
  * The chat-first shell (ADR-0026). Five regions stacked vertically
@@ -72,6 +78,7 @@ function ShellInner() {
   const [activeProjectId, setActiveProjectId] = useState<string>(() =>
     readActiveProject(),
   );
+  const [projects, setProjects] = useState<Project[]>([]);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [pendingSwap, setPendingSwap] = useState<{
     from: ProviderMeta;
@@ -91,6 +98,28 @@ function ShellInner() {
 
   useEffect(() => subscribeActiveProvider(setProviderId), []);
   useEffect(() => subscribeActiveProject(setActiveProjectId), []);
+
+  // Project list is best-effort — outside Tauri the call rejects and
+  // the message list just renders without project pills.
+  useEffect(() => {
+    let cancelled = false;
+    listProjects()
+      .then((result) => {
+        if (cancelled) return;
+        setProjects(result.projects);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProjects([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectId]);
+
+  const projectsById: ProjectsById = new Map(
+    projects.map((project) => [project.projectId, project]),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -174,6 +203,7 @@ function ShellInner() {
               <div className="mx-auto flex h-full w-full max-w-3xl flex-1 flex-col">
                 <MessageList
                   messages={messages}
+                  projectsById={projectsById}
                   header={<ThreadDigestGreeting />}
                   footer={
                     <>

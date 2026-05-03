@@ -36,6 +36,11 @@ export type Message =
        *  Storybook fixtures (which don't care about dividers) keep
        *  working unchanged. */
       atMs?: number;
+      /** The project this turn was tagged to (foreground bias at
+       *  send time, or whatever the brain's classifier resolved to
+       *  for ``thread.send``). The renderer surfaces a project pill
+       *  above the bubble when set. */
+      projectId?: string;
     }
   | {
       id: string;
@@ -46,4 +51,5 @@ export type Message =
       totalCostUsd?: number;
       leadAttribution?: LeadAttribution;
       atMs?: number;
+      projectId?: string;
     };

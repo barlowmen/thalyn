@@ -47,6 +47,15 @@ export function useChat({
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const sessionRef = useRef<string>(`sess_${Date.now()}`);
   const activeAssistantId = useRef<string | null>(null);
+  // The chunk handler closes over ``projectId`` so newly-streamed
+  // assistant messages get tagged with the project active at chunk
+  // time, not at mount time. The subscription itself is one-shot
+  // (we never re-subscribe), so we route chunks through a ref to
+  // pick up the current handler.
+  const projectIdRef = useRef<string | undefined>(projectId);
+  useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
 
   // Single subscription for the lifetime of the hook.
   useEffect(() => {
@@ -91,6 +100,7 @@ export function useChat({
             model: chunk.model,
             done: false,
             atMs: Date.now(),
+            projectId: projectIdRef.current,
           };
           activeAssistantId.current = message.id;
           next.push(message);
@@ -162,6 +172,7 @@ export function useChat({
         role: "user",
         text: trimmed,
         atMs: Date.now(),
+        projectId,
       };
       setMessages((current) => [...current, userMessage]);
       try {

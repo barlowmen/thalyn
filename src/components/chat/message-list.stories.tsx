@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
-import { MessageList } from "@/components/chat/message-list";
+import { MessageList, type ProjectsById } from "@/components/chat/message-list";
 import type { Message } from "@/components/chat/types";
 
 const meta: Meta<typeof MessageList> = {
@@ -87,6 +87,70 @@ export const SpansTwoDays: Story = {
         id: "m_today_assistant",
         segments: [{ kind: "text", text: "Three commits shipped overnight; one open question waiting on you." }],
         atMs: today,
+      },
+    ],
+  },
+};
+
+const projectsById: ProjectsById = new Map([
+  [
+    "proj_thalyn",
+    { projectId: "proj_thalyn", name: "Thalyn", slug: "thalyn" },
+  ],
+  [
+    "proj_taxprep",
+    { projectId: "proj_taxprep", name: "Tax Prep 2026", slug: "tax-prep-2026" },
+  ],
+  [
+    "proj_offsite",
+    { projectId: "proj_offsite", name: "Q3 offsite", slug: "q3-offsite" },
+  ],
+]);
+
+export const ProjectTaggedMessages: Story = {
+  args: {
+    projectsById,
+    messages: [
+      {
+        id: "m_user_thalyn",
+        role: "user",
+        text: "Lead-Thalyn, status on the auth refactor?",
+        atMs: today,
+        projectId: "proj_thalyn",
+      },
+      {
+        id: "m_assistant_thalyn",
+        role: "assistant",
+        segments: [{ kind: "text", text: "Three commits shipped; one open question." }],
+        model: "claude-sonnet-4-6",
+        done: true,
+        atMs: today,
+        projectId: "proj_thalyn",
+        leadAttribution: { agentId: "agent_lead_thalyn", displayName: "Lead-Thalyn" },
+      },
+      {
+        id: "m_user_taxprep",
+        role: "user",
+        text: "any new 1099s?",
+        atMs: today + 1_000,
+        projectId: "proj_taxprep",
+      },
+      {
+        id: "m_assistant_taxprep",
+        role: "assistant",
+        segments: [{ kind: "text", text: "Two arrived overnight; both filed." }],
+        model: "claude-sonnet-4-6",
+        done: true,
+        atMs: today + 1_000,
+        projectId: "proj_taxprep",
+        leadAttribution: { agentId: "agent_lead_taxprep", displayName: "Lead-TaxPrep" },
+      },
+      {
+        id: "m_user_offsite",
+        role: "user",
+        text: "what venues are still on the shortlist?",
+        atMs: today + 2_000,
+        projectId: "proj_offsite",
       },
     ],
   },

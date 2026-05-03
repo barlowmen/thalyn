@@ -88,3 +88,49 @@ export const NoDigestYet_NoGreeting: Story = {
     preview: { digest: null, lastTurnAtMs: YESTERDAY_MS },
   },
 };
+
+const multiProjectDigest: SessionDigest = {
+  digestId: "digest_multi",
+  threadId: "thread_self",
+  windowStartMs: YESTERDAY_MS - 4 * 60 * 60 * 1000,
+  windowEndMs: YESTERDAY_MS,
+  structuredSummary: {
+    topics: ["mixed activity"],
+    decisions: [],
+    open_threads: [],
+    project_breakdown: [
+      {
+        projectId: "proj_thalyn",
+        projectName: "Thalyn",
+        projectSlug: "thalyn",
+        topics: ["auth refactor", "first-run wizard"],
+        decisions: ["land tonight"],
+        open_threads: ["doc the rollback"],
+      },
+      {
+        projectId: "proj_taxprep",
+        projectName: "Tax Prep 2026",
+        projectSlug: "tax-prep-2026",
+        topics: ["1099 logging"],
+        decisions: [],
+        open_threads: ["chase missing W-2"],
+      },
+      {
+        projectId: "proj_offsite",
+        projectName: "Q3 offsite",
+        projectSlug: "q3-offsite",
+        topics: ["venue shortlist"],
+        decisions: [],
+        open_threads: [],
+      },
+    ],
+  },
+  secondLevelSummaryOf: null,
+};
+
+export const MultiProjectBreakdown: Story = {
+  args: {
+    nowMs: TODAY_MS,
+    preview: { digest: multiProjectDigest, lastTurnAtMs: YESTERDAY_MS },
+  },
+};

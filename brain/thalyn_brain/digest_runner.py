@@ -15,7 +15,12 @@ that graph's shape today.
 The output is parsed permissively: a missing or malformed JSON
 response falls back to a heuristic digest derived from the turns'
 plain text so a flaky model can't take the eternal-thread tier
-offline.
+offline. When the window covers turns tagged to two or more
+projects, the runner runs a sub-summary per project and folds the
+shape into the structured summary as ``project_breakdown`` — the
+greeting renderer then surfaces a per-project line so the user
+sees what each lead has been doing without forcing the brain into
+a single rolled-up paragraph.
 """
 
 from __future__ import annotations
@@ -23,7 +28,9 @@ from __future__ import annotations
 import json
 import re
 import time
+from typing import Any
 
+from thalyn_brain.projects import ProjectsStore
 from thalyn_brain.provider import ChatTextChunk, LlmProvider
 from thalyn_brain.threads import (
     SessionDigest,
@@ -81,12 +88,18 @@ async def run_digest(
     *,
     thread_id: str,
     until_ms: int | None = None,
+    projects_store: ProjectsStore | None = None,
 ) -> SessionDigest | None:
     """Summarize all completed turns since the last digest.
 
     Returns the new ``SessionDigest`` or ``None`` if there are fewer
     than ``MIN_TURNS_FOR_DIGEST`` un-summarized turns (a session that
     closes after one exchange isn't worth a digest of its own).
+
+    ``projects_store`` is optional — when wired and the window covers
+    two or more projects, the runner produces a per-project breakdown
+    alongside the rolled-up summary so the morning digest can speak
+    to each lead in turn.
     """
     latest = await store.latest_digest(thread_id)
     window_start = latest.window_end_ms if latest is not None else 0
@@ -101,7 +114,11 @@ async def run_digest(
     if len(in_window) < MIN_TURNS_FOR_DIGEST:
         return None
 
-    summary = await _summarize_turns(provider, in_window)
+    rolled_up = await _summarize_turns(provider, in_window)
+    breakdown = await _per_project_breakdown(provider, in_window, projects_store)
+    summary: dict[str, Any] = dict(rolled_up)
+    if breakdown:
+        summary["project_breakdown"] = breakdown
     digest = SessionDigest(
         digest_id=new_digest_id(),
         thread_id=thread_id,
@@ -121,6 +138,7 @@ async def maybe_run_idle_digest(
     thread_id: str,
     idle_threshold_ms: int = DEFAULT_IDLE_THRESHOLD_MS,
     now_ms: int | None = None,
+    projects_store: ProjectsStore | None = None,
 ) -> SessionDigest | None:
     """Run the summarizer when the gap before the next turn exceeds
     the idle threshold. Used by ``thread.send`` before the new user
@@ -136,7 +154,13 @@ async def maybe_run_idle_digest(
     now = now_ms if now_ms is not None else _now_ms()
     if (now - most_recent) < idle_threshold_ms:
         return None
-    return await run_digest(provider, store, thread_id=thread_id, until_ms=most_recent)
+    return await run_digest(
+        provider,
+        store,
+        thread_id=thread_id,
+        until_ms=most_recent,
+        projects_store=projects_store,
+    )
 
 
 async def maybe_compress_old_digests(
@@ -268,6 +292,47 @@ def _fallback_merge(digests: list[SessionDigest]) -> dict[str, list[str]]:
         "decisions": _dedupe(decisions)[:5],
         "open_threads": _dedupe(open_threads)[:5],
     }
+
+
+async def _per_project_breakdown(
+    provider: LlmProvider,
+    turns: list[ThreadTurn],
+    projects_store: ProjectsStore | None,
+) -> list[dict[str, Any]]:
+    """Build a per-project section list when the window covers ≥2 projects.
+
+    Returns ``[]`` when fewer than two projects show up in ``turns``
+    (the rolled-up summary already says everything there is to say)
+    or when the projects store isn't wired (narrow tests). Each
+    section runs its own provider call against the project's turn
+    excerpt, with the same permissive parser as the top-level
+    summary so a flaky model collapses to a heuristic instead of
+    breaking the digest.
+    """
+    if projects_store is None:
+        return []
+    grouped: dict[str, list[ThreadTurn]] = {}
+    for turn in turns:
+        if turn.project_id is None:
+            continue
+        grouped.setdefault(turn.project_id, []).append(turn)
+    if len(grouped) < 2:
+        return []
+    sections: list[dict[str, Any]] = []
+    for project_id, project_turns in grouped.items():
+        project = await projects_store.get(project_id)
+        if project is None:
+            continue
+        summary = await _summarize_turns(provider, project_turns)
+        sections.append(
+            {
+                "projectId": project.project_id,
+                "projectName": project.name,
+                "projectSlug": project.slug,
+                **summary,
+            }
+        )
+    return sections
 
 
 def _dedupe(items: list[str]) -> list[str]:

@@ -16,8 +16,10 @@
 
 import { useEffect, useState } from "react";
 
+import { ProjectTag } from "@/components/chat/project-tag";
 import {
   ETERNAL_THREAD_ID,
+  type ProjectBreakdownEntry,
   type SessionDigest,
   digestLatest,
   threadRecent,
@@ -123,6 +125,7 @@ function DayDividerGreeting({ digest, todayMs }: GreetingProps) {
   const topics = stringList(summary.topics);
   const decisions = stringList(summary.decisions);
   const openThreads = stringList(summary.open_threads);
+  const breakdown = projectBreakdown(summary.project_breakdown);
 
   const todayLabel = new Date(todayMs).toLocaleDateString(undefined, {
     weekday: "long",
@@ -146,43 +149,109 @@ function DayDividerGreeting({ digest, todayMs }: GreetingProps) {
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Since we last spoke
         </p>
-        <ul className="space-y-1.5">
-          {topics.length > 0 && (
-            <li>
-              <span className="font-medium">Topics:</span>{" "}
-              <span className="text-muted-foreground">
-                {topics.join(", ")}
-              </span>
-            </li>
-          )}
-          {decisions.length > 0 && (
-            <li>
-              <span className="font-medium">Decisions:</span>{" "}
-              <span className="text-muted-foreground">
-                {decisions.join(", ")}
-              </span>
-            </li>
-          )}
-          {openThreads.length > 0 && (
-            <li>
-              <span className="font-medium">Open threads:</span>{" "}
-              <span className="text-muted-foreground">
-                {openThreads.join(", ")}
-              </span>
-            </li>
-          )}
-          {topics.length === 0 &&
-            decisions.length === 0 &&
-            openThreads.length === 0 && (
-              <li className="text-muted-foreground">
-                Nothing landed in the last digest worth flagging — pick
-                up wherever feels right.
+        {breakdown.length >= 2 ? (
+          <ProjectBreakdownList entries={breakdown} />
+        ) : (
+          <ul className="space-y-1.5">
+            {topics.length > 0 && (
+              <li>
+                <span className="font-medium">Topics:</span>{" "}
+                <span className="text-muted-foreground">
+                  {topics.join(", ")}
+                </span>
               </li>
             )}
-        </ul>
+            {decisions.length > 0 && (
+              <li>
+                <span className="font-medium">Decisions:</span>{" "}
+                <span className="text-muted-foreground">
+                  {decisions.join(", ")}
+                </span>
+              </li>
+            )}
+            {openThreads.length > 0 && (
+              <li>
+                <span className="font-medium">Open threads:</span>{" "}
+                <span className="text-muted-foreground">
+                  {openThreads.join(", ")}
+                </span>
+              </li>
+            )}
+            {topics.length === 0 &&
+              decisions.length === 0 &&
+              openThreads.length === 0 && (
+                <li className="text-muted-foreground">
+                  Nothing landed in the last digest worth flagging — pick
+                  up wherever feels right.
+                </li>
+              )}
+          </ul>
+        )}
       </div>
     </section>
   );
+}
+
+function ProjectBreakdownList({ entries }: { entries: ProjectBreakdownEntry[] }) {
+  return (
+    <ul className="space-y-3">
+      {entries.map((entry) => {
+        const topics = stringList(entry.topics);
+        const decisions = stringList(entry.decisions);
+        const open = stringList(entry.open_threads);
+        const seed = entry.projectSlug || entry.projectId;
+        return (
+          <li key={entry.projectId} className="space-y-1.5">
+            <ProjectTag seed={seed} name={entry.projectName} />
+            <ul className="space-y-1 pl-1">
+              {topics.length > 0 && (
+                <li>
+                  <span className="font-medium">Topics:</span>{" "}
+                  <span className="text-muted-foreground">
+                    {topics.join(", ")}
+                  </span>
+                </li>
+              )}
+              {decisions.length > 0 && (
+                <li>
+                  <span className="font-medium">Decisions:</span>{" "}
+                  <span className="text-muted-foreground">
+                    {decisions.join(", ")}
+                  </span>
+                </li>
+              )}
+              {open.length > 0 && (
+                <li>
+                  <span className="font-medium">Open threads:</span>{" "}
+                  <span className="text-muted-foreground">
+                    {open.join(", ")}
+                  </span>
+                </li>
+              )}
+              {topics.length === 0 && decisions.length === 0 && open.length === 0 && (
+                <li className="text-muted-foreground">No notable activity.</li>
+              )}
+            </ul>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function projectBreakdown(value: unknown): ProjectBreakdownEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry): ProjectBreakdownEntry[] => {
+    if (
+      entry &&
+      typeof entry === "object" &&
+      typeof (entry as ProjectBreakdownEntry).projectId === "string" &&
+      typeof (entry as ProjectBreakdownEntry).projectName === "string"
+    ) {
+      return [entry as ProjectBreakdownEntry];
+    }
+    return [];
+  });
 }
 
 function stringList(value: unknown): string[] {

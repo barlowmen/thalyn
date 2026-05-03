@@ -158,7 +158,7 @@ def register_thread_send_methods(
         return await _handle_recovery_resolve(params, threads_store)
 
     async def digest_run(params: RpcParams) -> JsonValue:
-        return await _handle_digest_run(params, threads_store, registry)
+        return await _handle_digest_run(params, threads_store, registry, projects_store)
 
     dispatcher.register_streaming("thread.send", thread_send)
     dispatcher.register("thread.recovery_status", thread_recovery_status)
@@ -215,7 +215,12 @@ async def _handle_thread_send(
     # has to land before the new user turn lands — otherwise the new
     # turn slips into the next digest's window and the boundary is
     # smeared.
-    await maybe_run_idle_digest(provider, store, thread_id=thread_id)
+    await maybe_run_idle_digest(
+        provider,
+        store,
+        thread_id=thread_id,
+        projects_store=projects_store,
+    )
     await maybe_compress_old_digests(provider, store, thread_id=thread_id)
 
     # 4. Resolve the project the turn belongs to before persistence so
@@ -676,6 +681,7 @@ async def _handle_digest_run(
     params: RpcParams,
     store: ThreadsStore,
     registry: ProviderRegistry,
+    projects_store: ProjectsStore | None,
 ) -> JsonValue:
     """Force-run the rolling summarizer.
 
@@ -686,7 +692,12 @@ async def _handle_digest_run(
     thread_id = _require_str(params, "threadId")
     provider_id = _require_str(params, "providerId")
     provider = registry.get(provider_id)
-    digest = await run_digest(provider, store, thread_id=thread_id)
+    digest = await run_digest(
+        provider,
+        store,
+        thread_id=thread_id,
+        projects_store=projects_store,
+    )
     return {
         "threadId": thread_id,
         "digest": digest.to_wire() if digest is not None else None,

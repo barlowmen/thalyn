@@ -1,10 +1,14 @@
 import { UserCog } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
 
+import { ProjectTag } from "@/components/chat/project-tag";
 import { ToolCallCard } from "@/components/chat/tool-call-card";
 import type { Message } from "@/components/chat/types";
 import { Badge } from "@/components/ui/badge";
+import type { Project } from "@/lib/projects";
 import { cn } from "@/lib/utils";
+
+export type ProjectsById = Map<string, Pick<Project, "projectId" | "name" | "slug">>;
 
 type Props = {
   messages: Message[];
@@ -21,6 +25,14 @@ type Props = {
    * than as modal dialogs).
    */
   footer?: ReactNode;
+  /**
+   * Project lookup map for rendering per-message project pills (F8.5).
+   * When absent or a turn's ``projectId`` isn't in the map, the pill
+   * is suppressed — the bubble still renders unchanged. Resolution
+   * lives at the shell level so the message list stays decoupled from
+   * the projects RPC.
+   */
+  projectsById?: ProjectsById;
 };
 
 /**
@@ -28,7 +40,12 @@ type Props = {
  * messages so screen-readers announce streamed text without flooding —
  * polite mode batches per-render.
  */
-export function MessageList({ messages, header, footer }: Props) {
+export function MessageList({
+  messages,
+  header,
+  footer,
+  projectsById,
+}: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // Pin to the bottom when new content arrives — common chat affordance.
@@ -77,13 +94,23 @@ export function MessageList({ messages, header, footer }: Props) {
             {showDivider && messageDayMs !== null && (
               <DayDivider dayMs={messageDayMs} />
             )}
-            <MessageBubble message={message} />
+            <MessageBubble message={message} projectsById={projectsById} />
           </div>
         );
       })}
       {footer}
     </div>
   );
+}
+
+function renderProjectTag(
+  projectId: string | undefined,
+  projectsById: ProjectsById | undefined,
+): ReactNode {
+  if (!projectId || !projectsById) return null;
+  const project = projectsById.get(projectId);
+  if (!project) return null;
+  return <ProjectTag seed={project.slug || project.projectId} name={project.name} />;
 }
 
 function startOfDay(ms: number | undefined): number | null {
@@ -110,12 +137,22 @@ function DayDivider({ dayMs }: { dayMs: number }) {
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({
+  message,
+  projectsById,
+}: {
+  message: Message;
+  projectsById?: ProjectsById;
+}) {
+  const projectTag = renderProjectTag(message.projectId, projectsById);
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80ch] rounded-lg border border-border bg-card px-3 py-2 text-sm">
-          {message.text}
+        <div className="flex max-w-[80ch] flex-col items-end gap-1">
+          {projectTag}
+          <div className="rounded-lg border border-border bg-card px-3 py-2 text-sm">
+            {message.text}
+          </div>
         </div>
       </div>
     );
@@ -125,6 +162,7 @@ function MessageBubble({ message }: { message: Message }) {
 
   return (
     <div className="space-y-2">
+      {projectTag && <div>{projectTag}</div>}
       {attribution ? (
         <div
           className="flex items-center gap-1.5 text-xs text-muted-foreground"

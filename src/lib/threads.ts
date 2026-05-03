@@ -32,6 +32,15 @@ export type ThreadRecentResult = {
   turns: ThreadTurn[];
 };
 
+export type ProjectBreakdownEntry = {
+  projectId: string;
+  projectName: string;
+  projectSlug?: string;
+  topics?: string[];
+  decisions?: string[];
+  open_threads?: string[];
+};
+
 export type SessionDigest = {
   digestId: string;
   threadId: string;
@@ -41,6 +50,13 @@ export type SessionDigest = {
     topics?: string[];
     decisions?: string[];
     open_threads?: string[];
+    /**
+     * Optional per-project breakdown — present when the digest's
+     * window covers turns tagged to two or more projects (F1.3 /
+     * F3.7). Each entry carries that project's own
+     * topics/decisions/open_threads alongside the rolled-up summary.
+     */
+    project_breakdown?: ProjectBreakdownEntry[];
     [key: string]: unknown;
   };
   secondLevelSummaryOf: string | null;
