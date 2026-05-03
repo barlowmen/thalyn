@@ -32,6 +32,7 @@ from thalyn_brain.orchestration.storage import (
     default_data_dir,
 )
 from thalyn_brain.parent_watchdog import watch_parent
+from thalyn_brain.project_rpc import register_project_methods
 from thalyn_brain.projects import ProjectsStore
 from thalyn_brain.provider import AnthropicProvider, build_registry
 from thalyn_brain.provider.auth import AuthBackend
@@ -156,6 +157,16 @@ def main() -> int:
     # pause / resume / archive transitions and keeps the project's
     # ``lead_agent_id`` pointer consistent.
     register_lead_methods(dispatcher, lead_lifecycle)
+    # Project lifecycle surface (F3.6 / ADR-0021). Real handlers
+    # replace the v2 ``project.create`` / ``project.list`` stubs;
+    # ``project.classify`` stays stubbed until the classifier work
+    # lands. Archive cascades into the lead lifecycle so the
+    # project's pointer doesn't dangle at a still-active lead.
+    register_project_methods(
+        dispatcher,
+        projects=projects_store,
+        lead_lifecycle=lead_lifecycle,
+    )
     # Worker-routing surface (ADR-0023). Real handlers replace the v2
     # ``routing.*`` stubs; backed by ``RoutingOverridesStore`` plus the
     # pure ``route_worker`` resolver.

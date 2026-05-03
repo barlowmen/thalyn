@@ -435,6 +435,106 @@ async fn lead_archive(state: State<'_, AppState>, agent_id: String) -> Result<Va
 }
 
 #[tauri::command]
+async fn project_list(state: State<'_, AppState>, status: Option<String>) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    if let Some(s) = status {
+        params.insert("status".into(), Value::from(s));
+    }
+    state
+        .brain
+        .call("project.list", Value::Object(params), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn project_create(
+    state: State<'_, AppState>,
+    name: String,
+    workspace_path: Option<String>,
+    repo_remote: Option<String>,
+    local_only: Option<bool>,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    params.insert("name".into(), Value::from(name));
+    if let Some(path) = workspace_path {
+        params.insert("workspacePath".into(), Value::from(path));
+    }
+    if let Some(remote) = repo_remote {
+        params.insert("repoRemote".into(), Value::from(remote));
+    }
+    if let Some(flag) = local_only {
+        params.insert("localOnly".into(), Value::from(flag));
+    }
+    state
+        .brain
+        .call("project.create", Value::Object(params), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn project_update(
+    state: State<'_, AppState>,
+    project_id: String,
+    name: Option<String>,
+    local_only: Option<bool>,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    params.insert("projectId".into(), Value::from(project_id));
+    if let Some(n) = name {
+        params.insert("name".into(), Value::from(n));
+    }
+    if let Some(flag) = local_only {
+        params.insert("localOnly".into(), Value::from(flag));
+    }
+    state
+        .brain
+        .call("project.update", Value::Object(params), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn project_pause(state: State<'_, AppState>, project_id: String) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "project.pause",
+            json!({ "projectId": project_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn project_resume(state: State<'_, AppState>, project_id: String) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "project.resume",
+            json!({ "projectId": project_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn project_archive(state: State<'_, AppState>, project_id: String) -> Result<Value, String> {
+    state
+        .brain
+        .call(
+            "project.archive",
+            json!({ "projectId": project_id }),
+            BRAIN_CALL_TIMEOUT,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 async fn create_schedule(
     state: State<'_, AppState>,
     title: String,
@@ -1798,6 +1898,12 @@ pub fn run() {
             lead_pause,
             lead_resume,
             lead_archive,
+            project_list,
+            project_create,
+            project_update,
+            project_pause,
+            project_resume,
+            project_archive,
             list_memory,
             add_memory,
             update_memory,

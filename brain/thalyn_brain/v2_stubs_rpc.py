@@ -9,10 +9,12 @@ renderer would have to introspect.
 
 Stages that fill these in:
 
-- project.create / project.list — the multi-project stage.
 - project.classify — the project-mobility stage.
 
-The ``auth.*`` methods landed alongside the AuthBackend split and
+The ``project.*`` CRUD methods landed alongside the multi-project
+surface and register themselves through
+``project_rpc.register_project_methods``. The ``auth.*`` methods
+landed alongside the AuthBackend split and
 register themselves through ``auth_rpc.register_auth_methods``. The
 ``lead.*`` methods landed alongside the lead-as-first-class stage and
 register themselves through ``lead_rpc.register_lead_methods``. The
@@ -31,11 +33,7 @@ from thalyn_brain.rpc import (
     RpcParams,
 )
 
-_STUB_METHODS: tuple[tuple[str, str], ...] = (
-    ("project.create", "the multi-project stage"),
-    ("project.list", "the multi-project stage"),
-    ("project.classify", "the project-mobility stage"),
-)
+_STUB_METHODS: tuple[tuple[str, str], ...] = (("project.classify", "the project-mobility stage"),)
 
 
 def register_v2_stubs(dispatcher: Dispatcher) -> None:

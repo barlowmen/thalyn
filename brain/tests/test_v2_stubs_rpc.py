@@ -28,8 +28,6 @@ _drop_notify = _DropNotify()
 @pytest.mark.parametrize(
     "method",
     [
-        "project.create",
-        "project.list",
         "project.classify",
     ],
 )
