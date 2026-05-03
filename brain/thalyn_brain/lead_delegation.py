@@ -124,23 +124,40 @@ def find_addressed_lead(
     message: str,
     leads: list[AgentRecord],
 ) -> AddressedLead | None:
-    """Return the lead whose name leads ``message``, plus the trimmed body.
+    """Return the lead the user is addressing, plus the message body.
 
-    Matches when the message starts with one lead's ``display_name``
-    (case-insensitive) followed by a separator (``,``, ``:`` or
-    whitespace+text). Ambiguous matches (two leads share a name) yield
+    Two address shapes are recognised:
+
+    1. **Leading-name address.** The message starts with one lead's
+       ``display_name`` (case-insensitive) followed by a separator
+       (``,``, ``:``, ``-`` / ``—``, or whitespace+text). The body
+       returned to the lead is the message minus the leading address.
+    2. **Mid-message ``@`` mention.** The message contains
+       ``@<display_name>`` anywhere (case-insensitive, word-bounded).
+       The body returned is the *full* message — the mention isn't
+       stripped because the surrounding sentence carries the
+       routing intent ("hey @Lead-X, …", "ask @Lead-X about Y").
+
+    A leading-name match outranks an ``@`` mention when both forms
+    parse against the same message (the user clearly committed to
+    addressing the lead). Ambiguous matches across leads yield
     ``None`` so the caller falls back to a direct reply rather than
     guessing.
     """
     if not message.strip():
         return None
-    matches: list[tuple[AgentRecord, str]] = []
+    leading_matches: list[tuple[AgentRecord, str]] = []
+    mention_matches: list[tuple[AgentRecord, str]] = []
     for lead in leads:
         if lead.status != "active":
             continue
         body = _strip_addressing(message, lead.display_name)
         if body is not None:
-            matches.append((lead, body))
+            leading_matches.append((lead, body))
+            continue
+        if _has_at_mention(message, lead.display_name):
+            mention_matches.append((lead, message))
+    matches = leading_matches or mention_matches
     if len(matches) != 1:
         return None
     lead, body = matches[0]
@@ -270,3 +287,19 @@ def _strip_addressing(message: str, display_name: str) -> str | None:
     if match is None:
         return None
     return match.group("body").strip()
+
+
+def _has_at_mention(message: str, display_name: str) -> bool:
+    """Return True if ``message`` contains an ``@<display_name>`` mention.
+
+    Case-insensitive, anchored by a word boundary on the right so a
+    longer name doesn't accidentally swallow a shorter prefix
+    (``@Sam`` doesn't match the lead ``Samantha``). The ``@`` is
+    the literal anchor — bare names mid-sentence don't count,
+    otherwise ordinary prose mentioning the project would re-route
+    every turn. The character preceding ``@`` must not be a word
+    character so ``user@host`` style addresses don't count as a
+    mention.
+    """
+    pattern = r"(?<!\w)@" + re.escape(display_name) + r"\b"
+    return re.search(pattern, message, flags=re.IGNORECASE) is not None

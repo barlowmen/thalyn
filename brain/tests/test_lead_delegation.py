@@ -94,6 +94,51 @@ def test_find_addressed_lead_handles_whitespace_only_message() -> None:
     assert find_addressed_lead("   ", leads) is None
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "hey @Lead-Default, what's the status?",
+        "anyone know? @lead-default has the context.",
+        "ask @Lead-Default about the auth refactor",
+        "(@Lead-Default already covered this)",
+    ],
+)
+def test_find_addressed_lead_recognises_mid_message_at_mention(message: str) -> None:
+    leads = [_lead()]
+    addressed = find_addressed_lead(message, leads)
+    assert addressed is not None
+    assert addressed.lead.display_name == "Lead-Default"
+    # Mid-message mentions preserve the surrounding sentence —
+    # the lead sees the full body, not a stripped suffix.
+    assert addressed.body == message
+
+
+def test_find_addressed_lead_at_mention_requires_word_boundary() -> None:
+    leads = [_lead(display_name="Sam"), _lead(display_name="Samantha")]
+    addressed = find_addressed_lead("ask @Sam about it", leads)
+    assert addressed is not None
+    assert addressed.lead.display_name == "Sam"
+
+
+def test_find_addressed_lead_ignores_email_style_at_in_address() -> None:
+    leads = [_lead(display_name="Sam")]
+    # An email-like ``user@host`` shouldn't trigger a mention — the
+    # ``@`` must follow whitespace / punctuation, not a word char.
+    assert find_addressed_lead("ping carl@sam tomorrow", leads) is None
+
+
+def test_find_addressed_lead_prefers_leading_address_over_at_mention() -> None:
+    leads = [_lead(display_name="Sam"), _lead(display_name="Pat")]
+    addressed = find_addressed_lead("Sam, can you ask @Pat about it?", leads)
+    assert addressed is not None
+    assert addressed.lead.display_name == "Sam"
+
+
+def test_find_addressed_lead_ambiguous_at_mention_returns_none() -> None:
+    leads = [_lead(display_name="Sam"), _lead(display_name="Pat")]
+    assert find_addressed_lead("hey @Sam and @Pat, sync up please", leads) is None
+
+
 def test_effective_system_prompt_uses_stored_when_present() -> None:
     lead = _lead(system_prompt="You are Sam, the harness lead.")
     assert effective_system_prompt(lead) == "You are Sam, the harness lead."

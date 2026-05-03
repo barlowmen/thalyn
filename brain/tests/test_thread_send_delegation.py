@@ -232,6 +232,38 @@ async def test_paused_lead_does_not_attract_delegation(tmp_path: Path) -> None:
     assert [t.role for t in turns] == ["user", "brain"]
 
 
+async def test_at_mention_mid_message_routes_to_lead(tmp_path: Path) -> None:
+    """``@<lead-name>`` anywhere in the message routes to the lead.
+
+    The mid-message form preserves the surrounding sentence — the
+    lead sees the full body, not the leading-address-stripped
+    suffix the start-of-message form returns.
+    """
+    dispatcher, threads, _agents, lifecycle, projects = await _build(
+        tmp_path,
+        messages=[text_message("here's the rundown."), result_message()],
+    )
+    project = await _seed_project(projects)
+    lead = await lifecycle.spawn(
+        SpawnRequest(project_id=project.project_id, display_name="Sam"),
+    )
+    thread = await _seed_thread(threads)
+
+    response, _ = await _send(
+        dispatcher,
+        thread_id=thread.thread_id,
+        prompt="hey @Sam, can you sum up the auth refactor?",
+    )
+
+    result = response["result"]
+    assert result["delegation"]["leadId"] == lead.agent_id
+    turns = await threads.list_turns(thread.thread_id)
+    assert [t.role for t in turns] == ["user", "lead", "brain"]
+    # The user-turn body still carries the original mention so the
+    # transcript reads naturally on re-render.
+    assert turns[0].body == "hey @Sam, can you sum up the auth refactor?"
+
+
 async def test_hedged_lead_reply_surfaces_low_confidence_note(tmp_path: Path) -> None:
     dispatcher, threads, _agents, lifecycle, projects = await _build(
         tmp_path,
