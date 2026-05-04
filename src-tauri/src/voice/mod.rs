@@ -15,7 +15,11 @@
 //! shape that lib.rs and the renderer talk to.
 
 pub mod engine;
+#[cfg(feature = "voice-whisper")]
+pub mod local;
 pub mod manager;
 
 pub use engine::{ProjectVocabulary, StartConfig};
+#[cfg(feature = "voice-whisper")]
+pub use local::{LocalEngineError, LocalWhisperEngine};
 pub use manager::{SessionId, Transcript, VoiceManager};

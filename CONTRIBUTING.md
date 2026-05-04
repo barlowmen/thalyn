@@ -64,6 +64,39 @@ cargo check --manifest-path src-tauri/Cargo.toml --no-default-features
 The renderer's browser drawer falls back to an "engine not available"
 state in that build.
 
+### Voice (Whisper.cpp local STT)
+
+The voice STT bridge (ADR-0025) is on by default behind the
+`voice-whisper` cargo feature. The first `cargo build` compiles
+`whisper.cpp` from source via the `whisper-cpp-plus-sys` build script
+(it reuses the cmake/ninja you already installed for CEF — no extra
+prereqs); subsequent builds hit the cache. The lean default builds
+the engine with portable CPU-only inference so the codepath validates
+identically on every CI runner.
+
+For production builds, opt into the platform-specific accelerator:
+
+```sh
+# macOS (Apple Silicon — Metal)
+cargo build --release --features voice-whisper-metal
+
+# Linux / Windows (system OpenBLAS)
+cargo build --release --features voice-whisper-openblas
+```
+
+Apple Silicon Core ML support is the load-bearing follow-up — the
+`whisper-cpp-plus` 0.1.4 release does not yet expose it as a cargo
+feature, so wiring is on the going-public-checklist.
+
+If you specifically need a voice-free build (e.g., reproducing a
+non-voice regression on an offline machine), drop the feature:
+
+```sh
+cargo check --no-default-features --features cef
+```
+
+The composer mic falls back to a no-op engine in that build.
+
 ## Where things live
 
 - `src/` — React renderer.

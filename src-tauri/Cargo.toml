@@ -42,7 +42,7 @@ required-features = ["cef"]
 tauri-build = { version = "2", features = [] }
 
 [features]
-default = ["cef"]
+default = ["cef", "voice-whisper"]
 # Pulls in `cef` and links against a downloaded CEF binary distribution.
 # Default-on as of v0.30: the in-process engine ships in trunk and the
 # default `cargo` invocation pulls in cef-rs. Toolchain prerequisites
@@ -57,6 +57,23 @@ cef = [
     "dep:objc2-app-kit",
     "dep:windows-sys",
 ]
+# Pulls in `whisper-cpp-plus` and builds whisper.cpp from source via
+# its sys crate (cmake/ninja already required for `cef`). Default-on
+# from v0.33; pass `--no-default-features` for a lean, voice-free
+# build. Steady-state perf comes from the platform-specific accel
+# features below — they sit off the default so CI's lean-build path
+# stays portable, and macOS / Linux production builds opt in.
+voice-whisper = ["dep:whisper-cpp-plus"]
+# Apple Silicon Metal acceleration. Pass on macOS production builds.
+voice-whisper-metal = ["voice-whisper", "whisper-cpp-plus/metal"]
+# CPU acceleration via OpenBLAS. Pass on Linux / Windows production
+# builds where libopenblas is available system-wide.
+voice-whisper-openblas = ["voice-whisper", "whisper-cpp-plus/openblas"]
+# NVIDIA CUDA acceleration. Out of scope for v1's local-default
+# voice path (the user base for "Linux desktop with NVIDIA + no
+# Apple device" mostly overlaps with users who would prefer cloud
+# STT for latency); wired up as a feature for completeness.
+voice-whisper-cuda = ["voice-whisper", "whisper-cpp-plus/cuda"]
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -71,6 +88,11 @@ keyring = { version = "3", default-features = false, features = ["apple-native",
 portable-pty = "0.9"
 uuid = { version = "1", features = ["v4"] }
 cef = { version = "147.1.0", optional = true }
+# Whisper.cpp Rust binding (ADR-0025). Default features pull in
+# `quantization`; platform-specific accel (`metal`, `openblas`,
+# `cuda`) sits behind the `voice-whisper-*` feature flags above so
+# the lean-build path stays portable.
+whisper-cpp-plus = { version = "0.1", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", optional = true }

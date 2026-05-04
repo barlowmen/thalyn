@@ -1807,6 +1807,53 @@ fn pcm_bytes_to_samples(bytes: &[u8]) -> Vec<i16> {
         .collect()
 }
 
+/// Resolve the canonical default model path. The model-store commit
+/// will overlay this with the user-selected pick from settings; for
+/// now it's a fixed `<data_dir>/models/<DEFAULT>.bin`. ADR-0025 pins
+/// `base.en` as the immediate-first-use preload (148 MB).
+#[cfg(feature = "voice-whisper")]
+fn default_voice_model_path(data_dir: &std::path::Path) -> std::path::PathBuf {
+    data_dir.join("models").join("base.en.bin")
+}
+
+/// Build the voice manager, preferring the local Whisper engine when
+/// a model is on disk and falling back to the seam-only NoopEngine
+/// when not. The lean build (`--no-default-features`) compiles
+/// without `whisper-cpp-plus` at all and always picks the noop path.
+fn build_voice_manager(data_dir: &std::path::Path) -> VoiceManager {
+    #[cfg(feature = "voice-whisper")]
+    {
+        let model_path = default_voice_model_path(data_dir);
+        match crate::voice::LocalWhisperEngine::try_load(&model_path) {
+            Ok(engine) => {
+                tracing::info!(
+                    model_path = %engine.model_path().display(),
+                    "voice STT bridge using local Whisper engine"
+                );
+                return VoiceManager::new(Arc::new(engine));
+            }
+            Err(crate::voice::LocalEngineError::ModelNotFound(path)) => {
+                tracing::info!(
+                    model_path = %path.display(),
+                    "no Whisper model present yet; voice STT falls back to noop until the lazy-download path lands"
+                );
+            }
+            Err(err) => {
+                tracing::warn!(
+                    ?err,
+                    "failed to load Whisper model; voice STT falls back to noop"
+                );
+            }
+        }
+    }
+    #[cfg(not(feature = "voice-whisper"))]
+    {
+        let _ = data_dir;
+        tracing::info!("voice STT bridge built without `voice-whisper`; using noop engine");
+    }
+    VoiceManager::with_noop_engine()
+}
+
 /// Subscribe to the [`VoiceManager`]'s broadcast channel and re-emit
 /// every transcript as a `stt:transcript` Tauri event. Mirrors the
 /// terminal-data forwarder shape — one task per app, started in the
@@ -1874,10 +1921,13 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
     let supervisor = Arc::new(supervisor);
     spawn_global_notification_forwarder(app.clone(), supervisor.clone());
 
-    // Voice STT bridge (F7, ADR-0025). The seam ships the NoopEngine
-    // here; the local-Whisper / cloud / MLX backends swap in via
-    // later commits without changing the surface AppState exposes.
-    let voice = Arc::new(VoiceManager::with_noop_engine());
+    // Voice STT bridge (F7, ADR-0025). Try the local Whisper engine
+    // against the resolved model path first; fall back to a NoopEngine
+    // when no model is present (the lazy-download path lands in the
+    // model-store commit, so a fresh dev install starts on the
+    // fallback). The cloud (Deepgram) and MLX opt-ins swap in via
+    // settings flips in later commits without changing this shape.
+    let voice = Arc::new(build_voice_manager(&data_dir));
     spawn_voice_transcript_forwarder(app.clone(), voice.clone());
 
     // CEF profile lives under the same canonical root as the brain's
