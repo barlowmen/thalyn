@@ -138,11 +138,13 @@ jobs:
       - name: Read pinned CEF version
         id: cef
         run: echo "version=$(cat src-tauri/cef-version.txt)" >> "$GITHUB_OUTPUT"
-      - name: Install Tauri + CEF system deps
+      - name: Install Tauri + CEF + voice system deps
         # `cef` is default-on as of v0.30, so even the lint/test path
         # links against the bundled CEF SDK and uses cmake/ninja to
-        # build `libcef_dll_wrapper`. Mirrors the CONTRIBUTING.md
-        # one-time setup developers run locally.
+        # build `libcef_dll_wrapper`. `voice-whisper` is default-on
+        # as of v0.33; cpal binds to ALSA on Linux, so the build
+        # needs `libasound2-dev` for `alsa-sys` to link. Mirrors
+        # the CONTRIBUTING.md one-time setup developers run locally.
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -152,6 +154,7 @@ jobs:
             librsvg2-dev \
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev \
+            libasound2-dev \
             cmake \
             ninja-build \
             build-essential \
