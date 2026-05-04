@@ -6,6 +6,7 @@ mod provider;
 mod sandbox;
 mod secrets;
 mod terminal;
+mod voice;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,6 +24,7 @@ use crate::provider::{builtin_providers, ProviderMeta, ProviderRegistry};
 use crate::sandbox::SandboxManager;
 use crate::secrets::SecretsManager;
 use crate::terminal::TerminalManager;
+use crate::voice::{SessionId, StartConfig as VoiceStartConfig, Transcript, VoiceManager};
 
 const BRAIN_CALL_TIMEOUT: Duration = Duration::from_secs(15);
 const CHAT_DEADLINE: Duration = Duration::from_secs(180);
@@ -35,6 +37,8 @@ const LEAD_ESCALATION_EVENT: &str = "lead:escalation";
 const LSP_MESSAGE_EVENT: &str = "lsp:message";
 const LSP_ERROR_EVENT: &str = "lsp:error";
 const TERMINAL_DATA_EVENT: &str = "terminal:data";
+const STT_TRANSCRIPT_EVENT: &str = "stt:transcript";
+const VOICE_VOCABULARY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Shared application state, registered with Tauri's `manage` so commands
 /// can pull it via `State<...>`.
@@ -60,6 +64,12 @@ struct AppState {
     /// assertion when the same run hits a terminal status.
     assertions: Arc<Mutex<HashMap<String, AssertionToken>>>,
     terminals: Arc<TerminalManager>,
+    /// Voice STT bridge (F7, ADR-0025). Owns engine + in-flight
+    /// session map; the Tauri commands `stt_start` / `stt_chunk` /
+    /// `stt_stop` thread through this. Engine is a [`NoopEngine`]
+    /// in this scaffolding commit; later commits swap in
+    /// `whisper-cpp-plus`, Deepgram Nova-3, and MLX-Whisper.
+    voice: Arc<VoiceManager>,
 }
 
 /// Trimmed pong payload sent back to the renderer.
@@ -1690,6 +1700,136 @@ async fn send_chat(
     })
 }
 
+/// Begin a voice STT session. The renderer calls this when the
+/// user presses the composer mic; the core asks the brain for the
+/// project vocabulary slice (best-effort — empty list if the brain
+/// is slow or the project unknown), opens a session against the
+/// engine, and returns the session id. Audio capture itself lands
+/// in a later commit (cpal in the core, no audio bytes over IPC).
+#[tauri::command]
+async fn stt_start(
+    state: State<'_, AppState>,
+    project_id: Option<String>,
+) -> Result<String, String> {
+    let vocabulary = fetch_project_vocabulary(&state, project_id.as_deref()).await;
+    let config = VoiceStartConfig {
+        project_id: project_id.clone(),
+        vocabulary,
+    };
+    state
+        .voice
+        .start(config)
+        .await
+        .map(|id| id.as_str().to_owned())
+        .map_err(|err| err.to_string())
+}
+
+/// Push a PCM frame into an open session. Bytes are interpreted as
+/// little-endian 16-bit signed mono at 16 kHz (the format Whisper
+/// wants). The `pcm` argument is a `Vec<u8>` of raw PCM bytes —
+/// Tauri's invoke serialiser hands `Uint8Array` over as a byte
+/// vector. Empty frames are accepted as a heartbeat.
+#[tauri::command]
+async fn stt_chunk(
+    state: State<'_, AppState>,
+    session_id: String,
+    pcm: Vec<u8>,
+) -> Result<(), String> {
+    let session = SessionId::from(session_id.as_str());
+    let samples = pcm_bytes_to_samples(&pcm);
+    state
+        .voice
+        .feed_chunk(&session, &samples)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Finalise a session and return the final transcript shape.
+#[tauri::command]
+async fn stt_stop(state: State<'_, AppState>, session_id: String) -> Result<Transcript, String> {
+    let session = SessionId::from(session_id.as_str());
+    state
+        .voice
+        .finish(&session)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Best-effort vocabulary fetch. The brain's `voice.project_vocabulary`
+/// returns `{terms: [...]}`; on any failure (timeout, missing project,
+/// brain error), the session starts with an empty vocabulary and the
+/// engine falls back to its default decoder behaviour.
+async fn fetch_project_vocabulary(
+    state: &State<'_, AppState>,
+    project_id: Option<&str>,
+) -> crate::voice::ProjectVocabulary {
+    let mut params = serde_json::Map::new();
+    if let Some(pid) = project_id {
+        params.insert("projectId".into(), Value::String(pid.to_owned()));
+    }
+    let response = state
+        .brain
+        .call(
+            "voice.project_vocabulary",
+            Value::Object(params),
+            VOICE_VOCABULARY_TIMEOUT,
+        )
+        .await;
+    match response {
+        Ok(value) => parse_vocabulary(&value),
+        Err(err) => {
+            tracing::debug!(
+                ?err,
+                "voice.project_vocabulary unavailable; using empty vocabulary"
+            );
+            crate::voice::ProjectVocabulary::default()
+        }
+    }
+}
+
+fn parse_vocabulary(value: &Value) -> crate::voice::ProjectVocabulary {
+    let terms = value
+        .get("terms")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                .collect()
+        })
+        .unwrap_or_default();
+    crate::voice::ProjectVocabulary { terms }
+}
+
+fn pcm_bytes_to_samples(bytes: &[u8]) -> Vec<i16> {
+    bytes
+        .chunks_exact(2)
+        .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+        .collect()
+}
+
+/// Subscribe to the [`VoiceManager`]'s broadcast channel and re-emit
+/// every transcript as a `stt:transcript` Tauri event. Mirrors the
+/// terminal-data forwarder shape — one task per app, started in the
+/// setup hook after `AppState` is registered.
+fn spawn_voice_transcript_forwarder(app: AppHandle, voice: Arc<VoiceManager>) {
+    let mut subscriber = voice.subscribe();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match subscriber.recv().await {
+                Ok(transcript) => {
+                    if let Err(err) = app.emit(STT_TRANSCRIPT_EVENT, transcript) {
+                        tracing::warn!(?err, "failed to forward stt transcript");
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(skipped = n, "voice transcript subscriber lagged");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
 /// Spawn the brain sidecar during app setup. Failure here surfaces as a
 /// startup error rather than crashing the app.
 async fn init_app_state(app: &AppHandle) -> Result<(), String> {
@@ -1734,6 +1874,12 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
     let supervisor = Arc::new(supervisor);
     spawn_global_notification_forwarder(app.clone(), supervisor.clone());
 
+    // Voice STT bridge (F7, ADR-0025). The seam ships the NoopEngine
+    // here; the local-Whisper / cloud / MLX backends swap in via
+    // later commits without changing the surface AppState exposes.
+    let voice = Arc::new(VoiceManager::with_noop_engine());
+    spawn_voice_transcript_forwarder(app.clone(), voice.clone());
+
     // CEF profile lives under the same canonical root as the brain's
     // SQLite stores so all on-disk state shares one directory (per
     // ADR-0028). `data_dir` was resolved above and forwarded to the
@@ -1750,6 +1896,7 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
         power: Arc::new(PowerManager::new()),
         assertions: Arc::new(Mutex::new(HashMap::new())),
         terminals: Arc::new(TerminalManager::new()),
+        voice,
     });
     Ok(())
 }
@@ -1955,6 +2102,9 @@ pub fn run() {
             email_discard_draft,
             email_approve_draft,
             email_send_draft,
+            stt_start,
+            stt_chunk,
+            stt_stop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

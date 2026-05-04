@@ -58,6 +58,7 @@ from thalyn_brain.threads_rpc import register_thread_methods
 from thalyn_brain.tracing import init_tracer
 from thalyn_brain.transport import serve_stdio
 from thalyn_brain.v2_stubs_rpc import register_v2_stubs
+from thalyn_brain.voice_rpc import register_voice_methods
 from thalyn_brain.worker_router import StoreBackedWorkerRouter
 
 
@@ -186,6 +187,11 @@ def main() -> int:
         projects_store=projects_store,
         valid_provider_ids={meta.id for meta in registry.list_meta()},
     )
+    # Voice STT bridge (F7, ADR-0025). The brain owns only the
+    # ``voice.project_vocabulary`` slice the engine biases against;
+    # the audio path lives in the Rust core.
+    register_voice_methods(dispatcher, projects=projects_store)
+
     # Stubs for the v2 IPC surface; real handlers replace these as
     # subsequent stages land per ADR-0021 / 02-architecture.md §6.
     register_v2_stubs(dispatcher)

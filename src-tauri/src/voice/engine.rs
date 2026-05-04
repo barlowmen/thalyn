@@ -1,0 +1,108 @@
+//! STT engine trait.
+//!
+//! Three engine kinds are planned for v0.33: the local default
+//! ([`EngineKind::LocalWhisper`], `whisper-cpp-plus`); the opt-in
+//! cloud fallback ([`EngineKind::Cloud`], Deepgram Nova-3); and the
+//! Apple-Silicon power-user opt-in ([`EngineKind::Mlx`],
+//! MLX-Whisper). All three sit behind the same trait so the
+//! [`super::VoiceManager`] can swap between them on a settings
+//! flip without re-wiring the IPC surface.
+//!
+//! [`NoopEngine`] is the placeholder shipped alongside the seam —
+//! it accepts every audio frame, returns an empty transcript on
+//! finalise, and lets the rest of the wire (Tauri commands, brain
+//! RPC, renderer events) land against a stable shape before the
+//! real backends arrive.
+
+use async_trait::async_trait;
+
+use super::manager::{SessionId, Transcript, VoiceError};
+
+/// Which backend a session uses. Persisted with the session so
+/// observers can disambiguate transcripts in mixed-mode tests.
+///
+/// Variants are listed up front so the routing surface lands once;
+/// only [`Noop`] is constructed in this scaffolding commit. Real
+/// backends fill the others in: `whisper-cpp-plus` for
+/// [`LocalWhisper`], Deepgram Nova-3 for [`Cloud`], MLX-Whisper for
+/// [`Mlx`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum EngineKind {
+    /// Whisper.cpp via the `whisper-cpp-plus` Rust crate (ADR-0025).
+    LocalWhisper,
+    /// Deepgram Nova-3 streaming WebSocket (opt-in cloud fallback).
+    Cloud,
+    /// MLX-Whisper on Apple Silicon (opt-in power-user alternative).
+    Mlx,
+    /// Placeholder used by tests and by the seam-only build before the
+    /// real backends land.
+    Noop,
+}
+
+/// Per-session inputs the manager hands the engine when a recording
+/// starts. The vocabulary slice biases Whisper's `initial_prompt` so
+/// the model recognises project-specific terminology — the EM
+/// metaphor cashing out in the voice path (spike F7). The
+/// [`NoopEngine`] ignores both fields; later engines consume them.
+#[derive(Debug, Clone, Default)]
+pub struct StartConfig {
+    pub project_id: Option<String>,
+    #[allow(dead_code)]
+    pub vocabulary: ProjectVocabulary,
+}
+
+/// Project-derived terminology hints. Populated by the brain's
+/// `voice.project_vocabulary` RPC (THALYN.md identifiers + memory
+/// facts) and forwarded to the engine via [`StartConfig`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProjectVocabulary {
+    pub terms: Vec<String>,
+}
+
+/// What every backend must implement. Engines are stateless across
+/// sessions — per-session state lives in the [`super::Session`] the
+/// manager owns; the engine is purely the decoder.
+#[async_trait]
+pub trait Engine: Send + Sync {
+    /// Identifier the manager records in [`Session`] for observability.
+    fn kind(&self) -> EngineKind;
+
+    /// Open a decoder context for a new session. The default impl
+    /// returns no per-session state — engines that need to load a
+    /// model context override this.
+    async fn begin(
+        &self,
+        _session_id: &SessionId,
+        _config: &StartConfig,
+    ) -> Result<(), VoiceError> {
+        Ok(())
+    }
+
+    /// Process an interim PCM frame. The seam-only [`NoopEngine`]
+    /// drops the frame; real engines decode and emit interim
+    /// transcripts via the manager's broadcast channel.
+    async fn feed(&self, _session_id: &SessionId, _pcm: &[i16]) -> Result<(), VoiceError> {
+        Ok(())
+    }
+
+    /// Finalise a session and return the final transcript. Engines
+    /// release any per-session state here.
+    async fn finish(&self, _session_id: &SessionId) -> Result<Transcript, VoiceError>;
+}
+
+/// Default engine used until the real backends land. Returns an
+/// empty final transcript on every session — the wire shape
+/// (Tauri commands + brain RPC) is what this commit ships.
+pub struct NoopEngine;
+
+#[async_trait]
+impl Engine for NoopEngine {
+    fn kind(&self) -> EngineKind {
+        EngineKind::Noop
+    }
+
+    async fn finish(&self, _session_id: &SessionId) -> Result<Transcript, VoiceError> {
+        Ok(Transcript::final_empty())
+    }
+}
