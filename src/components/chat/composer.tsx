@@ -3,7 +3,12 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { startStt, stopStt, subscribeSttLevels } from "@/lib/voice";
+import {
+  startStt,
+  stopStt,
+  subscribeSttLevels,
+  subscribeSttTranscripts,
+} from "@/lib/voice";
 
 type Props = {
   disabled?: boolean;
@@ -48,6 +53,17 @@ function meterScale(peak: number): number {
 }
 
 /**
+ * Concatenate the recording-time prefix and the transcript, inserting
+ * a space when the prefix is non-empty and doesn't already end with
+ * one. Mirrors the legacy ``stopRecording`` join behaviour so
+ * dictating after typed text reads as one sentence.
+ */
+function joinPrefixSuffix(prefix: string, suffix: string): string {
+  if (!prefix) return suffix;
+  return prefix.endsWith(" ") ? prefix + suffix : `${prefix} ${suffix}`;
+}
+
+/**
  * Multi-line composer. Enter sends; Shift-Enter inserts a newline;
  * ⌘/Ctrl-Enter is an explicit send alias for users who prefer the
  * Cmd-Enter convention. Auto-grows to a sensible cap then scrolls.
@@ -70,6 +86,11 @@ export function Composer({
   const [voice, setVoice] = useState<VoiceState>({ kind: "idle" });
   const [level, setLevel] = useState(0);
   const recordingRef = useRef<string | null>(null);
+  // Snapshot of the textarea's content at the moment recording
+  // started. Interim transcripts are written *after* this prefix so
+  // the user's prior typed text isn't clobbered, and the final
+  // transcript replaces the whole interim suffix on stop.
+  const prefixRef = useRef<string>("");
 
   const submit = () => {
     if (disabled) return;
@@ -94,6 +115,7 @@ export function Composer({
 
   const startRecording = async () => {
     if (voice.kind !== "idle" || disabled) return;
+    prefixRef.current = value;
     try {
       const sessionId = await startStt(projectId ?? undefined);
       recordingRef.current = sessionId;
@@ -107,16 +129,21 @@ export function Composer({
   const stopRecording = async () => {
     if (voice.kind !== "recording") return;
     const sessionId = voice.sessionId;
+    const prefix = prefixRef.current;
     recordingRef.current = null;
     setVoice({ kind: "transcribing" });
     try {
       const transcript = await stopStt(sessionId);
       const text = transcript.text.trim();
-      if (text) {
-        setValue((prev) => (prev ? `${prev}${prev.endsWith(" ") ? "" : " "}${text}` : text));
-      }
+      // Replace the whole interim suffix (anything appended during
+      // the hold) with the final, gold transcript — interim text
+      // is rolling and may not match the final phrasing.
+      setValue(text ? joinPrefixSuffix(prefix, text) : prefix);
       setVoice({ kind: "idle" });
     } catch (err) {
+      // Restore the pre-recording prefix so the textarea doesn't
+      // strand a partial interim if the engine errored out.
+      setValue(prefix);
       const message = err instanceof Error ? err.message : String(err);
       setVoice({ kind: "error", message });
     }
@@ -147,6 +174,34 @@ export function Composer({
       const current = recordingRef.current;
       if (!current || sample.sessionId !== current) return;
       setLevel(sample.peak);
+    }).then((cleanup) => {
+      if (cancelled) {
+        cleanup();
+        return;
+      }
+      unlisten = cleanup;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Subscribe to interim transcripts so the textarea updates live
+  // while the user holds the mic. Final transcripts are handled by
+  // the ``stopStt`` return path in ``stopRecording`` so we don't
+  // double-write here.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void subscribeSttTranscripts((sample) => {
+      if (cancelled) return;
+      if (sample.isFinal) return;
+      const current = recordingRef.current;
+      if (!current || sample.sessionId !== current) return;
+      const interim = sample.text.trim();
+      const prefix = prefixRef.current;
+      setValue(interim ? joinPrefixSuffix(prefix, interim) : prefix);
     }).then((cleanup) => {
       if (cancelled) {
         cleanup();
