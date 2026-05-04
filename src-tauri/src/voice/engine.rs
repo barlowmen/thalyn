@@ -17,7 +17,7 @@
 use async_trait::async_trait;
 use tokio::sync::broadcast;
 
-use super::manager::{SessionId, Transcript, VoiceError};
+use super::manager::{LevelEvent, SessionId, Transcript, VoiceError};
 
 /// Which backend a session uses. Persisted with the session so
 /// observers can disambiguate transcripts in mixed-mode tests.
@@ -94,6 +94,37 @@ impl InterimSink {
             session_id: self.session_id.clone(),
             text,
             is_final: false,
+        });
+    }
+}
+
+/// Channel the mic-capture path pushes peak-amplitude samples down.
+/// One sink per session; the cpal callback owns a clone and emits
+/// per-chunk peaks straight into the manager's broadcast channel.
+///
+/// `dead_code` is allowed for the same reason as [`InterimSink`] —
+/// the lean (non-`voice-whisper`) build still wires the type but
+/// the noop path doesn't run mic capture.
+#[allow(dead_code)]
+#[derive(Clone)]
+pub struct LevelSink {
+    sender: broadcast::Sender<LevelEvent>,
+    session_id: SessionId,
+}
+
+#[allow(dead_code)]
+impl LevelSink {
+    pub(super) fn new(sender: broadcast::Sender<LevelEvent>, session_id: SessionId) -> Self {
+        Self { sender, session_id }
+    }
+
+    /// Emit one peak-amplitude sample. Send failures are swallowed —
+    /// level events are best-effort animation fuel, not state, so a
+    /// missing one is harmless.
+    pub fn emit(&self, peak: f32) {
+        let _ = self.sender.send(LevelEvent {
+            session_id: self.session_id.clone(),
+            peak,
         });
     }
 }

@@ -27,6 +27,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat, StreamConfig};
 use thiserror::Error;
 
+use super::engine::LevelSink;
 use super::manager::{SessionId, VoiceManager};
 
 /// Whisper's input format. The resampler in [`downmix_to_16khz_mono`]
@@ -80,6 +81,7 @@ impl MicCapture {
         let (stop_tx, stop_rx) = std_mpsc::channel::<()>();
         let failed = Arc::new(AtomicBool::new(false));
         let failed_for_stream = failed.clone();
+        let level_sink = manager.level_sink(session_id.clone());
 
         // Spawn the cpal-owning OS thread. It builds the stream,
         // starts it, and parks until the stop signal fires.
@@ -92,6 +94,7 @@ impl MicCapture {
                 channels,
                 device_rate,
                 thread_pcm_tx,
+                level_sink,
                 failed_for_stream.clone(),
             );
             let stream = match stream_result {
@@ -161,6 +164,7 @@ fn build_input_stream(
     channels: u16,
     device_rate: u32,
     pcm_tx: tokio::sync::mpsc::Sender<Vec<i16>>,
+    level_sink: LevelSink,
     failed: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, CaptureError> {
     let err_failed = failed.clone();
@@ -170,43 +174,69 @@ fn build_input_stream(
     };
 
     match sample_format {
-        SampleFormat::F32 => device
-            .build_input_stream(
-                config,
-                move |data: &[f32], _| {
-                    let frame = downmix_to_16khz_mono(data, channels, device_rate);
-                    let _ = pcm_tx.try_send(frame);
-                },
-                err_handler,
-                None,
-            )
-            .map_err(|err| CaptureError::BuildStream(err.to_string())),
-        SampleFormat::I16 => device
-            .build_input_stream(
-                config,
-                move |data: &[i16], _| {
-                    let as_f32: Vec<f32> = data.iter().map(|&s| s.to_sample()).collect();
-                    let frame = downmix_to_16khz_mono(&as_f32, channels, device_rate);
-                    let _ = pcm_tx.try_send(frame);
-                },
-                err_handler,
-                None,
-            )
-            .map_err(|err| CaptureError::BuildStream(err.to_string())),
-        SampleFormat::U16 => device
-            .build_input_stream(
-                config,
-                move |data: &[u16], _| {
-                    let as_f32: Vec<f32> = data.iter().map(|&s| s.to_sample()).collect();
-                    let frame = downmix_to_16khz_mono(&as_f32, channels, device_rate);
-                    let _ = pcm_tx.try_send(frame);
-                },
-                err_handler,
-                None,
-            )
-            .map_err(|err| CaptureError::BuildStream(err.to_string())),
+        SampleFormat::F32 => {
+            let level = level_sink.clone();
+            device
+                .build_input_stream(
+                    config,
+                    move |data: &[f32], _| {
+                        level.emit(peak_amplitude_f32(data));
+                        let frame = downmix_to_16khz_mono(data, channels, device_rate);
+                        let _ = pcm_tx.try_send(frame);
+                    },
+                    err_handler,
+                    None,
+                )
+                .map_err(|err| CaptureError::BuildStream(err.to_string()))
+        }
+        SampleFormat::I16 => {
+            let level = level_sink.clone();
+            device
+                .build_input_stream(
+                    config,
+                    move |data: &[i16], _| {
+                        let as_f32: Vec<f32> = data.iter().map(|&s| s.to_sample()).collect();
+                        level.emit(peak_amplitude_f32(&as_f32));
+                        let frame = downmix_to_16khz_mono(&as_f32, channels, device_rate);
+                        let _ = pcm_tx.try_send(frame);
+                    },
+                    err_handler,
+                    None,
+                )
+                .map_err(|err| CaptureError::BuildStream(err.to_string()))
+        }
+        SampleFormat::U16 => {
+            let level = level_sink.clone();
+            device
+                .build_input_stream(
+                    config,
+                    move |data: &[u16], _| {
+                        let as_f32: Vec<f32> = data.iter().map(|&s| s.to_sample()).collect();
+                        level.emit(peak_amplitude_f32(&as_f32));
+                        let frame = downmix_to_16khz_mono(&as_f32, channels, device_rate);
+                        let _ = pcm_tx.try_send(frame);
+                    },
+                    err_handler,
+                    None,
+                )
+                .map_err(|err| CaptureError::BuildStream(err.to_string()))
+        }
         other => Err(CaptureError::UnsupportedFormat(other)),
     }
+}
+
+/// Peak absolute amplitude over a chunk, clamped to [0.0, 1.0]. The
+/// renderer animates a level meter from this, so peak (rather than
+/// RMS) keeps the visual responsive to word-attack transients.
+fn peak_amplitude_f32(samples: &[f32]) -> f32 {
+    let mut peak = 0.0_f32;
+    for &s in samples {
+        let abs = s.abs();
+        if abs > peak {
+            peak = abs;
+        }
+    }
+    peak.clamp(0.0, 1.0)
 }
 
 /// Downmix multi-channel f32 frames to mono and resample (decimate)
@@ -305,5 +335,27 @@ mod tests {
     fn downmix_handles_zero_channels() {
         // Defensive: channels = 0 must not divide-by-zero. Returns empty.
         assert!(downmix_to_16khz_mono(&[1.0, 2.0], 0, 16_000).is_empty());
+    }
+
+    #[test]
+    fn peak_amplitude_returns_max_absolute_value() {
+        let samples = [-0.4_f32, 0.7, -0.9, 0.3];
+        assert!((peak_amplitude_f32(&samples) - 0.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn peak_amplitude_returns_zero_for_silence() {
+        assert_eq!(peak_amplitude_f32(&[0.0; 8]), 0.0);
+    }
+
+    #[test]
+    fn peak_amplitude_clamps_runaway_input() {
+        let samples = [2.5_f32, -3.0, 1.5];
+        assert_eq!(peak_amplitude_f32(&samples), 1.0);
+    }
+
+    #[test]
+    fn peak_amplitude_handles_empty_input() {
+        assert_eq!(peak_amplitude_f32(&[]), 0.0);
     }
 }

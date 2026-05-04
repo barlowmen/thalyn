@@ -40,6 +40,7 @@ const LSP_MESSAGE_EVENT: &str = "lsp:message";
 const LSP_ERROR_EVENT: &str = "lsp:error";
 const TERMINAL_DATA_EVENT: &str = "terminal:data";
 const STT_TRANSCRIPT_EVENT: &str = "stt:transcript";
+const STT_LEVEL_EVENT: &str = "stt:level";
 const VOICE_VOCABULARY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Shared application state, registered with Tauri's `manage` so commands
@@ -1913,6 +1914,30 @@ fn spawn_voice_transcript_forwarder(app: AppHandle, voice: Arc<VoiceManager>) {
     });
 }
 
+/// Subscribe to the [`VoiceManager`]'s mic-level broadcast channel
+/// and re-emit every sample as a `stt:level` Tauri event. Levels
+/// arrive at cpal-callback cadence (~20–50 ms), so a `Lagged` here
+/// just means the renderer fell behind one or two animation frames
+/// — log and continue rather than tearing down the forwarder.
+fn spawn_voice_level_forwarder(app: AppHandle, voice: Arc<VoiceManager>) {
+    let mut subscriber = voice.subscribe_levels();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match subscriber.recv().await {
+                Ok(level) => {
+                    if let Err(err) = app.emit(STT_LEVEL_EVENT, level) {
+                        tracing::warn!(?err, "failed to forward stt level");
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::debug!(skipped = n, "voice level subscriber lagged");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
 /// Spawn the brain sidecar during app setup. Failure here surfaces as a
 /// startup error rather than crashing the app.
 async fn init_app_state(app: &AppHandle) -> Result<(), String> {
@@ -1967,6 +1992,7 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
     let bundled_whisper_dir = resource_dir.as_ref().map(|dir| dir.join("whisper"));
     let voice = Arc::new(build_voice_manager(&data_dir, bundled_whisper_dir));
     spawn_voice_transcript_forwarder(app.clone(), voice.clone());
+    spawn_voice_level_forwarder(app.clone(), voice.clone());
 
     // CEF profile lives under the same canonical root as the brain's
     // SQLite stores so all on-disk state shares one directory (per

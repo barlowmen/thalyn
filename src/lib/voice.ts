@@ -16,6 +16,12 @@ export type SttTranscript = {
   isFinal: boolean;
 };
 
+export type SttLevel = {
+  sessionId: string;
+  /** Peak absolute amplitude over the last cpal chunk, in [0, 1]. */
+  peak: number;
+};
+
 /**
  * Begin a voice STT session. The optional ``projectId`` lets the
  * brain seed the engine's ``initial_prompt`` with the project
@@ -68,6 +74,25 @@ export async function subscribeSttTranscripts(
   if (!eventModule) return () => undefined;
   const unlisten = await eventModule.listen<SttTranscript>(
     "stt:transcript",
+    (event) => handler(event.payload),
+  );
+  return () => unlisten();
+}
+
+/**
+ * Subscribe to live mic-level samples. Peak amplitude per cpal
+ * chunk; the handler runs at audio-callback cadence (~20–50 ms)
+ * so callers should keep work cheap. Returns an unsubscribe.
+ */
+export async function subscribeSttLevels(
+  handler: (level: SttLevel) => void,
+): Promise<() => void> {
+  const eventModule = await import("@tauri-apps/api/event").catch(
+    () => undefined,
+  );
+  if (!eventModule) return () => undefined;
+  const unlisten = await eventModule.listen<SttLevel>(
+    "stt:level",
     (event) => handler(event.payload),
   );
   return () => unlisten();

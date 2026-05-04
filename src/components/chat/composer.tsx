@@ -3,7 +3,7 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { startStt, stopStt } from "@/lib/voice";
+import { startStt, stopStt, subscribeSttLevels } from "@/lib/voice";
 
 type Props = {
   disabled?: boolean;
@@ -34,6 +34,20 @@ type VoiceState =
   | { kind: "error"; message: string };
 
 /**
+ * Map raw peak amplitude (linear, [0, 1]) to a meter scale that
+ * feels responsive. Speech rarely peaks near 1.0 even when loud —
+ * raising the floor and clamping high values gives a livelier bar
+ * for normal voice input without over-saturating on loud syllables.
+ */
+function meterScale(peak: number): number {
+  const floor = 0.05;
+  const ceiling = 0.6;
+  const clamped = Math.max(0, Math.min(peak, 1));
+  if (clamped <= floor) return 0;
+  return Math.min(1, (clamped - floor) / (ceiling - floor));
+}
+
+/**
  * Multi-line composer. Enter sends; Shift-Enter inserts a newline;
  * ⌘/Ctrl-Enter is an explicit send alias for users who prefer the
  * Cmd-Enter convention. Auto-grows to a sensible cap then scrolls.
@@ -54,6 +68,7 @@ export function Composer({
 }: Props) {
   const [value, setValue] = useState("");
   const [voice, setVoice] = useState<VoiceState>({ kind: "idle" });
+  const [level, setLevel] = useState(0);
   const recordingRef = useRef<string | null>(null);
 
   const submit = () => {
@@ -119,6 +134,40 @@ export function Composer({
     };
   }, []);
 
+  // Subscribe to mic-level events so the meter reflects real
+  // amplitude rather than a CSS animation. The subscription is
+  // active across the component's lifetime; payloads with a
+  // session id that doesn't match the current recording are
+  // dropped so concurrent composers can't crosstalk.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void subscribeSttLevels((sample) => {
+      if (cancelled) return;
+      const current = recordingRef.current;
+      if (!current || sample.sessionId !== current) return;
+      setLevel(sample.peak);
+    }).then((cleanup) => {
+      if (cancelled) {
+        cleanup();
+        return;
+      }
+      unlisten = cleanup;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Reset the meter when a session ends so the bar collapses
+  // cleanly (otherwise the last peak value would linger).
+  useEffect(() => {
+    if (voice.kind !== "recording") {
+      setLevel(0);
+    }
+  }, [voice.kind]);
+
   const roomy = size === "roomy";
   const recording = voice.kind === "recording";
   const transcribing = voice.kind === "transcribing";
@@ -143,45 +192,68 @@ export function Composer({
         submit();
       }}
     >
-      <Button
-        type="button"
-        size="icon"
-        variant={recording ? "destructive" : "ghost"}
-        disabled={disabled || transcribing}
-        aria-label={micLabel}
-        aria-pressed={recording}
-        title={micLabel}
-        onPointerDown={(event) => {
-          if (event.button !== 0) return;
-          event.preventDefault();
-          event.currentTarget.setPointerCapture(event.pointerId);
-          void startRecording();
-        }}
-        onPointerUp={(event) => {
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-          }
-          void stopRecording();
-        }}
-        onPointerCancel={() => {
-          void stopRecording();
-        }}
-        onLostPointerCapture={() => {
-          void stopRecording();
-        }}
-        className={cn(
-          "shrink-0",
-          roomy ? "h-10 w-10" : "h-9 w-9",
-          !recording && !transcribing && !errored && "text-muted-foreground",
-          recording && "animate-pulse",
+      <div className="relative shrink-0">
+        <Button
+          type="button"
+          size="icon"
+          variant={recording ? "destructive" : "ghost"}
+          disabled={disabled || transcribing}
+          aria-label={micLabel}
+          aria-pressed={recording}
+          title={micLabel}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            void startRecording();
+          }}
+          onPointerUp={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+            void stopRecording();
+          }}
+          onPointerCancel={() => {
+            void stopRecording();
+          }}
+          onLostPointerCapture={() => {
+            void stopRecording();
+          }}
+          className={cn(
+            "relative",
+            roomy ? "h-10 w-10" : "h-9 w-9",
+            !recording && !transcribing && !errored && "text-muted-foreground",
+          )}
+        >
+          {transcribing ? (
+            <Loader2 className="animate-spin" aria-hidden />
+          ) : (
+            <Mic aria-hidden className="relative z-10" />
+          )}
+          {recording && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-x-1 bottom-1 origin-bottom rounded-sm bg-destructive-foreground/40 transition-transform duration-75 ease-out"
+              style={{
+                height: "60%",
+                transform: `scaleY(${meterScale(level)})`,
+              }}
+            />
+          )}
+        </Button>
+        {recording && (
+          <span
+            role="meter"
+            aria-label="Microphone level"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(meterScale(level) * 100)}
+            className="sr-only"
+          >
+            {Math.round(meterScale(level) * 100)}
+          </span>
         )}
-      >
-        {transcribing ? (
-          <Loader2 className="animate-spin" aria-hidden />
-        ) : (
-          <Mic aria-hidden />
-        )}
-      </Button>
+      </div>
       <label htmlFor="chat-composer" className="sr-only">
         Message Thalyn
       </label>

@@ -20,9 +20,14 @@ use thiserror::Error;
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
 
-use super::engine::{Engine, EngineKind, InterimSink, NoopEngine, StartConfig};
+use super::engine::{Engine, EngineKind, InterimSink, LevelSink, NoopEngine, StartConfig};
 
 const TRANSCRIPT_BUFFER: usize = 256;
+/// Bigger than the transcript buffer because levels arrive at the
+/// cpal callback cadence (~20–50 ms). The renderer should not lag
+/// the producer often, but we'd rather drop than back-pressure the
+/// audio thread.
+const LEVEL_BUFFER: usize = 512;
 
 /// Errors surfaced to Tauri commands.
 #[derive(Debug, Error)]
@@ -86,6 +91,16 @@ impl Transcript {
     }
 }
 
+/// One mic-level sample — peak amplitude (0.0 – 1.0) over the last
+/// cpal callback's chunk. Emitted at audio-callback cadence so the
+/// renderer can animate a level meter without polling.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LevelEvent {
+    pub session_id: SessionId,
+    pub peak: f32,
+}
+
 /// Per-session bookkeeping. Engines are stateless across sessions;
 /// anything session-scoped lives here. The fields are read by tests
 /// today; commit 2 surfaces them through observability spans and
@@ -101,6 +116,7 @@ pub struct Session {
 pub struct VoiceManager {
     sessions: Mutex<HashMap<SessionId, Arc<Session>>>,
     transcripts: broadcast::Sender<Transcript>,
+    levels: broadcast::Sender<LevelEvent>,
     engine: Arc<dyn Engine>,
 }
 
@@ -109,9 +125,11 @@ impl VoiceManager {
     /// `VoiceManager` at startup and stores it on `AppState`.
     pub fn new(engine: Arc<dyn Engine>) -> Self {
         let (transcripts, _) = broadcast::channel(TRANSCRIPT_BUFFER);
+        let (levels, _) = broadcast::channel(LEVEL_BUFFER);
         Self {
             sessions: Mutex::new(HashMap::new()),
             transcripts,
+            levels,
             engine,
         }
     }
@@ -127,6 +145,21 @@ impl VoiceManager {
     /// a `stt:transcript` Tauri event.
     pub fn subscribe(&self) -> broadcast::Receiver<Transcript> {
         self.transcripts.subscribe()
+    }
+
+    /// Subscribe to the mic-level stream. Lib.rs spawns a parallel
+    /// forwarder that re-emits every level sample as a `stt:level`
+    /// Tauri event so the composer can animate a real meter.
+    pub fn subscribe_levels(&self) -> broadcast::Receiver<LevelEvent> {
+        self.levels.subscribe()
+    }
+
+    /// Build a [`LevelSink`] for the named session. The mic-capture
+    /// path takes the sink and pushes peak amplitude per cpal chunk;
+    /// keeping construction here means the broadcast channel and
+    /// session correlation stay private to the manager.
+    pub fn level_sink(&self, session_id: SessionId) -> LevelSink {
+        LevelSink::new(self.levels.clone(), session_id)
     }
 
     /// Start a new session and return its id.
