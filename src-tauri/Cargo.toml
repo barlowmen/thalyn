@@ -114,6 +114,7 @@ windows-sys = { version = "0.61", optional = true, features = [
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
+tempfile = "3"
 
 [profile.release]
 panic = "abort"

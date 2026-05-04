@@ -18,8 +18,12 @@ pub mod engine;
 #[cfg(feature = "voice-whisper")]
 pub mod local;
 pub mod manager;
+#[cfg(feature = "voice-whisper")]
+pub mod models;
 
 pub use engine::{ProjectVocabulary, StartConfig};
 #[cfg(feature = "voice-whisper")]
-pub use local::{LocalEngineError, LocalWhisperEngine};
+pub use local::LocalWhisperEngine;
 pub use manager::{SessionId, Transcript, VoiceManager};
+#[cfg(feature = "voice-whisper")]
+pub use models::ModelStore;

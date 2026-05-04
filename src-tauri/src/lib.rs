@@ -1807,40 +1807,38 @@ fn pcm_bytes_to_samples(bytes: &[u8]) -> Vec<i16> {
         .collect()
 }
 
-/// Resolve the canonical default model path. The model-store commit
-/// will overlay this with the user-selected pick from settings; for
-/// now it's a fixed `<data_dir>/models/<DEFAULT>.bin`. ADR-0025 pins
-/// `base.en` as the immediate-first-use preload (148 MB).
-#[cfg(feature = "voice-whisper")]
-fn default_voice_model_path(data_dir: &std::path::Path) -> std::path::PathBuf {
-    data_dir.join("models").join("base.en.bin")
-}
-
 /// Build the voice manager, preferring the local Whisper engine when
 /// a model is on disk and falling back to the seam-only NoopEngine
 /// when not. The lean build (`--no-default-features`) compiles
 /// without `whisper-cpp-plus` at all and always picks the noop path.
+///
+/// Picks the largest variant present under `<data_dir>/models/` per
+/// [`ModelStore::try_load_default`]; the lazy-download path that
+/// populates that directory lands next.
 fn build_voice_manager(data_dir: &std::path::Path) -> VoiceManager {
     #[cfg(feature = "voice-whisper")]
     {
-        let model_path = default_voice_model_path(data_dir);
+        let store = crate::voice::ModelStore::new(data_dir);
+        let Some((variant, model_path)) = store.try_load_default() else {
+            tracing::info!(
+                models_root = %store.root().display(),
+                "no Whisper model present yet; voice STT falls back to noop until the lazy-download path runs"
+            );
+            return VoiceManager::with_noop_engine();
+        };
         match crate::voice::LocalWhisperEngine::try_load(&model_path) {
             Ok(engine) => {
                 tracing::info!(
+                    model = variant.label(),
                     model_path = %engine.model_path().display(),
                     "voice STT bridge using local Whisper engine"
                 );
                 return VoiceManager::new(Arc::new(engine));
             }
-            Err(crate::voice::LocalEngineError::ModelNotFound(path)) => {
-                tracing::info!(
-                    model_path = %path.display(),
-                    "no Whisper model present yet; voice STT falls back to noop until the lazy-download path lands"
-                );
-            }
             Err(err) => {
                 tracing::warn!(
                     ?err,
+                    model = variant.label(),
                     "failed to load Whisper model; voice STT falls back to noop"
                 );
             }
