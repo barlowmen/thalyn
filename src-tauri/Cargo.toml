@@ -93,6 +93,12 @@ cef = { version = "147.1.0", optional = true }
 # `cuda`) sits behind the `voice-whisper-*` feature flags above so
 # the lean-build path stays portable.
 whisper-cpp-plus = { version = "0.1", optional = true }
+# Cross-platform audio I/O. Drives the composer mic via the default
+# input device on every platform; the resampling-to-16kHz-mono path
+# lives in `voice/capture.rs`. Apache-2.0; ADR-0016 (MIT for our own
+# code) allows linking against Apache-2.0 deps the same way the rest
+# of the ecosystem does (tokio, serde, etc.).
+cpal = "0.17"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", optional = true }

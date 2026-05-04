@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Voice input (F7 / ADR-0025): the composer mic captures audio
+         through cpal in the Rust core (NOT through CEF), so the
+         standard NSMicrophoneUsageDescription gates the prompt. The
+         signed-bundle landmine the v0.32 spike flagged: this key has
+         to live in the *merged* Info.plist that Tauri produces;
+         without it the first audio-stream open silently fails to
+         prompt and the user gets a dead mic with no error. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Thalyn uses the microphone to transcribe voice input directed at the eternal chat and at direct lead chats.</string>
+</dict>
+</plist>

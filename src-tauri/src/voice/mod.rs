@@ -14,6 +14,7 @@
 //! later commits swap in the real backends without touching the
 //! shape that lib.rs and the renderer talk to.
 
+pub mod capture;
 pub mod engine;
 #[cfg(feature = "voice-whisper")]
 pub mod local;
@@ -21,6 +22,7 @@ pub mod manager;
 #[cfg(feature = "voice-whisper")]
 pub mod models;
 
+pub use capture::MicCapture;
 pub use engine::{ProjectVocabulary, StartConfig};
 #[cfg(feature = "voice-whisper")]
 pub use local::LocalWhisperEngine;

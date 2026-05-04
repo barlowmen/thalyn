@@ -24,7 +24,9 @@ use crate::provider::{builtin_providers, ProviderMeta, ProviderRegistry};
 use crate::sandbox::SandboxManager;
 use crate::secrets::SecretsManager;
 use crate::terminal::TerminalManager;
-use crate::voice::{SessionId, StartConfig as VoiceStartConfig, Transcript, VoiceManager};
+use crate::voice::{
+    MicCapture, SessionId, StartConfig as VoiceStartConfig, Transcript, VoiceManager,
+};
 
 const BRAIN_CALL_TIMEOUT: Duration = Duration::from_secs(15);
 const CHAT_DEADLINE: Duration = Duration::from_secs(180);
@@ -66,10 +68,13 @@ struct AppState {
     terminals: Arc<TerminalManager>,
     /// Voice STT bridge (F7, ADR-0025). Owns engine + in-flight
     /// session map; the Tauri commands `stt_start` / `stt_chunk` /
-    /// `stt_stop` thread through this. Engine is a [`NoopEngine`]
-    /// in this scaffolding commit; later commits swap in
-    /// `whisper-cpp-plus`, Deepgram Nova-3, and MLX-Whisper.
+    /// `stt_stop` thread through this.
     voice: Arc<VoiceManager>,
+    /// Per-session active mic captures. The renderer holds Space to
+    /// open a session; when `stt_stop` fires we drop the capture
+    /// (cpal stream ends) and finalise the manager session. Empty
+    /// when no recording is in flight.
+    mic_captures: Arc<Mutex<HashMap<SessionId, MicCapture>>>,
 }
 
 /// Trimmed pong payload sent back to the renderer.
@@ -1704,8 +1709,9 @@ async fn send_chat(
 /// user presses the composer mic; the core asks the brain for the
 /// project vocabulary slice (best-effort — empty list if the brain
 /// is slow or the project unknown), opens a session against the
-/// engine, and returns the session id. Audio capture itself lands
-/// in a later commit (cpal in the core, no audio bytes over IPC).
+/// engine, starts the mic capture loop, and returns the session id.
+/// Audio bytes never traverse Tauri's IPC — capture lives in the
+/// Rust core via cpal, transcripts return through `stt_stop`.
 #[tauri::command]
 async fn stt_start(
     state: State<'_, AppState>,
@@ -1716,12 +1722,30 @@ async fn stt_start(
         project_id: project_id.clone(),
         vocabulary,
     };
-    state
+    let session_id = state
         .voice
         .start(config)
         .await
-        .map(|id| id.as_str().to_owned())
-        .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?;
+
+    match MicCapture::start(session_id.clone(), state.voice.clone()) {
+        Ok(capture) => {
+            state
+                .mic_captures
+                .lock()
+                .await
+                .insert(session_id.clone(), capture);
+        }
+        Err(err) => {
+            // Bail out of the session entirely so the renderer's
+            // pair start/stop invariant holds — finish() removes the
+            // session id, and the error surfaces.
+            let _ = state.voice.finish(&session_id).await;
+            return Err(format!("microphone unavailable: {err}"));
+        }
+    }
+
+    Ok(session_id.as_str().to_owned())
 }
 
 /// Push a PCM frame into an open session. Bytes are interpreted as
@@ -1744,10 +1768,16 @@ async fn stt_chunk(
         .map_err(|err| err.to_string())
 }
 
-/// Finalise a session and return the final transcript shape.
+/// Finalise a session and return the final transcript. Stops the
+/// mic capture (drops the cpal stream) before calling
+/// [`VoiceManager::finish`] so no further frames land after the
+/// engine has run its inference pass.
 #[tauri::command]
 async fn stt_stop(state: State<'_, AppState>, session_id: String) -> Result<Transcript, String> {
     let session = SessionId::from(session_id.as_str());
+    if let Some(mut capture) = state.mic_captures.lock().await.remove(&session) {
+        capture.stop();
+    }
     state
         .voice
         .finish(&session)
@@ -1955,6 +1985,7 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
         assertions: Arc::new(Mutex::new(HashMap::new())),
         terminals: Arc::new(TerminalManager::new()),
         voice,
+        mic_captures: Arc::new(Mutex::new(HashMap::new())),
     });
     Ok(())
 }

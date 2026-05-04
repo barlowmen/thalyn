@@ -258,6 +258,7 @@ function ShellInner() {
                     ? "Add an Anthropic API key in Settings to enable chat."
                     : undefined
                 }
+                projectId={activeProjectId}
                 onSubmit={send}
               />
             </div>

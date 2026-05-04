@@ -1,8 +1,9 @@
-import { ArrowUp, Mic } from "lucide-react";
-import { type KeyboardEvent, useState } from "react";
+import { ArrowUp, Loader2, Mic } from "lucide-react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { startStt, stopStt } from "@/lib/voice";
 
 type Props = {
   disabled?: boolean;
@@ -16,20 +17,44 @@ type Props = {
    * so the legacy callers keep their layout.
    */
   size?: "compact" | "roomy";
+  /**
+   * Project context for voice transcription. The Rust core forwards
+   * this to the brain's ``voice.project_vocabulary`` RPC so Whisper's
+   * ``initial_prompt`` biases toward project-specific terminology.
+   * ``null`` / undefined is fine — the engine falls back to its
+   * default decoder behaviour (F7 / ADR-0025).
+   */
+  projectId?: string | null;
 };
+
+type VoiceState =
+  | { kind: "idle" }
+  | { kind: "recording"; sessionId: string }
+  | { kind: "transcribing" }
+  | { kind: "error"; message: string };
 
 /**
  * Multi-line composer. Enter sends; Shift-Enter inserts a newline;
  * ⌘/Ctrl-Enter is an explicit send alias for users who prefer the
  * Cmd-Enter convention. Auto-grows to a sensible cap then scrolls.
  *
- * The mic button is a v0.26 stub — voice input lands later (F7).
- * Rendering it now keeps the composer geometry stable across the
- * voice transition so the bottom-bar doesn't reflow when the mic
- * lights up.
+ * The mic button is **press-and-hold push-to-talk** (F7 / ADR-0025).
+ * Mouse / touch down opens an STT session in the Rust core; release
+ * stops the cpal stream, runs the engine's batch-on-stop transcribe,
+ * and drops the editable transcript into the textarea. The user can
+ * tweak before hitting Cmd/Ctrl-Enter — voice is a faster way to
+ * dictate intent, not a one-shot voice command.
  */
-export function Composer({ disabled, placeholder, onSubmit, size = "compact" }: Props) {
+export function Composer({
+  disabled,
+  placeholder,
+  onSubmit,
+  size = "compact",
+  projectId,
+}: Props) {
   const [value, setValue] = useState("");
+  const [voice, setVoice] = useState<VoiceState>({ kind: "idle" });
+  const recordingRef = useRef<string | null>(null);
 
   const submit = () => {
     if (disabled) return;
@@ -52,7 +77,60 @@ export function Composer({ disabled, placeholder, onSubmit, size = "compact" }: 
     }
   };
 
+  const startRecording = async () => {
+    if (voice.kind !== "idle" || disabled) return;
+    try {
+      const sessionId = await startStt(projectId ?? undefined);
+      recordingRef.current = sessionId;
+      setVoice({ kind: "recording", sessionId });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setVoice({ kind: "error", message });
+    }
+  };
+
+  const stopRecording = async () => {
+    if (voice.kind !== "recording") return;
+    const sessionId = voice.sessionId;
+    recordingRef.current = null;
+    setVoice({ kind: "transcribing" });
+    try {
+      const transcript = await stopStt(sessionId);
+      const text = transcript.text.trim();
+      if (text) {
+        setValue((prev) => (prev ? `${prev}${prev.endsWith(" ") ? "" : " "}${text}` : text));
+      }
+      setVoice({ kind: "idle" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setVoice({ kind: "error", message });
+    }
+  };
+
+  // Defensive: if the component unmounts mid-recording, drop the
+  // session in the core so the cpal stream doesn't leak.
+  useEffect(() => {
+    return () => {
+      const sessionId = recordingRef.current;
+      if (sessionId) {
+        stopStt(sessionId).catch(() => undefined);
+        recordingRef.current = null;
+      }
+    };
+  }, []);
+
   const roomy = size === "roomy";
+  const recording = voice.kind === "recording";
+  const transcribing = voice.kind === "transcribing";
+  const errored = voice.kind === "error";
+
+  const micLabel = recording
+    ? "Recording — release to transcribe"
+    : transcribing
+      ? "Transcribing…"
+      : errored
+        ? `Voice input error — ${voice.message}`
+        : "Voice input — hold to record";
 
   return (
     <form
@@ -68,16 +146,41 @@ export function Composer({ disabled, placeholder, onSubmit, size = "compact" }: 
       <Button
         type="button"
         size="icon"
-        variant="ghost"
-        disabled
-        aria-label="Voice input (coming soon)"
-        title="Voice input — coming soon"
+        variant={recording ? "destructive" : "ghost"}
+        disabled={disabled || transcribing}
+        aria-label={micLabel}
+        aria-pressed={recording}
+        title={micLabel}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          void startRecording();
+        }}
+        onPointerUp={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+          void stopRecording();
+        }}
+        onPointerCancel={() => {
+          void stopRecording();
+        }}
+        onLostPointerCapture={() => {
+          void stopRecording();
+        }}
         className={cn(
-          "shrink-0 text-muted-foreground",
+          "shrink-0",
           roomy ? "h-10 w-10" : "h-9 w-9",
+          !recording && !transcribing && !errored && "text-muted-foreground",
+          recording && "animate-pulse",
         )}
       >
-        <Mic aria-hidden />
+        {transcribing ? (
+          <Loader2 className="animate-spin" aria-hidden />
+        ) : (
+          <Mic aria-hidden />
+        )}
       </Button>
       <label htmlFor="chat-composer" className="sr-only">
         Message Thalyn
