@@ -15,6 +15,7 @@
 //! real backends arrive.
 
 use async_trait::async_trait;
+use tokio::sync::broadcast;
 
 use super::manager::{SessionId, Transcript, VoiceError};
 
@@ -60,6 +61,43 @@ pub struct ProjectVocabulary {
     pub terms: Vec<String>,
 }
 
+/// Channel an engine pushes interim transcripts down. The manager
+/// constructs one per session — the engine only sees `send_interim`
+/// and never has to think about routing or session correlation.
+///
+/// Cheap to clone (it's a wrapper around a `tokio::sync::broadcast`
+/// `Sender` + a `SessionId`), so engines that hand the sink to a
+/// worker thread can clone freely.
+///
+/// `dead_code` is allowed because the lean (non-`voice-whisper`)
+/// build only ever runs the [`NoopEngine`], which never emits
+/// interim transcripts; the type still has to exist so the
+/// `Engine::begin` signature compiles on every target.
+#[allow(dead_code)]
+#[derive(Clone)]
+pub struct InterimSink {
+    sender: broadcast::Sender<Transcript>,
+    session_id: SessionId,
+}
+
+#[allow(dead_code)]
+impl InterimSink {
+    pub(super) fn new(sender: broadcast::Sender<Transcript>, session_id: SessionId) -> Self {
+        Self { sender, session_id }
+    }
+
+    /// Emit an interim transcript. Send failures (no subscribers,
+    /// channel lagged) are swallowed — interim transcripts are best-
+    /// effort and a missing one isn't fatal to the session.
+    pub fn send_interim(&self, text: String) {
+        let _ = self.sender.send(Transcript {
+            session_id: self.session_id.clone(),
+            text,
+            is_final: false,
+        });
+    }
+}
+
 /// What every backend must implement. Engines are stateless across
 /// sessions — per-session state lives in the [`super::Session`] the
 /// manager owns; the engine is purely the decoder.
@@ -70,11 +108,14 @@ pub trait Engine: Send + Sync {
 
     /// Open a decoder context for a new session. The default impl
     /// returns no per-session state — engines that need to load a
-    /// model context override this.
+    /// model context override this. The `interim` sink lets the
+    /// engine push live transcripts back through the manager's
+    /// broadcast channel as it decodes.
     async fn begin(
         &self,
         _session_id: &SessionId,
         _config: &StartConfig,
+        _interim: InterimSink,
     ) -> Result<(), VoiceError> {
         Ok(())
     }

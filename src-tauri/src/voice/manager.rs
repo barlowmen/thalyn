@@ -20,7 +20,7 @@ use thiserror::Error;
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
 
-use super::engine::{Engine, EngineKind, NoopEngine, StartConfig};
+use super::engine::{Engine, EngineKind, InterimSink, NoopEngine, StartConfig};
 
 const TRANSCRIPT_BUFFER: usize = 256;
 
@@ -132,8 +132,9 @@ impl VoiceManager {
     /// Start a new session and return its id.
     pub async fn start(&self, config: StartConfig) -> Result<SessionId, VoiceError> {
         let id = SessionId::new();
+        let interim = InterimSink::new(self.transcripts.clone(), id.clone());
         self.engine
-            .begin(&id, &config)
+            .begin(&id, &config, interim)
             .await
             .map_err(|err| VoiceError::Engine(err.to_string()))?;
 
@@ -185,6 +186,7 @@ impl VoiceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
 
     #[tokio::test]
     async fn start_assigns_a_unique_session_id() {
@@ -234,6 +236,46 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, VoiceError::UnknownSession(_)));
+    }
+
+    #[tokio::test]
+    async fn interim_sink_emissions_reach_subscribers() {
+        // Custom engine that fires one interim transcript on `begin`
+        // — proves the manager's plumbing wires the broadcast sink
+        // correctly so real engines (whisper.cpp, Deepgram, MLX) can
+        // push interim updates back through the same channel that
+        // forwards to the renderer.
+        struct InterimEngine;
+
+        #[async_trait]
+        impl Engine for InterimEngine {
+            fn kind(&self) -> EngineKind {
+                EngineKind::Noop
+            }
+
+            async fn begin(
+                &self,
+                _session_id: &SessionId,
+                _config: &StartConfig,
+                interim: InterimSink,
+            ) -> Result<(), VoiceError> {
+                interim.send_interim("hello".into());
+                Ok(())
+            }
+
+            async fn finish(&self, _session_id: &SessionId) -> Result<Transcript, VoiceError> {
+                Ok(Transcript::final_empty())
+            }
+        }
+
+        let manager = VoiceManager::new(Arc::new(InterimEngine));
+        let mut rx = manager.subscribe();
+        let id = manager.start(StartConfig::default()).await.unwrap();
+
+        let received = rx.recv().await.unwrap();
+        assert_eq!(received.session_id, id);
+        assert!(!received.is_final);
+        assert_eq!(received.text, "hello");
     }
 
     #[tokio::test]
