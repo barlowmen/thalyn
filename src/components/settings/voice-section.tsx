@@ -1,20 +1,39 @@
+import { AlertTriangle, Eye, EyeOff } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   type VoiceContinuousSubmit,
+  type VoiceEngine,
   type VoiceMicGesture,
   type VoiceMode,
   readVoiceContinuousSubmit,
+  readVoiceEngine,
   readVoiceMicGesture,
   readVoiceMode,
   subscribeVoiceContinuousSubmit,
+  subscribeVoiceEngine,
   subscribeVoiceMicGesture,
   subscribeVoiceMode,
   writeVoiceContinuousSubmit,
+  writeVoiceEngine,
   writeVoiceMicGesture,
   writeVoiceMode,
 } from "@/lib/voice-prefs";
+import {
+  clearVoiceSecret,
+  getVoiceSecretStatus,
+  saveVoiceSecret,
+  type VoiceSecretStatus,
+} from "@/lib/voice-secrets";
 
 /**
  * Three toggles controlling the composer's voice input behaviour:
@@ -34,6 +53,8 @@ import {
  * sessions; the composer subscribes via custom events so changes
  * here flow into a live composer without a remount.
  */
+const EMPTY_SECRET_STATUS: VoiceSecretStatus = { deepgramConfigured: false };
+
 export function VoiceSection() {
   const [mode, setModeState] = useState<VoiceMode>(readVoiceMode);
   const [gesture, setGestureState] = useState<VoiceMicGesture>(
@@ -42,15 +63,30 @@ export function VoiceSection() {
   const [submit, setSubmitState] = useState<VoiceContinuousSubmit>(
     readVoiceContinuousSubmit,
   );
+  const [engine, setEngineState] = useState<VoiceEngine>(readVoiceEngine);
+  const [secretStatus, setSecretStatus] =
+    useState<VoiceSecretStatus>(EMPTY_SECRET_STATUS);
+  const [pendingCloud, setPendingCloud] = useState(false);
+
+  const refreshSecretStatus = async () => {
+    try {
+      setSecretStatus(await getVoiceSecretStatus());
+    } catch {
+      setSecretStatus(EMPTY_SECRET_STATUS);
+    }
+  };
 
   useEffect(() => {
     const unMode = subscribeVoiceMode(setModeState);
     const unGesture = subscribeVoiceMicGesture(setGestureState);
     const unSubmit = subscribeVoiceContinuousSubmit(setSubmitState);
+    const unEngine = subscribeVoiceEngine(setEngineState);
+    void refreshSecretStatus();
     return () => {
       unMode();
       unGesture();
       unSubmit();
+      unEngine();
     };
   }, []);
 
@@ -66,6 +102,22 @@ export function VoiceSection() {
     setSubmitState(next);
     writeVoiceContinuousSubmit(next);
   };
+  const onEngineChange = (next: VoiceEngine) => {
+    if (next === "cloud" && engine !== "cloud") {
+      // Surface the privacy disclosure before flipping the toggle.
+      // The Dialog confirm path actually persists the change.
+      setPendingCloud(true);
+      return;
+    }
+    setEngineState(next);
+    writeVoiceEngine(next);
+  };
+  const confirmCloud = () => {
+    setEngineState("cloud");
+    writeVoiceEngine("cloud");
+    setPendingCloud(false);
+  };
+  const cancelCloud = () => setPendingCloud(false);
 
   return (
     <section className="space-y-4">
@@ -149,6 +201,197 @@ export function VoiceSection() {
           <option value="auto">Auto-submit each utterance</option>
         </select>
       </div>
+
+      <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+        <div>
+          <Label htmlFor="voice-engine" className="text-sm font-medium">
+            Engine
+          </Label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Local Whisper.cpp runs on-device by default — audio never
+            leaves your machine. Deepgram Nova-3 is an opt-in cloud
+            fallback for weak hardware; it sends audio over the
+            network and needs an API key. The cloud wire-up is
+            scheduled post-v1; the toggle is here today so the
+            settings + key paths exist when the smoke goes live.
+          </p>
+        </div>
+        <select
+          id="voice-engine"
+          value={engine}
+          onChange={(e) => onEngineChange(e.target.value as VoiceEngine)}
+          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <option value="local">Local Whisper.cpp (default)</option>
+          <option value="cloud">Deepgram Nova-3 (cloud, opt-in)</option>
+        </select>
+        {engine === "cloud" && (
+          <DeepgramApiKeyField
+            configured={secretStatus.deepgramConfigured}
+            onSaved={refreshSecretStatus}
+          />
+        )}
+      </div>
+
+      <Dialog
+        open={pendingCloud}
+        onOpenChange={(open) => {
+          if (!open) cancelCloud();
+        }}
+      >
+        <DialogContent className="sm:max-w-[480px]">
+          <header className="space-y-1">
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle
+                aria-hidden
+                className="h-5 w-5 text-warning"
+              />
+              Switch voice engine to Deepgram cloud?
+            </DialogTitle>
+            <DialogDescription>
+              The local Whisper.cpp engine processes audio entirely on
+              your machine. Switching to Deepgram Nova-3 sends each
+              utterance over the network to Deepgram and requires
+              their API key. Lower latency on weak hardware; less
+              private than local-only.
+            </DialogDescription>
+          </header>
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <Button size="sm" variant="ghost" onClick={cancelCloud}>
+              Keep local
+            </Button>
+            <Button size="sm" variant="default" onClick={confirmCloud}>
+              Switch to cloud
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </section>
+  );
+}
+
+type ApiKeyStatus =
+  | { kind: "idle" }
+  | { kind: "saving" }
+  | { kind: "saved" }
+  | { kind: "clearing" }
+  | { kind: "cleared" }
+  | { kind: "error"; message: string };
+
+function DeepgramApiKeyField({
+  configured,
+  onSaved,
+}: {
+  configured: boolean;
+  onSaved: () => Promise<void> | void;
+}) {
+  const [value, setValue] = useState("");
+  const [reveal, setReveal] = useState(false);
+  const [status, setStatus] = useState<ApiKeyStatus>({ kind: "idle" });
+
+  const onSave = async () => {
+    if (!value.trim()) return;
+    setStatus({ kind: "saving" });
+    try {
+      await saveVoiceSecret("deepgram_api_key", value.trim());
+      setStatus({ kind: "saved" });
+      setValue("");
+      await onSaved();
+    } catch (err) {
+      setStatus({
+        kind: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  const onClear = async () => {
+    setStatus({ kind: "clearing" });
+    try {
+      await clearVoiceSecret("deepgram_api_key");
+      setStatus({ kind: "cleared" });
+      await onSaved();
+    } catch (err) {
+      setStatus({
+        kind: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  return (
+    <div className="space-y-3 rounded-md border border-border bg-bg p-3">
+      <Label htmlFor="deepgram-api-key" className="text-sm font-medium">
+        Deepgram API key
+      </Label>
+      <div className="flex items-center gap-2">
+        <Input
+          id="deepgram-api-key"
+          type={reveal ? "text" : "password"}
+          placeholder="sk_…"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          spellCheck={false}
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={reveal ? "Hide key" : "Show key"}
+          aria-pressed={reveal}
+          onClick={() => setReveal((current) => !current)}
+        >
+          {reveal ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Stored in the OS keychain. Never rendered after save.
+      </p>
+
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          onClick={onSave}
+          disabled={!value.trim() || status.kind === "saving"}
+          size="sm"
+        >
+          {status.kind === "saving" ? "Saving…" : "Save"}
+        </Button>
+        {configured && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onClear}
+            disabled={status.kind === "clearing"}
+          >
+            {status.kind === "clearing" ? "Clearing…" : "Clear"}
+          </Button>
+        )}
+      </div>
+
+      {status.kind === "error" && (
+        <p className="text-sm text-destructive">{status.message}</p>
+      )}
+      {status.kind === "saved" && (
+        <p className="text-sm text-success">Saved.</p>
+      )}
+      {status.kind === "cleared" && (
+        <p className="text-sm text-muted-foreground">Cleared.</p>
+      )}
+      {status.kind === "idle" &&
+        (configured ? (
+          <p className="text-sm text-success">
+            A Deepgram API key is on file in the OS keychain.
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No key on file. Cloud STT is disabled until one is saved.
+          </p>
+        ))}
+    </div>
   );
 }

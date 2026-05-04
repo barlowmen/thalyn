@@ -11,12 +11,15 @@ import {
 } from "@/lib/voice";
 import {
   type VoiceContinuousSubmit,
+  type VoiceEngine,
   type VoiceMicGesture,
   type VoiceMode,
   readVoiceContinuousSubmit,
+  readVoiceEngine,
   readVoiceMicGesture,
   readVoiceMode,
   subscribeVoiceContinuousSubmit,
+  subscribeVoiceEngine,
   subscribeVoiceMicGesture,
   subscribeVoiceMode,
 } from "@/lib/voice-prefs";
@@ -98,6 +101,7 @@ export function Composer({
   const [level, setLevel] = useState(0);
   const [mode, setMode] = useState<VoiceMode>(readVoiceMode);
   const [gesture, setGesture] = useState<VoiceMicGesture>(readVoiceMicGesture);
+  const [engine, setEngine] = useState<VoiceEngine>(readVoiceEngine);
   const [continuousSubmit, setContinuousSubmit] =
     useState<VoiceContinuousSubmit>(readVoiceContinuousSubmit);
   const recordingRef = useRef<string | null>(null);
@@ -164,6 +168,7 @@ export function Composer({
       const sessionId = await startStt({
         projectId: projectId ?? null,
         continuous: mode === "continuous",
+        preferCloud: engine === "cloud",
       });
       recordingRef.current = sessionId;
       setVoice({ kind: "recording", sessionId });
@@ -317,10 +322,12 @@ export function Composer({
     const unMode = subscribeVoiceMode(setMode);
     const unGesture = subscribeVoiceMicGesture(setGesture);
     const unSubmit = subscribeVoiceContinuousSubmit(setContinuousSubmit);
+    const unEngine = subscribeVoiceEngine(setEngine);
     return () => {
       unMode();
       unGesture();
       unSubmit();
+      unEngine();
     };
   }, []);
 

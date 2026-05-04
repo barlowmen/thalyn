@@ -37,6 +37,13 @@ export type StartSttOptions = {
    * Default ``false`` (single-utterance push-to-talk).
    */
   continuous?: boolean;
+  /**
+   * Route the session to the opt-in cloud STT engine (Deepgram
+   * Nova-3 per ADR-0025) instead of the local Whisper.cpp default.
+   * The Rust core fails fast when this is true but no API key is
+   * configured, or when the network wire-up is still pending.
+   */
+  preferCloud?: boolean;
 };
 
 /**
@@ -48,6 +55,7 @@ export async function startStt(
   return invoke<string>("stt_start", {
     projectId: options.projectId ?? null,
     continuous: options.continuous ?? false,
+    preferCloud: options.preferCloud ?? false,
   });
 }
 

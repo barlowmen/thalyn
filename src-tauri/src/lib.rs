@@ -214,6 +214,52 @@ fn is_observability_secret(name: &str) -> bool {
     matches!(name, "sentry_dsn" | "otel_otlp_endpoint")
 }
 
+/// Voice-related secrets carried in the OS keychain. The cloud STT
+/// opt-in (Deepgram Nova-3 per ADR-0025) is the only entry today;
+/// the MLX-Whisper alternative runs locally so it has no key. Future
+/// providers add their own variant here without changing the wire
+/// shape the renderer talks to.
+fn is_voice_secret(name: &str) -> bool {
+    matches!(name, "deepgram_api_key")
+}
+
+#[tauri::command]
+async fn save_voice_secret(
+    state: State<'_, AppState>,
+    name: String,
+    value: String,
+) -> Result<(), String> {
+    if !is_voice_secret(&name) {
+        return Err(format!("unknown voice secret: {name}"));
+    }
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("value is empty".into());
+    }
+    state
+        .secrets
+        .save_secret(&name, trimmed)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn clear_voice_secret(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    if !is_voice_secret(&name) {
+        return Err(format!("unknown voice secret: {name}"));
+    }
+    state
+        .secrets
+        .delete_secret(&name)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn voice_secret_status(state: State<'_, AppState>) -> Result<Value, String> {
+    Ok(json!({
+        "deepgramConfigured": state.secrets.has_secret("deepgram_api_key"),
+    }))
+}
+
 #[tauri::command]
 async fn list_runs(
     state: State<'_, AppState>,
@@ -1719,12 +1765,34 @@ async fn send_chat(
 /// the broadcast channel, and the session keeps listening until
 /// `stt_stop` is called. The renderer's voice prefs decide whether
 /// to pass true here.
+///
+/// `prefer_cloud` is the routing flag for the opt-in Deepgram
+/// Nova-3 engine (ADR-0025). It's wired as a skeleton in v0.33 —
+/// the routing surface lands so the Tauri command + settings can
+/// flip behaviour, but the underlying engine errors out with a
+/// clear "wire-up pending" message until the going-public smoke
+/// runs.
 #[tauri::command]
 async fn stt_start(
     state: State<'_, AppState>,
     project_id: Option<String>,
     continuous: Option<bool>,
+    prefer_cloud: Option<bool>,
 ) -> Result<String, String> {
+    if prefer_cloud.unwrap_or(false) {
+        if !state.secrets.has_secret("deepgram_api_key") {
+            return Err(
+                "Deepgram cloud STT is enabled in settings, but no API key is on file. \
+                 Paste a key in Settings → Voice or disable the cloud opt-in."
+                    .into(),
+            );
+        }
+        return Err(
+            "Deepgram cloud STT is opt-in but the network wire-up ships post-v1; \
+             see docs/going-public-checklist.md."
+                .into(),
+        );
+    }
     let vocabulary = fetch_project_vocabulary(&state, project_id.as_deref()).await;
     let config = VoiceStartConfig {
         project_id: project_id.clone(),
@@ -2195,6 +2263,9 @@ pub fn run() {
             save_observability_secret,
             clear_observability_secret,
             observability_status,
+            save_voice_secret,
+            clear_voice_secret,
+            voice_secret_status,
             terminal_open,
             terminal_input,
             terminal_resize,

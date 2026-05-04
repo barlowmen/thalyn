@@ -21,14 +21,17 @@
 export type VoiceMode = "ptt" | "continuous";
 export type VoiceMicGesture = "hold" | "tap-toggle";
 export type VoiceContinuousSubmit = "review" | "auto";
+export type VoiceEngine = "local" | "cloud";
 
 const MODE_KEY = "thalyn:voice-mode";
 const GESTURE_KEY = "thalyn:voice-mic-gesture";
 const SUBMIT_KEY = "thalyn:voice-continuous-submit";
+const ENGINE_KEY = "thalyn:voice-engine";
 
 export const VOICE_MODE_DEFAULT: VoiceMode = "continuous";
 export const VOICE_MIC_GESTURE_DEFAULT: VoiceMicGesture = "hold";
 export const VOICE_CONTINUOUS_SUBMIT_DEFAULT: VoiceContinuousSubmit = "review";
+export const VOICE_ENGINE_DEFAULT: VoiceEngine = "local";
 
 const VOICE_MODE_VALUES: ReadonlySet<VoiceMode> = new Set(["ptt", "continuous"]);
 const VOICE_GESTURE_VALUES: ReadonlySet<VoiceMicGesture> = new Set([
@@ -39,11 +42,13 @@ const VOICE_SUBMIT_VALUES: ReadonlySet<VoiceContinuousSubmit> = new Set([
   "review",
   "auto",
 ]);
+const VOICE_ENGINE_VALUES: ReadonlySet<VoiceEngine> = new Set(["local", "cloud"]);
 
 export const VOICE_MODE_EVENT = "thalyn:voice-mode-changed";
 export const VOICE_MIC_GESTURE_EVENT = "thalyn:voice-mic-gesture-changed";
 export const VOICE_CONTINUOUS_SUBMIT_EVENT =
   "thalyn:voice-continuous-submit-changed";
+export const VOICE_ENGINE_EVENT = "thalyn:voice-engine-changed";
 
 function readEnum<T extends string>(
   key: string,
@@ -149,4 +154,20 @@ export function subscribeVoiceContinuousSubmit(
     VOICE_SUBMIT_VALUES,
     handler,
   );
+}
+
+// --- voiceEngine -----------------------------------------------------------
+
+export function readVoiceEngine(): VoiceEngine {
+  return readEnum(ENGINE_KEY, VOICE_ENGINE_DEFAULT, VOICE_ENGINE_VALUES);
+}
+
+export function writeVoiceEngine(value: VoiceEngine): void {
+  writeEnum(ENGINE_KEY, value, VOICE_ENGINE_EVENT);
+}
+
+export function subscribeVoiceEngine(
+  handler: (value: VoiceEngine) => void,
+): () => void {
+  return subscribeEnum(VOICE_ENGINE_EVENT, VOICE_ENGINE_VALUES, handler);
 }
