@@ -238,9 +238,10 @@ export function VoiceSection() {
           <p className="rounded-md border border-border bg-bg p-3 text-xs text-muted-foreground">
             MLX-Whisper runs ~3× faster than whisper.cpp on M-series
             hardware but needs a separate model download (~600 MB) and
-            adds the MLX dep to the brain venv. Both ship in a v1.x
-            follow-up; selecting MLX today surfaces a clear "wire-up
-            pending" error when you press the mic.
+            adds an MLX dependency to Thalyn&apos;s bundled Python
+            runtime. Both ship in a v1.x follow-up; selecting MLX
+            today surfaces a clear &quot;wire-up pending&quot; error
+            when you press the mic.
           </p>
         )}
       </div>
