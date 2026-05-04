@@ -161,6 +161,13 @@ re-architecture.
   `src-tauri/Info.plist` with its generated one) silently
   fail to prompt. The bundle smoke check verifies the merged
   plist has the key before signing.
+- macOS denies microphone access *silently* once the user has
+  said "Don't Allow" — `cpal::build_input_stream` succeeds but
+  no PCM frames flow. The composer can't classify this as a
+  permission failure on the same code path Windows uses; the
+  ``open_mic_settings`` Tauri command is wired and points at
+  Security & Privacy → Microphone for users who realise they
+  denied access by accident.
 
 ### Windows
 
@@ -185,6 +192,12 @@ re-architecture.
   doesn't gate behind it; the going-public checklist
   carries a row to wire the portal path before public
   release.
+- The renderer's "Open settings" affordance returns an error
+  on Linux today (no canonical privacy pane to deep-link to);
+  the composer leaves the dismiss button so the user can
+  resolve the access denial in their distro's audio control
+  panel and try again. PipeWire portal integration will
+  surface a real deep-link once it lands.
 
 ## Privacy posture
 

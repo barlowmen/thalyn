@@ -25,7 +25,7 @@ use crate::sandbox::SandboxManager;
 use crate::secrets::SecretsManager;
 use crate::terminal::TerminalManager;
 use crate::voice::{
-    MicCapture, SessionId, StartConfig as VoiceStartConfig, Transcript, VoiceManager,
+    CaptureError, MicCapture, SessionId, StartConfig as VoiceStartConfig, Transcript, VoiceManager,
 };
 
 const BRAIN_CALL_TIMEOUT: Duration = Duration::from_secs(15);
@@ -221,6 +221,70 @@ fn is_observability_secret(name: &str) -> bool {
 /// shape the renderer talks to.
 fn is_voice_secret(name: &str) -> bool {
     matches!(name, "deepgram_api_key")
+}
+
+/// Map a [`CaptureError`] to the string the renderer parses. The
+/// `mic_permission_denied:` prefix is the cue for the composer to
+/// render an "Open Settings" affordance pointing at the OS privacy
+/// pane (Windows ms-settings:privacy-microphone, macOS Security &
+/// Privacy → Microphone). Other errors keep the legacy
+/// "microphone unavailable: …" wording for backwards-compat with
+/// existing renderer copy.
+fn format_capture_error(err: &CaptureError) -> String {
+    match err {
+        CaptureError::PermissionDenied(msg) => format!("mic_permission_denied: {msg}"),
+        CaptureError::StartTimeout => {
+            "mic_permission_denied: microphone stream did not start; check OS privacy settings"
+                .into()
+        }
+        other => format!("microphone unavailable: {other}"),
+    }
+}
+
+/// Open the OS privacy-microphone settings pane in a single click.
+/// Wired for the renderer's permission-denied error UI: when the
+/// composer sees a `mic_permission_denied:` error it can offer this
+/// command instead of asking the user to navigate the OS shell by
+/// hand. macOS opens Security & Privacy → Microphone; Windows
+/// opens the modern Settings deep-link
+/// (`ms-settings:privacy-microphone`); Linux returns an explanatory
+/// error since ALSA / Pulse don't have a single canonical privacy
+/// surface (PipeWire portal integration is on
+/// `docs/going-public-checklist.md`).
+#[tauri::command]
+async fn open_mic_settings() -> Result<(), String> {
+    open_mic_settings_impl()
+}
+
+#[cfg(target_os = "macos")]
+fn open_mic_settings_impl() -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("failed to open macOS Privacy pane: {err}"))
+}
+
+#[cfg(target_os = "windows")]
+fn open_mic_settings_impl() -> Result<(), String> {
+    // ``cmd /c start ms-settings:privacy-microphone`` is the
+    // documented path; ``start`` is a shell builtin so we route it
+    // through cmd rather than spawning an .exe directly.
+    std::process::Command::new("cmd")
+        .args(["/c", "start", "ms-settings:privacy-microphone"])
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("failed to open Windows privacy settings: {err}"))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_mic_settings_impl() -> Result<(), String> {
+    // Linux distros vary — ALSA and PulseAudio direct don't have a
+    // canonical privacy pane the way macOS / Windows do, and the
+    // PipeWire portal flow lands on the going-public list. Surface
+    // a clear "no shortcut here" so the renderer can show a
+    // distro-agnostic hint instead of a dead button.
+    Err("no canonical microphone-privacy pane on this platform".into())
 }
 
 #[tauri::command]
@@ -1826,7 +1890,7 @@ async fn stt_start(
             // pair start/stop invariant holds — finish() removes the
             // session id, and the error surfaces.
             let _ = state.voice.finish(&session_id).await;
-            return Err(format!("microphone unavailable: {err}"));
+            return Err(format_capture_error(&err));
         }
     }
 
@@ -2274,6 +2338,7 @@ pub fn run() {
             save_voice_secret,
             clear_voice_secret,
             voice_secret_status,
+            open_mic_settings,
             terminal_open,
             terminal_input,
             terminal_resize,

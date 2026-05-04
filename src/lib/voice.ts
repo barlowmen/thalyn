@@ -115,6 +115,32 @@ export async function subscribeSttTranscripts(
 }
 
 /**
+ * Open the OS privacy-microphone settings pane. macOS opens the
+ * Security & Privacy → Microphone pane; Windows the modern
+ * ``ms-settings:privacy-microphone`` deep-link; Linux returns an
+ * error since there's no canonical pane (PipeWire portal flow is
+ * deferred to a v1.x follow-up).
+ *
+ * The renderer calls this in response to a ``mic_permission_denied:``
+ * error from ``startStt`` so the user can fix the OS toggle in one
+ * click.
+ */
+export async function openMicSettings(): Promise<void> {
+  await invoke("open_mic_settings");
+}
+
+/**
+ * Convenience: ``true`` when a ``startStt`` rejection was a typed
+ * mic-permission denial. The Rust core prefixes the error message
+ * with ``mic_permission_denied:`` so the composer can render an
+ * "Open Settings" affordance instead of a dead-end error string.
+ */
+export function isMicPermissionError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.startsWith("mic_permission_denied:");
+}
+
+/**
  * Subscribe to live mic-level samples. Peak amplitude per cpal
  * chunk; the handler runs at audio-callback cadence (~20–50 ms)
  * so callers should keep work cheap. Returns an unsubscribe.

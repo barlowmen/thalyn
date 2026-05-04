@@ -22,7 +22,7 @@ pub mod manager;
 #[cfg(feature = "voice-whisper")]
 pub mod models;
 
-pub use capture::MicCapture;
+pub use capture::{CaptureError, MicCapture};
 pub use engine::{ProjectVocabulary, StartConfig};
 #[cfg(feature = "voice-whisper")]
 pub use local::LocalWhisperEngine;

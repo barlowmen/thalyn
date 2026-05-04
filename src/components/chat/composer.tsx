@@ -1,9 +1,11 @@
-import { ArrowUp, Loader2, Mic } from "lucide-react";
+import { ArrowUp, Loader2, Mic, Settings as SettingsIcon } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
+  isMicPermissionError,
+  openMicSettings,
   startStt,
   stopStt,
   subscribeSttLevels,
@@ -50,7 +52,7 @@ type VoiceState =
   | { kind: "idle" }
   | { kind: "recording"; sessionId: string }
   | { kind: "transcribing" }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; permissionDenied: boolean };
 
 /**
  * Map raw peak amplitude (linear, [0, 1]) to a meter scale that
@@ -75,6 +77,20 @@ function meterScale(peak: number): number {
 function joinPrefixSuffix(prefix: string, suffix: string): string {
   if (!prefix) return suffix;
   return prefix.endsWith(" ") ? prefix + suffix : `${prefix} ${suffix}`;
+}
+
+/**
+ * Strip the ``mic_permission_denied:`` prefix the Rust core uses to
+ * tag typed errors so the renderer can surface a deep-link button.
+ * The user shouldn't see the prefix; the rest of the message stays
+ * intact for whatever fallback display the composer wants.
+ */
+function formatVoiceErrorMessage(raw: string): string {
+  const prefix = "mic_permission_denied:";
+  if (raw.startsWith(prefix)) {
+    return raw.slice(prefix.length).trim();
+  }
+  return raw;
 }
 
 /**
@@ -176,7 +192,11 @@ export function Composer({
     } catch (err) {
       sessionContinuousRef.current = false;
       const message = err instanceof Error ? err.message : String(err);
-      setVoice({ kind: "error", message });
+      setVoice({
+        kind: "error",
+        message,
+        permissionDenied: isMicPermissionError(err),
+      });
     }
   };
 
@@ -208,7 +228,11 @@ export function Composer({
       // strand a partial interim if the engine errored out.
       setValue(prefix);
       const message = err instanceof Error ? err.message : String(err);
-      setVoice({ kind: "error", message });
+      setVoice({
+        kind: "error",
+        message,
+        permissionDenied: isMicPermissionError(err),
+      });
     }
   };
 
@@ -336,6 +360,7 @@ export function Composer({
   const recording = voice.kind === "recording";
   const transcribing = voice.kind === "transcribing";
   const errored = voice.kind === "error";
+  const permissionDenied = voice.kind === "error" && voice.permissionDenied;
   const tapToggle = gesture === "tap-toggle";
   const continuousMode = mode === "continuous";
 
@@ -350,18 +375,40 @@ export function Composer({
     ? "Recording — tap to stop"
     : "Recording — release to transcribe";
 
+  const errorMessageDisplay =
+    voice.kind === "error" ? formatVoiceErrorMessage(voice.message) : "";
+
   const micLabel = recording
     ? recordingHint
     : transcribing
       ? "Transcribing…"
       : errored
-        ? `Voice input error — ${voice.message}`
+        ? permissionDenied
+          ? "Microphone access blocked — open OS settings to allow Thalyn"
+          : `Voice input error — ${errorMessageDisplay}`
         : idleHint;
+
+  const dismissError = () => {
+    if (voice.kind === "error") {
+      setVoice({ kind: "idle" });
+    }
+  };
+
+  const onOpenMicSettings = async () => {
+    try {
+      await openMicSettings();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Replace the prior error so the user sees the deep-link
+      // failed (Linux today, or any unexpected platform error).
+      setVoice({ kind: "error", message, permissionDenied: false });
+    }
+  };
 
   return (
     <form
       className={cn(
-        "flex items-end gap-2 border-t border-border bg-background",
+        "flex flex-col gap-2 border-t border-border bg-background",
         roomy ? "px-6 py-4" : "px-6 py-3",
       )}
       onSubmit={(e) => {
@@ -369,6 +416,39 @@ export function Composer({
         submit();
       }}
     >
+      {permissionDenied && (
+        <div
+          role="alert"
+          className="flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+        >
+          <p className="flex-1">
+            Microphone access is blocked. Allow Thalyn in the OS
+            privacy settings, then try again.
+          </p>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1 px-2 text-xs"
+              onClick={() => void onOpenMicSettings()}
+            >
+              <SettingsIcon aria-hidden className="h-3.5 w-3.5" />
+              Open settings
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              onClick={dismissError}
+            >
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      )}
+      <div className="flex items-end gap-2">
       <div className="relative shrink-0">
         <Button
           type="button"
@@ -474,6 +554,7 @@ export function Composer({
       >
         <ArrowUp aria-hidden />
       </Button>
+      </div>
     </form>
   );
 }

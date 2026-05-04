@@ -45,6 +45,20 @@ pub enum CaptureError {
     BuildStream(String),
     #[error("unsupported sample format: {0:?}")]
     UnsupportedFormat(SampleFormat),
+    /// Thalyn was blocked from opening the input device. On Windows
+    /// this is the OS privacy-microphone toggle; on Linux a sandbox
+    /// or PipeWire portal denial. macOS surfaces permission denial
+    /// silently (build succeeds, no PCM flows) so the renderer
+    /// detects it via a different signal.
+    #[error("microphone access blocked by the OS: {0}")]
+    PermissionDenied(String),
+    /// The cpal build/play handshake didn't complete within the
+    /// expected window. Distinct from a hard build error — the
+    /// device exists, the API didn't fail, but we couldn't confirm
+    /// the stream came up. Surfaces in the renderer as a generic
+    /// mic-error with the underlying message.
+    #[error("microphone stream did not start within the expected window")]
+    StartTimeout,
 }
 
 /// Handle for one in-flight mic-capture session. Drop the handle to
@@ -79,12 +93,17 @@ impl MicCapture {
 
         let (pcm_tx, mut pcm_rx) = tokio::sync::mpsc::channel::<Vec<i16>>(64);
         let (stop_tx, stop_rx) = std_mpsc::channel::<()>();
+        let (build_tx, build_rx) = std_mpsc::sync_channel::<Result<(), CaptureError>>(1);
         let failed = Arc::new(AtomicBool::new(false));
         let failed_for_stream = failed.clone();
         let level_sink = manager.level_sink(session_id.clone());
 
         // Spawn the cpal-owning OS thread. It builds the stream,
-        // starts it, and parks until the stop signal fires.
+        // starts it, and parks until the stop signal fires. The
+        // build/play handshake reports back through `build_tx` so
+        // start() can surface a permission-denied error
+        // synchronously (Windows) instead of swallowing it into a
+        // log line.
         let thread_pcm_tx = pcm_tx.clone();
         std::thread::spawn(move || {
             let stream_result = build_input_stream(
@@ -102,18 +121,27 @@ impl MicCapture {
                 Err(err) => {
                     tracing::warn!(?err, "failed to build mic stream");
                     failed_for_stream.store(true, Ordering::Relaxed);
+                    let _ = build_tx.send(Err(classify_capture_error(&err)));
                     return;
                 }
             };
             if let Err(err) = stream.play() {
                 tracing::warn!(?err, "failed to start mic stream");
                 failed_for_stream.store(true, Ordering::Relaxed);
+                let msg = err.to_string();
+                let classified = if is_permission_message(&msg) {
+                    CaptureError::PermissionDenied(msg)
+                } else {
+                    CaptureError::BuildStream(msg)
+                };
+                let _ = build_tx.send(Err(classified));
                 return;
             }
-            // Block this OS thread until the renderer-side stop
-            // signal fires (or the sender is dropped). cpal's stream
-            // stays alive as long as we hold it; dropping it here
-            // ends capture.
+            // Stream is up; report success then park until the
+            // renderer-side stop signal fires (or the sender is
+            // dropped). cpal's stream stays alive as long as we
+            // hold it; dropping it here ends capture.
+            let _ = build_tx.send(Ok(()));
             let _ = stop_rx.recv();
             drop(stream);
         });
@@ -129,6 +157,16 @@ impl MicCapture {
                 }
             }
         });
+
+        // Wait for the worker to confirm build + play. A 2 s ceiling
+        // is generous — cpal returns near-instantly on every
+        // platform — but covers an unusually slow device enumeration
+        // without blocking the user beyond the perceptible.
+        match build_rx.recv_timeout(std::time::Duration::from_secs(2)) {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => return Err(err),
+            Err(_) => return Err(CaptureError::StartTimeout),
+        }
 
         Ok(Self {
             stop_tx: Some(stop_tx),
@@ -223,6 +261,55 @@ fn build_input_stream(
         }
         other => Err(CaptureError::UnsupportedFormat(other)),
     }
+}
+
+/// Classify a [`CaptureError`] coming back from cpal. Today the only
+/// classification is permission-denied detection — Windows reports
+/// the privacy-microphone toggle through a build error whose string
+/// includes "access" / "denied" / "permission" / the
+/// `0x80070005` (E_ACCESSDENIED) HRESULT. Returning a typed variant
+/// lets the renderer offer a one-click deep-link to the OS
+/// settings page instead of just dumping the raw error.
+fn classify_capture_error(err: &CaptureError) -> CaptureError {
+    let msg = match err {
+        CaptureError::BuildStream(msg) => msg.as_str(),
+        CaptureError::DefaultConfig(msg) => msg.as_str(),
+        // Other variants are already classified.
+        _ => return clone_capture_error(err),
+    };
+    if is_permission_message(msg) {
+        return CaptureError::PermissionDenied(msg.to_string());
+    }
+    clone_capture_error(err)
+}
+
+/// `CaptureError` doesn't derive `Clone` because `SampleFormat` is
+/// only conditionally `Clone` across cpal versions; explicit
+/// reconstruction is the safer shape.
+fn clone_capture_error(err: &CaptureError) -> CaptureError {
+    match err {
+        CaptureError::NoInputDevice => CaptureError::NoInputDevice,
+        CaptureError::DefaultConfig(s) => CaptureError::DefaultConfig(s.clone()),
+        CaptureError::BuildStream(s) => CaptureError::BuildStream(s.clone()),
+        CaptureError::UnsupportedFormat(fmt) => CaptureError::UnsupportedFormat(*fmt),
+        CaptureError::PermissionDenied(s) => CaptureError::PermissionDenied(s.clone()),
+        CaptureError::StartTimeout => CaptureError::StartTimeout,
+    }
+}
+
+/// Heuristic match for permission-denied error strings across the
+/// platforms cpal targets. Windows' `0x80070005` is the canonical
+/// signal; Linux portal denials and ALSA's "access denied" variants
+/// land on the same wording. macOS denies silently (no error) so the
+/// substring match has nothing to catch there — that's a separate
+/// "no PCM after N seconds" UX, not this commit's surface.
+fn is_permission_message(msg: &str) -> bool {
+    let lower = msg.to_ascii_lowercase();
+    lower.contains("access is denied")
+        || lower.contains("access denied")
+        || lower.contains("permission denied")
+        || lower.contains("0x80070005")
+        || (lower.contains("denied") && lower.contains("microphone"))
 }
 
 /// Peak absolute amplitude over a chunk, clamped to [0.0, 1.0]. The
@@ -357,5 +444,61 @@ mod tests {
     #[test]
     fn peak_amplitude_handles_empty_input() {
         assert_eq!(peak_amplitude_f32(&[]), 0.0);
+    }
+
+    #[test]
+    fn permission_message_matches_windows_hresult() {
+        assert!(is_permission_message("CoCreateInstance failed: 0x80070005"));
+    }
+
+    #[test]
+    fn permission_message_matches_access_denied() {
+        assert!(is_permission_message("Access is denied. (os error 5)"));
+        assert!(is_permission_message(
+            "WAS device activation: access denied"
+        ));
+    }
+
+    #[test]
+    fn permission_message_matches_permission_denied() {
+        assert!(is_permission_message(
+            "ALSA: permission denied opening hw:0"
+        ));
+    }
+
+    #[test]
+    fn permission_message_matches_microphone_denial_phrase() {
+        assert!(is_permission_message(
+            "Portal returned: microphone access was denied"
+        ));
+    }
+
+    #[test]
+    fn permission_message_misses_unrelated_errors() {
+        assert!(!is_permission_message("device disconnected"));
+        assert!(!is_permission_message("unsupported sample rate: 48000"));
+        // "denied" without microphone context shouldn't match
+        // unless it pairs with the canonical access/permission verbs.
+        assert!(!is_permission_message(
+            "buffer pool allocation denied by daemon"
+        ));
+    }
+
+    #[test]
+    fn classify_capture_error_promotes_build_error_on_permission() {
+        let err = CaptureError::BuildStream("Access is denied. (os error 5)".into());
+        match classify_capture_error(&err) {
+            CaptureError::PermissionDenied(_) => {}
+            other => panic!("expected PermissionDenied, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_capture_error_keeps_unrelated_errors_unchanged() {
+        let err = CaptureError::BuildStream("device disconnected".into());
+        match classify_capture_error(&err) {
+            CaptureError::BuildStream(msg) => assert_eq!(msg, "device disconnected"),
+            other => panic!("expected BuildStream, got {other:?}"),
+        }
     }
 }
