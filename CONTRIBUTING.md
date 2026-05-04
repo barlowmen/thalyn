@@ -88,6 +88,29 @@ Apple Silicon Core ML support is the load-bearing follow-up — the
 `whisper-cpp-plus` 0.1.4 release does not yet expose it as a cargo
 feature, so wiring is on the going-public-checklist.
 
+The `base.en` GGML model (148 MB) preloads inside the macOS bundle
+via [`scripts/fetch-whisper-base-en.sh`](scripts/fetch-whisper-base-en.sh),
+chained from `before-bundle.sh`. The first `pnpm tauri build` runs
+the fetch (~30s on a typical connection) and SHA-256-verifies the
+result; subsequent builds hit the cached file at
+`target/whisper-models/ggml-base.en.bin`. Set
+`THALYN_SKIP_WHISPER_PRELOAD=1` to skip the staging step when
+iterating on Rust-only changes that don't need a working voice
+surface; the bundle then ships without the preload and falls
+through to the runtime fallback path.
+
+For `pnpm tauri dev` runs (no bundle), drop a model into your data
+dir manually if you want voice to work locally:
+
+```sh
+mkdir -p ~/Library/Application\ Support/app.thalyn/models
+cp target/whisper-models/ggml-base.en.bin \
+   ~/Library/Application\ Support/app.thalyn/models/
+```
+
+(The Linux / Windows data-dir paths follow the standard XDG /
+%APPDATA% layout — Tauri's `BaseDirectory::AppData` resolves them.)
+
 If you specifically need a voice-free build (e.g., reproducing a
 non-voice regression on an offline machine), drop the feature:
 

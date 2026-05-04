@@ -42,7 +42,8 @@
         "Frameworks/Thalyn Helper (Renderer).app": "target/cef-helpers/Thalyn Helper (Renderer).app",
         "Frameworks/Thalyn Helper (Plugin).app": "target/cef-helpers/Thalyn Helper (Plugin).app",
         "Frameworks/Thalyn Helper (Alerts).app": "target/cef-helpers/Thalyn Helper (Alerts).app",
-        "Resources/thalyn-brain": "target/brain-sidecar/thalyn-brain"
+        "Resources/thalyn-brain": "target/brain-sidecar/thalyn-brain",
+        "Resources/whisper/ggml-base.en.bin": "target/whisper-models/ggml-base.en.bin"
       }
     }
   }

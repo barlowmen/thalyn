@@ -118,34 +118,79 @@ impl ModelVariant {
     }
 }
 
-/// On-disk store for Whisper models. Owns one root directory
-/// (`<data_dir>/models/`); the lazy-download path writes into it,
-/// the engine reads from it.
+/// On-disk store for Whisper models. The store reads from two
+/// roots in order:
+///
+/// - **Bundle resources** (optional): for packaged `.app` builds,
+///   the bundler stages `base.en` under
+///   `<resource_dir>/whisper/ggml-base.en.bin` via
+///   `before-bundle.sh` so the immediate-first-use model ships
+///   inside the installer (ADR-0025). Read-only.
+/// - **User data dir** (`<data_dir>/models/`): the lazy-download
+///   path writes here at runtime — `small.en` lands here on first
+///   push-to-talk, and a power user can drop a manually downloaded
+///   `.bin` into the same dir.
+///
+/// Resolution prefers the user data dir when both roots have the
+/// same variant — that lets the user override the bundled
+/// `base.en` with a different model without un-bundling the app.
 #[derive(Debug, Clone)]
 pub struct ModelStore {
-    root: PathBuf,
+    user_root: PathBuf,
+    bundled_root: Option<PathBuf>,
 }
 
 impl ModelStore {
-    /// Build a store rooted under `<data_dir>/models/`. Doesn't
-    /// create the directory; the download path does that lazily.
+    /// Build a store rooted under `<data_dir>/models/` for runtime
+    /// downloads, with no bundle root. Used by the noop dev path.
     pub fn new(data_dir: impl Into<PathBuf>) -> Self {
         Self {
-            root: data_dir.into().join("models"),
+            user_root: data_dir.into().join("models"),
+            bundled_root: None,
         }
     }
 
-    /// Resolve the on-disk path for one variant.
-    pub fn path_for(&self, variant: ModelVariant) -> PathBuf {
-        self.root.join(variant.filename())
+    /// Build a store with both the runtime root and a bundle root
+    /// that ships preloaded models. AppState passes the Tauri
+    /// resource dir's `whisper/` subdir as the bundle root in
+    /// packaged builds.
+    pub fn with_bundled(data_dir: impl Into<PathBuf>, bundled_root: PathBuf) -> Self {
+        Self {
+            user_root: data_dir.into().join("models"),
+            bundled_root: Some(bundled_root),
+        }
     }
 
-    /// Whether the file for `variant` exists and is non-empty.
+    /// Resolve the on-disk path the variant would live at if it
+    /// were downloaded into the user dir. The runtime download
+    /// path writes here.
+    #[allow(dead_code)]
+    pub fn path_for(&self, variant: ModelVariant) -> PathBuf {
+        self.user_root.join(variant.filename())
+    }
+
+    /// Whether the file for `variant` exists and is non-empty in
+    /// either root. Bundled models count as present.
+    #[allow(dead_code)]
     pub fn is_present(&self, variant: ModelVariant) -> bool {
-        let path = self.path_for(variant);
-        std::fs::metadata(&path)
-            .map(|m| m.is_file() && m.len() > 0)
-            .unwrap_or(false)
+        self.resolve_existing(variant).is_some()
+    }
+
+    /// Find the actual on-disk path for a variant — checks the
+    /// user data dir first (so a downloaded override wins over the
+    /// bundle), then the bundle root.
+    pub fn resolve_existing(&self, variant: ModelVariant) -> Option<PathBuf> {
+        let user_path = self.user_root.join(variant.filename());
+        if path_is_nonempty_file(&user_path) {
+            return Some(user_path);
+        }
+        if let Some(bundled_root) = &self.bundled_root {
+            let bundled_path = bundled_root.join(variant.filename());
+            if path_is_nonempty_file(&bundled_path) {
+                return Some(bundled_path);
+            }
+        }
+        None
     }
 
     /// Pick the largest variant that's present on disk. Returns
@@ -155,15 +200,21 @@ impl ModelStore {
         ModelVariant::ORDERED
             .iter()
             .copied()
-            .find(|v| self.is_present(*v))
-            .map(|v| (v, self.path_for(v)))
+            .find_map(|v| self.resolve_existing(v).map(|p| (v, p)))
     }
 
-    /// Read-only view of the root directory.
+    /// Read-only view of the user data root. Used by the startup
+    /// log line.
     #[allow(dead_code)]
     pub fn root(&self) -> &Path {
-        &self.root
+        &self.user_root
     }
+}
+
+fn path_is_nonempty_file(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|m| m.is_file() && m.len() > 0)
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -247,5 +298,48 @@ mod tests {
         std::fs::write(store.path_for(ModelVariant::BaseEn), b"x").unwrap();
         let (variant, _) = store.try_load_default().unwrap();
         assert_eq!(variant, ModelVariant::BaseEn);
+    }
+
+    #[test]
+    fn bundled_root_falls_through_when_user_dir_is_empty() {
+        let user = tempfile::tempdir().unwrap();
+        let bundle = tempfile::tempdir().unwrap();
+        let store = ModelStore::with_bundled(user.path(), bundle.path().to_path_buf());
+        std::fs::write(bundle.path().join("ggml-base.en.bin"), b"x").unwrap();
+        let (variant, path) = store.try_load_default().expect("bundled model resolves");
+        assert_eq!(variant, ModelVariant::BaseEn);
+        assert_eq!(path, bundle.path().join("ggml-base.en.bin"));
+    }
+
+    #[test]
+    fn user_dir_overrides_bundled_for_the_same_variant() {
+        let user = tempfile::tempdir().unwrap();
+        let bundle = tempfile::tempdir().unwrap();
+        let store = ModelStore::with_bundled(user.path(), bundle.path().to_path_buf());
+        std::fs::create_dir_all(store.root()).unwrap();
+        // Both roots have base.en; the user-dir copy must win so
+        // a re-download or a manual replacement actually takes effect.
+        std::fs::write(bundle.path().join("ggml-base.en.bin"), b"bundle").unwrap();
+        std::fs::write(store.path_for(ModelVariant::BaseEn), b"user").unwrap();
+        let path = store
+            .resolve_existing(ModelVariant::BaseEn)
+            .expect("override resolves");
+        assert_eq!(path, store.path_for(ModelVariant::BaseEn));
+    }
+
+    #[test]
+    fn user_dir_small_en_beats_bundled_base_en() {
+        // The bundle ships base.en as the immediate-first-use
+        // preload; once the user downloads small.en into the
+        // runtime dir, the larger model wins.
+        let user = tempfile::tempdir().unwrap();
+        let bundle = tempfile::tempdir().unwrap();
+        let store = ModelStore::with_bundled(user.path(), bundle.path().to_path_buf());
+        std::fs::create_dir_all(store.root()).unwrap();
+        std::fs::write(bundle.path().join("ggml-base.en.bin"), b"bundle").unwrap();
+        std::fs::write(store.path_for(ModelVariant::SmallEn), b"downloaded").unwrap();
+        let (variant, path) = store.try_load_default().unwrap();
+        assert_eq!(variant, ModelVariant::SmallEn);
+        assert_eq!(path, store.path_for(ModelVariant::SmallEn));
     }
 }

@@ -1812,13 +1812,21 @@ fn pcm_bytes_to_samples(bytes: &[u8]) -> Vec<i16> {
 /// when not. The lean build (`--no-default-features`) compiles
 /// without `whisper-cpp-plus` at all and always picks the noop path.
 ///
-/// Picks the largest variant present under `<data_dir>/models/` per
-/// [`ModelStore::try_load_default`]; the lazy-download path that
-/// populates that directory lands next.
-fn build_voice_manager(data_dir: &std::path::Path) -> VoiceManager {
+/// Picks the largest variant present in either the user data dir
+/// (`<data_dir>/models/`) or the bundled `whisper/` resource dir
+/// per [`ModelStore::try_load_default`]; the user dir wins on
+/// conflict so a runtime download can override the bundled
+/// `base.en` preload.
+fn build_voice_manager(
+    data_dir: &std::path::Path,
+    bundled_whisper_dir: Option<std::path::PathBuf>,
+) -> VoiceManager {
     #[cfg(feature = "voice-whisper")]
     {
-        let store = crate::voice::ModelStore::new(data_dir);
+        let store = match bundled_whisper_dir {
+            Some(bundle) => crate::voice::ModelStore::with_bundled(data_dir, bundle),
+            None => crate::voice::ModelStore::new(data_dir),
+        };
         let Some((variant, model_path)) = store.try_load_default() else {
             tracing::info!(
                 models_root = %store.root().display(),
@@ -1846,7 +1854,7 @@ fn build_voice_manager(data_dir: &std::path::Path) -> VoiceManager {
     }
     #[cfg(not(feature = "voice-whisper"))]
     {
-        let _ = data_dir;
+        let _ = (data_dir, bundled_whisper_dir);
         tracing::info!("voice STT bridge built without `voice-whisper`; using noop engine");
     }
     VoiceManager::with_noop_engine()
@@ -1921,11 +1929,13 @@ async fn init_app_state(app: &AppHandle) -> Result<(), String> {
 
     // Voice STT bridge (F7, ADR-0025). Try the local Whisper engine
     // against the resolved model path first; fall back to a NoopEngine
-    // when no model is present (the lazy-download path lands in the
-    // model-store commit, so a fresh dev install starts on the
-    // fallback). The cloud (Deepgram) and MLX opt-ins swap in via
-    // settings flips in later commits without changing this shape.
-    let voice = Arc::new(build_voice_manager(&data_dir));
+    // when no model is present. The bundled `base.en` preload lives
+    // under `<resource_dir>/whisper/` in packaged builds; runtime
+    // downloads (and dev-machine drops) land under
+    // `<data_dir>/models/`. Cloud (Deepgram) and MLX opt-ins swap in
+    // via settings flips in later commits without changing this shape.
+    let bundled_whisper_dir = resource_dir.as_ref().map(|dir| dir.join("whisper"));
+    let voice = Arc::new(build_voice_manager(&data_dir, bundled_whisper_dir));
     spawn_voice_transcript_forwarder(app.clone(), voice.clone());
 
     // CEF profile lives under the same canonical root as the brain's
