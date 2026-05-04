@@ -1,0 +1,18 @@
+{
+  "engine": "faster-whisper",
+  "model": "small.en",
+  "audio_s": 11.0,
+  "runs_s": [
+    13.528193083999213,
+    2.175545374979265,
+    1.8168976249871776
+  ],
+  "cold_s": 13.528193083999213,
+  "median_s": 2.175545374979265,
+  "warm_median_s": 1.9962214999832213,
+  "rtf_cold": 1.2298357349090194,
+  "rtf_warm": 0.1814746818166565,
+  "rss_mb": 745.109375,
+  "transcript": "And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country.",
+  "wer": 0.0
+}

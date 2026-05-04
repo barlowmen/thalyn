@@ -45,6 +45,10 @@ Each item links to the requirement / ADR it overrides or extends.
 ### Audit logs
 - [ ] **Hash-chained / signed audit logs** (currently F7.6 ships unsigned NDJSON). Upgrade to a tamper-evident format.
 
+### Voice input
+- [ ] **CEF media-permission UX wiring.** v1 captures the composer mic in the Rust core, not in CEF, so the in-app browser doesn't request microphone access. Before a public release ships any in-CEF voice flow (e.g. a web app the user opens that wants `getUserMedia`), wire the `enable-media-stream` switch and implement `OnRequestMediaAccessPermission` + `OnShowPermissionPrompt` callbacks to surface the request through Thalyn's own UI rather than dropping it on the floor. (ADR-0025; ADR-0019.)
+- [ ] **PipeWire / `xdg-desktop-portal` audio portal integration on Linux.** v1 captures audio via ALSA / PulseAudio direct, which works on every shipping distro today but doesn't fit the sandboxed-client model that the audio portal is moving toward. Track the portal's distro-coverage and switch the Linux audio path when the portal is ubiquitous on supported distros. (ADR-0025; PipeWire portal docs.)
+
 ### Browser engine (CEF)
 - [ ] **CEF / Chromium-stable CVE response SLO.** Define and publish the
   service-level objective from a Chromium-stable security advisory to a

@@ -1,0 +1,18 @@
+{
+  "engine": "mlx-whisper",
+  "model": "base.en",
+  "audio_s": 11.0,
+  "runs_s": [
+    0.23241766705177724,
+    0.13798558298731223,
+    0.13863587495870888
+  ],
+  "cold_s": 0.23241766705177724,
+  "median_s": 0.13863587495870888,
+  "warm_median_s": 0.13831072897301055,
+  "rtf_cold": 0.02112887882288884,
+  "rtf_warm": 0.01257370263391005,
+  "rss_mb": 251.34375,
+  "transcript": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
+  "wer": 0.0
+}
