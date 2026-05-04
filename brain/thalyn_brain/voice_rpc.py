@@ -13,6 +13,7 @@ read for the engine routing flag).
 
 from __future__ import annotations
 
+from thalyn_brain.memory import MemoryStore
 from thalyn_brain.projects import ProjectsStore
 from thalyn_brain.rpc import Dispatcher, JsonValue, RpcParams
 from thalyn_brain.voice import build_project_vocabulary
@@ -22,15 +23,17 @@ def register_voice_methods(
     dispatcher: Dispatcher,
     *,
     projects: ProjectsStore,
+    memory: MemoryStore | None = None,
 ) -> None:
     async def project_vocabulary(params: RpcParams) -> JsonValue:
         project_id_value = params.get("projectId")
         project_id = (
             project_id_value if isinstance(project_id_value, str) and project_id_value else None
         )
-        vocabulary = build_project_vocabulary(
+        vocabulary = await build_project_vocabulary(
             project_id=project_id,
             projects=projects,
+            memory=memory,
         )
         return vocabulary.to_wire()
 

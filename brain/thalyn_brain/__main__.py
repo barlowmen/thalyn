@@ -190,7 +190,7 @@ def main() -> int:
     # Voice STT bridge (F7, ADR-0025). The brain owns only the
     # ``voice.project_vocabulary`` slice the engine biases against;
     # the audio path lives in the Rust core.
-    register_voice_methods(dispatcher, projects=projects_store)
+    register_voice_methods(dispatcher, projects=projects_store, memory=memory_store)
 
     # Stubs for the v2 IPC surface; real handlers replace these as
     # subsequent stages land per ADR-0021 / 02-architecture.md §6.
