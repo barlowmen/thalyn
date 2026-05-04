@@ -1722,6 +1722,7 @@ async fn stt_start(
     let config = VoiceStartConfig {
         project_id: project_id.clone(),
         vocabulary,
+        continuous: false,
     };
     let session_id = state
         .voice

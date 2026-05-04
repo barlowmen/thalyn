@@ -46,11 +46,20 @@ pub enum EngineKind {
 /// the model recognises project-specific terminology — the EM
 /// metaphor cashing out in the voice path (spike F7). The
 /// [`NoopEngine`] ignores both fields; later engines consume them.
+///
+/// `continuous` flips the engine to VAD-driven segmentation: each
+/// utterance ends when an energy-based silence threshold is met,
+/// the engine finalises just that utterance via
+/// [`InterimSink::send_final`], and the session keeps listening
+/// for the next one. Off by default — push-to-talk is the
+/// composer's primary surface.
 #[derive(Debug, Clone, Default)]
 pub struct StartConfig {
     pub project_id: Option<String>,
     #[allow(dead_code)]
     pub vocabulary: ProjectVocabulary,
+    #[allow(dead_code)]
+    pub continuous: bool,
 }
 
 /// Project-derived terminology hints. Populated by the brain's
@@ -94,6 +103,19 @@ impl InterimSink {
             session_id: self.session_id.clone(),
             text,
             is_final: false,
+        });
+    }
+
+    /// Emit a final transcript without ending the session. Used by
+    /// the continuous-listen path to publish each completed
+    /// utterance — the renderer's continuous-mode handler treats
+    /// these as auto-submit triggers, while push-to-talk sessions
+    /// only ever see one final via the `Engine::finish` return path.
+    pub fn send_final(&self, text: String) {
+        let _ = self.sender.send(Transcript {
+            session_id: self.session_id.clone(),
+            text,
+            is_final: true,
         });
     }
 }

@@ -272,6 +272,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn final_sink_emissions_reach_subscribers_with_is_final_true() {
+        // Continuous-listen engines push utterance-final transcripts
+        // through the same broadcast channel as interim ones, but
+        // tagged `is_final = true`. This keeps push-to-talk's
+        // end-of-session contract alive while letting the renderer
+        // distinguish utterance boundaries in continuous mode.
+        struct UtteranceEngine;
+
+        #[async_trait]
+        impl Engine for UtteranceEngine {
+            fn kind(&self) -> EngineKind {
+                EngineKind::Noop
+            }
+
+            async fn begin(
+                &self,
+                _session_id: &SessionId,
+                _config: &StartConfig,
+                interim: InterimSink,
+            ) -> Result<(), VoiceError> {
+                interim.send_final("first utterance".into());
+                Ok(())
+            }
+
+            async fn finish(&self, _session_id: &SessionId) -> Result<Transcript, VoiceError> {
+                Ok(Transcript::final_empty())
+            }
+        }
+
+        let manager = VoiceManager::new(Arc::new(UtteranceEngine));
+        let mut rx = manager.subscribe();
+        let id = manager.start(StartConfig::default()).await.unwrap();
+
+        let received = rx.recv().await.unwrap();
+        assert_eq!(received.session_id, id);
+        assert!(received.is_final);
+        assert_eq!(received.text, "first utterance");
+    }
+
+    #[tokio::test]
     async fn interim_sink_emissions_reach_subscribers() {
         // Custom engine that fires one interim transcript on `begin`
         // — proves the manager's plumbing wires the broadcast sink

@@ -34,8 +34,8 @@ use async_trait::async_trait;
 use thiserror::Error;
 use tokio::sync::Mutex;
 use whisper_cpp_plus::{
-    FullParams, SamplingStrategy, TranscriptionParams, WhisperContext, WhisperStream,
-    WhisperStreamConfig,
+    FullParams, PcmFormat, PcmReader, PcmReaderConfig, SamplingStrategy, TranscriptionParams,
+    WhisperContext, WhisperStream, WhisperStreamConfig, WhisperStreamPcm, WhisperStreamPcmConfig,
 };
 
 use super::engine::{Engine, EngineKind, InterimSink, StartConfig};
@@ -62,6 +62,34 @@ const STREAM_STEP_MS: i32 = 1500;
 /// `length_ms` of audio.
 const STREAM_LENGTH_MS: i32 = 10_000;
 
+/// Continuous-listen VAD silence threshold. When voice activity falls
+/// below threshold for this many ms, the worker treats the
+/// accumulated speech buffer as a complete utterance and finalises
+/// it. Matches the v0.32 spike's recommendation (1.2 s) — short
+/// enough to feel responsive, long enough to handle natural pauses
+/// between phrases.
+const CONTINUOUS_SILENCE_MS: i32 = 1_200;
+
+/// Continuous-listen VAD probe window. The processor pops audio in
+/// chunks of this size to run the VAD energy check; smaller chunks
+/// mean snappier silence detection at the cost of more probes per
+/// second.
+const CONTINUOUS_PROBE_MS: i32 = 200;
+
+/// How much pre-roll audio to prepend when speech is first detected,
+/// so the leading consonant of the first word doesn't get clipped.
+const CONTINUOUS_PRE_ROLL_MS: i32 = 300;
+
+/// Maximum utterance length before the continuous worker force-ends
+/// a segment. Prevents a 5-minute monologue from accumulating
+/// unbounded audio without ever crossing the silence threshold.
+const CONTINUOUS_MAX_UTTERANCE_MS: i32 = 30_000;
+
+/// PcmReader ring-buffer length (ms). Generous so a brief cpal /
+/// runtime stall doesn't cause samples to be dropped before the
+/// worker drains them.
+const CONTINUOUS_BUFFER_MS: i32 = 30_000;
+
 /// Errors surfaced when the engine itself can't be constructed or
 /// model inference fails.
 #[derive(Debug, Error)]
@@ -80,14 +108,30 @@ impl From<LocalEngineError> for VoiceError {
     }
 }
 
-/// Per-session state. The streaming worker emits interim transcripts
-/// as audio arrives; the parallel `pcm` buffer feeds the final
-/// batch transcribe so the gold transcript covers the entire
-/// utterance without depending on the streaming step granularity.
+/// Per-session state. In push-to-talk mode the streaming worker
+/// emits interim transcripts and the parallel `pcm` buffer feeds
+/// the final batch transcribe on stop; in continuous mode the
+/// worker emits per-utterance final transcripts directly through
+/// the [`InterimSink`] and the `pcm` buffer is left empty (the
+/// gold transcript for each utterance comes from the worker).
 struct SessionBuffer {
     pcm: Vec<i16>,
     initial_prompt: Option<String>,
     streaming: Option<StreamingWorker>,
+    /// Whether the session is in continuous-listen mode. Drives
+    /// `finish`'s decision on whether to run a final batch over
+    /// `pcm` (push-to-talk) or skip it (continuous).
+    continuous: bool,
+}
+
+/// Which segmentation strategy a streaming worker uses. Push-to-talk
+/// gets the sliding-window `WhisperStream` (interim transcripts);
+/// continuous-listen gets `WhisperStreamPcm` with simple-energy VAD
+/// so each utterance ends on its own silence.
+#[derive(Debug, Clone, Copy)]
+enum WorkerMode {
+    PushToTalk,
+    Continuous,
 }
 
 /// Handle for the streaming worker thread that owns a
@@ -105,10 +149,16 @@ impl StreamingWorker {
         context: Arc<WhisperContext>,
         initial_prompt: Option<String>,
         interim: InterimSink,
+        mode: WorkerMode,
     ) -> Self {
         let (tx, rx) = std_mpsc::channel::<Vec<f32>>();
-        let handle = thread::spawn(move || {
-            run_streaming(context, initial_prompt, rx, interim);
+        let handle = thread::spawn(move || match mode {
+            WorkerMode::PushToTalk => {
+                run_streaming(context, initial_prompt, rx, interim);
+            }
+            WorkerMode::Continuous => {
+                run_streaming_continuous(context, initial_prompt, rx, interim);
+            }
         });
         Self {
             tx,
@@ -208,14 +258,20 @@ impl Engine for LocalWhisperEngine {
         interim: InterimSink,
     ) -> Result<(), VoiceError> {
         let initial_prompt = build_initial_prompt(&config.vocabulary.terms);
+        let mode = if config.continuous {
+            WorkerMode::Continuous
+        } else {
+            WorkerMode::PushToTalk
+        };
         let streaming =
-            StreamingWorker::spawn(self.context.clone(), initial_prompt.clone(), interim);
+            StreamingWorker::spawn(self.context.clone(), initial_prompt.clone(), interim, mode);
         self.sessions.lock().await.insert(
             session_id.clone(),
             SessionBuffer {
                 pcm: Vec::new(),
                 initial_prompt,
                 streaming: Some(streaming),
+                continuous: config.continuous,
             },
         );
         Ok(())
@@ -226,7 +282,12 @@ impl Engine for LocalWhisperEngine {
         let buffer = sessions
             .get_mut(session_id)
             .ok_or_else(|| VoiceError::UnknownSession(session_id.to_string()))?;
-        buffer.pcm.extend_from_slice(pcm);
+        // Push-to-talk mode keeps the parallel buffer for the
+        // batch-on-stop final transcribe; continuous mode is fully
+        // streaming so we save the memory.
+        if !buffer.continuous {
+            buffer.pcm.extend_from_slice(pcm);
+        }
         if let Some(streaming) = &buffer.streaming {
             streaming.push(pcm_to_f32(pcm));
         }
@@ -247,6 +308,17 @@ impl Engine for LocalWhisperEngine {
         // so the Tokio runtime stays unblocked.
         if let Some(streaming) = buffer.streaming.take() {
             let _ = tokio::task::spawn_blocking(move || streaming.shutdown()).await;
+        }
+
+        // Continuous-listen sessions don't accumulate a parallel PCM
+        // buffer — utterances are finalised inline by the worker,
+        // so finish only needs to wrap up the session.
+        if buffer.continuous {
+            return Ok(Transcript {
+                session_id: session_id.clone(),
+                text: String::new(),
+                is_final: true,
+            });
         }
 
         // Empty buffers (no feed calls between begin and finish) are
@@ -329,6 +401,117 @@ fn run_streaming(
             }
         }
     }
+}
+
+/// Continuous-listen worker body. Owns a [`WhisperStreamPcm`] driven
+/// by simple-energy VAD, pulls PCM chunks off `rx` (encoded into
+/// little-endian f32 bytes en route to the crate's `PcmReader`), and
+/// emits one *final* transcript per detected utterance via
+/// [`InterimSink::send_final`]. Exits when the channel closes (the
+/// engine drops its `Sender` in `finish`).
+fn run_streaming_continuous(
+    context: Arc<WhisperContext>,
+    initial_prompt: Option<String>,
+    rx: std_mpsc::Receiver<Vec<f32>>,
+    interim: InterimSink,
+) {
+    let pcm_config = PcmReaderConfig {
+        buffer_len_ms: CONTINUOUS_BUFFER_MS,
+        sample_rate: SAMPLE_RATE as i32,
+        format: PcmFormat::F32,
+    };
+    let reader = PcmReader::new(Box::new(ChannelReader::new(rx)), pcm_config);
+    let stream_config = WhisperStreamPcmConfig {
+        use_vad: true,
+        vad_silence_ms: CONTINUOUS_SILENCE_MS,
+        vad_pre_roll_ms: CONTINUOUS_PRE_ROLL_MS,
+        vad_probe_ms: CONTINUOUS_PROBE_MS,
+        length_ms: CONTINUOUS_MAX_UTTERANCE_MS,
+        ..WhisperStreamPcmConfig::default()
+    };
+    let params = build_stream_params(initial_prompt.as_deref());
+    let mut stream = match WhisperStreamPcm::new(&context, params, stream_config, reader) {
+        Ok(s) => s,
+        Err(err) => {
+            tracing::warn!(
+                ?err,
+                "WhisperStreamPcm continuous-mode init failed; continuous-listen disabled"
+            );
+            return;
+        }
+    };
+
+    let result = stream.run(|segments, _start_ms, _end_ms| {
+        if segments.is_empty() {
+            return;
+        }
+        let text = join_segments(segments);
+        if !text.is_empty() {
+            interim.send_final(text);
+        }
+    });
+    if let Err(err) = result {
+        tracing::warn!(?err, "WhisperStreamPcm continuous-mode run errored");
+    }
+}
+
+/// `Read` adapter over a `mpsc::Receiver<Vec<f32>>`. The crate's
+/// [`PcmReader`] takes raw bytes and runs its own thread to fill
+/// a ring buffer; we already have f32 samples coming off cpal, so
+/// the adapter just little-endian-encodes each chunk on demand.
+///
+/// `read` blocks until a chunk arrives or the channel closes; the
+/// engine signals end-of-session by dropping the sender, which makes
+/// `recv` return `Err` and we report EOF (`Ok(0)`) so PcmReader's
+/// internal thread exits cleanly.
+struct ChannelReader {
+    rx: std_mpsc::Receiver<Vec<f32>>,
+    leftover: Vec<u8>,
+    leftover_pos: usize,
+}
+
+impl ChannelReader {
+    fn new(rx: std_mpsc::Receiver<Vec<f32>>) -> Self {
+        Self {
+            rx,
+            leftover: Vec::new(),
+            leftover_pos: 0,
+        }
+    }
+}
+
+impl std::io::Read for ChannelReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            if self.leftover_pos < self.leftover.len() {
+                let to_copy = buf.len().min(self.leftover.len() - self.leftover_pos);
+                buf[..to_copy].copy_from_slice(
+                    &self.leftover[self.leftover_pos..self.leftover_pos + to_copy],
+                );
+                self.leftover_pos += to_copy;
+                return Ok(to_copy);
+            }
+            match self.rx.recv() {
+                Ok(samples) => {
+                    self.leftover = samples_to_le_bytes(&samples);
+                    self.leftover_pos = 0;
+                }
+                Err(_) => return Ok(0),
+            }
+        }
+    }
+}
+
+/// Encode an f32 sample slice as little-endian bytes (the format
+/// [`PcmFormat::F32`] expects). Equivalent to a manual
+/// `bytemuck::cast_slice` but avoids the extra dep — we already do
+/// this volume of work inside the cpal callback path.
+fn samples_to_le_bytes(samples: &[f32]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(samples.len() * 4);
+    for &s in samples {
+        bytes.extend_from_slice(&s.to_le_bytes());
+    }
+    bytes
 }
 
 /// Construct the `initial_prompt` text from a vocabulary term list.
@@ -461,6 +644,57 @@ mod tests {
         assert!((floats[1] - 1.0).abs() < 1e-6);
         assert!((floats[2] - (-1.0)).abs() < 1e-3);
         assert!((floats[3] - 0.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn samples_to_le_bytes_round_trips_through_f32_decode() {
+        let samples = [0.0_f32, 0.5, -0.25, 1.0, -1.0];
+        let bytes = samples_to_le_bytes(&samples);
+        assert_eq!(bytes.len(), samples.len() * 4);
+        for (i, expected) in samples.iter().enumerate() {
+            let chunk: [u8; 4] = bytes[i * 4..i * 4 + 4].try_into().unwrap();
+            let decoded = f32::from_le_bytes(chunk);
+            assert!((decoded - expected).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn channel_reader_drains_pushed_samples_and_eofs_on_close() {
+        let (tx, rx) = std_mpsc::channel::<Vec<f32>>();
+        // Push two chunks then close the channel.
+        tx.send(vec![0.5_f32, -0.5]).unwrap();
+        tx.send(vec![0.25_f32]).unwrap();
+        drop(tx);
+
+        let mut reader = ChannelReader::new(rx);
+        let mut out = Vec::new();
+        let mut buf = [0_u8; 8];
+        loop {
+            let n = std::io::Read::read(&mut reader, &mut buf).unwrap();
+            if n == 0 {
+                break;
+            }
+            out.extend_from_slice(&buf[..n]);
+        }
+        // 3 samples × 4 bytes each = 12 bytes total.
+        assert_eq!(out.len(), 12);
+        let decoded: Vec<f32> = out
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+            .collect();
+        assert!((decoded[0] - 0.5).abs() < 1e-6);
+        assert!((decoded[1] - (-0.5)).abs() < 1e-6);
+        assert!((decoded[2] - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn channel_reader_returns_eof_when_no_senders() {
+        let (tx, rx) = std_mpsc::channel::<Vec<f32>>();
+        drop(tx);
+        let mut reader = ChannelReader::new(rx);
+        let mut buf = [0_u8; 4];
+        let n = std::io::Read::read(&mut reader, &mut buf).unwrap();
+        assert_eq!(n, 0);
     }
 
     #[test]
