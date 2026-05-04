@@ -22,14 +22,33 @@ export type SttLevel = {
   peak: number;
 };
 
+export type StartSttOptions = {
+  /**
+   * Project context for vocabulary biasing. The brain returns the
+   * matching ``project_vocabulary`` slice and the engine wraps it
+   * into Whisper's ``initial_prompt``.
+   */
+  projectId?: string | null;
+  /**
+   * Run the engine in continuous-listen mode (VAD segments each
+   * utterance). When ``true``, the engine emits one
+   * ``stt:transcript`` event with ``isFinal: true`` per detected
+   * utterance and keeps listening until ``stopStt`` is called.
+   * Default ``false`` (single-utterance push-to-talk).
+   */
+  continuous?: boolean;
+};
+
 /**
- * Begin a voice STT session. The optional ``projectId`` lets the
- * brain seed the engine's ``initial_prompt`` with the project
- * vocabulary — pass the foreground project so dictation biases
- * toward known identifiers.
+ * Begin a voice STT session.
  */
-export async function startStt(projectId?: string): Promise<string> {
-  return invoke<string>("stt_start", { projectId: projectId ?? null });
+export async function startStt(
+  options: StartSttOptions = {},
+): Promise<string> {
+  return invoke<string>("stt_start", {
+    projectId: options.projectId ?? null,
+    continuous: options.continuous ?? false,
+  });
 }
 
 /**

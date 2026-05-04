@@ -1713,16 +1713,23 @@ async fn send_chat(
 /// engine, starts the mic capture loop, and returns the session id.
 /// Audio bytes never traverse Tauri's IPC — capture lives in the
 /// Rust core via cpal, transcripts return through `stt_stop`.
+///
+/// `continuous` flips the engine to VAD-driven utterance
+/// segmentation: each silence boundary finalises an utterance via
+/// the broadcast channel, and the session keeps listening until
+/// `stt_stop` is called. The renderer's voice prefs decide whether
+/// to pass true here.
 #[tauri::command]
 async fn stt_start(
     state: State<'_, AppState>,
     project_id: Option<String>,
+    continuous: Option<bool>,
 ) -> Result<String, String> {
     let vocabulary = fetch_project_vocabulary(&state, project_id.as_deref()).await;
     let config = VoiceStartConfig {
         project_id: project_id.clone(),
         vocabulary,
-        continuous: false,
+        continuous: continuous.unwrap_or(false),
     };
     let session_id = state
         .voice
