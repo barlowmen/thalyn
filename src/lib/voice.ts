@@ -44,6 +44,13 @@ export type StartSttOptions = {
    * configured, or when the network wire-up is still pending.
    */
   preferCloud?: boolean;
+  /**
+   * Route the session to the opt-in MLX-Whisper engine (Apple
+   * Silicon power users, ADR-0025). Mutually exclusive with
+   * ``preferCloud``; the engine errors out until the model-download
+   * + brain-venv MLX dep go live.
+   */
+  preferMlx?: boolean;
 };
 
 /**
@@ -56,6 +63,7 @@ export async function startStt(
     projectId: options.projectId ?? null,
     continuous: options.continuous ?? false,
     preferCloud: options.preferCloud ?? false,
+    preferMlx: options.preferMlx ?? false,
   });
 }
 

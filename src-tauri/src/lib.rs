@@ -1766,18 +1766,19 @@ async fn send_chat(
 /// `stt_stop` is called. The renderer's voice prefs decide whether
 /// to pass true here.
 ///
-/// `prefer_cloud` is the routing flag for the opt-in Deepgram
-/// Nova-3 engine (ADR-0025). It's wired as a skeleton in v0.33 —
-/// the routing surface lands so the Tauri command + settings can
-/// flip behaviour, but the underlying engine errors out with a
-/// clear "wire-up pending" message until the going-public smoke
-/// runs.
+/// `prefer_cloud` and `prefer_mlx` are the routing flags for the
+/// opt-in Deepgram Nova-3 and MLX-Whisper engines respectively
+/// (ADR-0025). Both are wired as skeletons in v0.33 — the routing
+/// surface lands so the Tauri command + settings can flip
+/// behaviour, but the underlying engines error out with a clear
+/// "wire-up pending" message until the going-public smoke runs.
 #[tauri::command]
 async fn stt_start(
     state: State<'_, AppState>,
     project_id: Option<String>,
     continuous: Option<bool>,
     prefer_cloud: Option<bool>,
+    prefer_mlx: Option<bool>,
 ) -> Result<String, String> {
     if prefer_cloud.unwrap_or(false) {
         if !state.secrets.has_secret("deepgram_api_key") {
@@ -1790,6 +1791,13 @@ async fn stt_start(
         return Err(
             "Deepgram cloud STT is opt-in but the network wire-up ships post-v1; \
              see docs/going-public-checklist.md."
+                .into(),
+        );
+    }
+    if prefer_mlx.unwrap_or(false) {
+        return Err(
+            "MLX-Whisper is opt-in but the model-download path and brain-venv MLX dep \
+             ship post-v1; see docs/going-public-checklist.md."
                 .into(),
         );
     }

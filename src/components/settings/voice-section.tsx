@@ -211,9 +211,11 @@ export function VoiceSection() {
             Local Whisper.cpp runs on-device by default — audio never
             leaves your machine. Deepgram Nova-3 is an opt-in cloud
             fallback for weak hardware; it sends audio over the
-            network and needs an API key. The cloud wire-up is
-            scheduled post-v1; the toggle is here today so the
-            settings + key paths exist when the smoke goes live.
+            network and needs an API key. MLX-Whisper is an opt-in
+            Apple-Silicon-only fast path that runs locally but pulls
+            in a separate model. The cloud + MLX wire-ups are
+            scheduled post-v1; the toggles are here so the settings
+            paths exist when the smokes go live.
           </p>
         </div>
         <select
@@ -224,12 +226,22 @@ export function VoiceSection() {
         >
           <option value="local">Local Whisper.cpp (default)</option>
           <option value="cloud">Deepgram Nova-3 (cloud, opt-in)</option>
+          <option value="mlx">MLX-Whisper (Apple Silicon, opt-in)</option>
         </select>
         {engine === "cloud" && (
           <DeepgramApiKeyField
             configured={secretStatus.deepgramConfigured}
             onSaved={refreshSecretStatus}
           />
+        )}
+        {engine === "mlx" && (
+          <p className="rounded-md border border-border bg-bg p-3 text-xs text-muted-foreground">
+            MLX-Whisper runs ~3× faster than whisper.cpp on M-series
+            hardware but needs a separate model download (~600 MB) and
+            adds the MLX dep to the brain venv. Both ship in a v1.x
+            follow-up; selecting MLX today surfaces a clear "wire-up
+            pending" error when you press the mic.
+          </p>
         )}
       </div>
 

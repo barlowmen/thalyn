@@ -169,6 +169,7 @@ export function Composer({
         projectId: projectId ?? null,
         continuous: mode === "continuous",
         preferCloud: engine === "cloud",
+        preferMlx: engine === "mlx",
       });
       recordingRef.current = sessionId;
       setVoice({ kind: "recording", sessionId });

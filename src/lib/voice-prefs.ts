@@ -21,7 +21,7 @@
 export type VoiceMode = "ptt" | "continuous";
 export type VoiceMicGesture = "hold" | "tap-toggle";
 export type VoiceContinuousSubmit = "review" | "auto";
-export type VoiceEngine = "local" | "cloud";
+export type VoiceEngine = "local" | "cloud" | "mlx";
 
 const MODE_KEY = "thalyn:voice-mode";
 const GESTURE_KEY = "thalyn:voice-mic-gesture";
@@ -42,7 +42,11 @@ const VOICE_SUBMIT_VALUES: ReadonlySet<VoiceContinuousSubmit> = new Set([
   "review",
   "auto",
 ]);
-const VOICE_ENGINE_VALUES: ReadonlySet<VoiceEngine> = new Set(["local", "cloud"]);
+const VOICE_ENGINE_VALUES: ReadonlySet<VoiceEngine> = new Set([
+  "local",
+  "cloud",
+  "mlx",
+]);
 
 export const VOICE_MODE_EVENT = "thalyn:voice-mode-changed";
 export const VOICE_MIC_GESTURE_EVENT = "thalyn:voice-mic-gesture-changed";
