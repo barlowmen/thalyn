@@ -1,7 +1,7 @@
 # 0025 — Voice input: Whisper.cpp local-first STT with Deepgram cloud fallback
 
-- **Status:** Proposed
-- **Date:** 2026-05-03
+- **Status:** Accepted
+- **Date:** 2026-05-03 (Proposed); 2026-05-11 (Accepted, refined)
 - **Deciders:** Barlow
 - **Supersedes:** —
 - **Superseded by:** —
@@ -80,18 +80,68 @@ download (~600 MB) plus the dependency surface for MLX on the
 host.
 
 The latency budget moves from the planning-time placeholder of
-"< 500 ms" to two grounded numbers:
+"< 500 ms" to a set of grounded numbers, sharpened by the v0.33
+M4 re-run (`docs/spikes/voice-bake-off/results/bench-all.json`):
 
 - **≤ 250 ms** from end-of-utterance to final transcript on
-  Apple Silicon with `small.en` and Core ML enabled.
+  Apple Silicon with `small.en` and **Core ML enabled, or**
+  with the MLX-Whisper opt-in. Without either, the v1 default
+  (`whisper-cpp-plus` + Metal) lands at ~1.1 s warm on M4
+  `small.en` and ~0.6 s on `base.en` — over the budget on
+  `small.en`, close on `base.en`. Core ML wiring is on
+  `docs/going-public-checklist.md`; the v1 UX still feels live
+  (sub-second band) but the headline ≤ 250 ms requires Core ML
+  or the MLX opt-in.
 - **≤ 800 ms** on the Linux-without-GPU baseline with `base.en`
   and OpenBLAS.
 
-These are interpolations from the M4 bake-off plus published
-M1 / x86 RTF; v0.33's verification recipe re-runs the in-tree
-bake-off harness on each platform's representative hardware
-(M1 baseline, Linux without GPU, the 2-year-old Windows laptop)
-to confirm before declaring exit criteria met.
+The Apple-Silicon numbers are measured on M4 / 16 GB; the
+Linux-without-GPU number is interpolated from M4 + published
+x86 RTF and lands on `docs/going-public-checklist.md` for
+runtime confirmation on a representative box.
+
+### v0.33 verification: WER on project-shaped vocabulary
+
+The v0.32 spike bake-off ranked engines on broadcast-quality
+JFK audio, where every (engine, model) cell tied at WER=0.000.
+v0.33 re-ran the matrix with a second fixture
+(`fixture/delegation.{wav,txt}`) — a 16.5 s Piper-TTS rendering
+of a delegation request loaded with the kind of identifiers
+the project-vocabulary path is built to feed (CamelCase,
+snake/kebab tokens, hyphenated lead names). The new fixture
+spreads WER as designed:
+
+| Engine | Model | JFK WER | Delegation WER |
+|---|---|---:|---:|
+| whisper.cpp (Metal)     | tiny.en  | 0.000 | 0.323 |
+| whisper.cpp (Metal)     | base.en  | 0.000 | 0.323 |
+| **whisper.cpp (Metal)** | **small.en** | **0.000** | **0.161** |
+| MLX-Whisper             | tiny.en  | 0.000 | 0.323 |
+| MLX-Whisper             | base.en  | 0.000 | 0.290 |
+| MLX-Whisper             | small.en | 0.000 | 0.258 |
+
+`small.en` cuts the error rate roughly in half on technical
+jargon versus the smaller models. The errors cluster on
+identifiers (`LangGraph` → "lane graph", `WhisperStream` →
+"whisper stream", `Lead-Sam` → "lead SAM", `cpal` → "CPAL"),
+which is exactly the failure mode `voice.project_vocabulary`
+(brain RPC → Whisper `initial_prompt`) is designed to bias.
+The bench doesn't pass `initial_prompt`, so the table is a
+**floor**; production runs use the vocabulary slice and should
+drop WER on the same audio.
+
+Two follow-ups stay open on `docs/going-public-checklist.md`:
+
+1. **Cross-platform latency confirmation.** M1 baseline, Linux
+   without GPU, the 2-year-old Windows laptop — re-run the
+   bake-off on each to confirm the ≤ 800 ms Linux budget and
+   the M1 Core-ML projection.
+2. **Human-recorded delegation fixture.** The current
+   `delegation.wav` is Piper-synthesised so the regression
+   numbers are reproducible from text + voice model, but real
+   microphone input is noisier than synthetic TTS. Record the
+   same script with a real human voice on the public-release
+   hardware before publishing the headline WER claims.
 
 UX patterns landing in v0.33 (per F7.3 and the spike's
 "Land in v0.33" rows): **push-to-talk via hold-space-in-composer**,
@@ -148,10 +198,13 @@ and screen-context awareness — explicitly out of scope for v0.33.
   the model-distribution path on macOS for the opt-in slice.
   Acceptable because MLX is gated behind a settings flag the
   vast majority of users won't flip.
-- The latency budget on the M1 baseline is interpolated, not
-  measured. v0.33's verify-step has to re-run the bake-off on
-  an M1 to confirm the ≤ 250 ms figure holds before the budget
-  is locked in.
+- The ≤ 250 ms Apple-Silicon budget is measured on M4 with
+  MLX-Whisper or projected with Core ML; the v1 default
+  (`whisper-cpp-plus` + Metal alone) lands at ~1.1 s warm on
+  M4 `small.en`. UX-wise this is still acceptable (sub-second
+  band, no perceptual stall) but the headline ADR-0025 number
+  requires Core ML or MLX. M-series-other-than-M4 confirmation
+  lands on the going-public checklist.
 
 ### Neutral
 
