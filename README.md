@@ -54,6 +54,18 @@ ADRs for individual technology choices live in
 
 For details, see [`02-architecture.md`](02-architecture.md).
 
+## Configuring things by asking
+
+Every configurable surface in Thalyn is reachable conversationally —
+connectors, worker routing, personal-memory entries, project flags,
+schedules, themes. You ask Thalyn in the eternal chat ("set up Slack",
+"route coding to ollama in this project", "remember that I prefer
+atomic commits"), Thalyn walks the inputs, surfaces an in-app browser
+drawer for OAuth, and confirms when it lands. Actions that change the
+world on your behalf — send a message, publish a doc — still surface
+the per-action approval dialog before they fire. Settings panels exist
+for the same surfaces; the conversational path is the recommended one.
+
 ## Running from source
 
 You will need:
