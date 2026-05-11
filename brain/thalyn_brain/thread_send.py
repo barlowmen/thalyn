@@ -48,6 +48,10 @@ from thalyn_brain.lead_delegation import (
     sanity_check_lead_reply,
 )
 from thalyn_brain.memory import MemoryStore
+from thalyn_brain.pending_actions import (
+    ActionApprovalRequiredEvent,
+    PendingActionStore,
+)
 from thalyn_brain.project_classifier import (
     Classifier,
     classify_for_routing,
@@ -84,6 +88,7 @@ from thalyn_brain.threads import (
 THREAD_CHUNK = "thread.chunk"
 LEAD_ESCALATION = "lead.escalation"
 ACTION_FOLLOWUP = "action.followup"
+ACTION_APPROVAL_REQUIRED = "action.approval_required"
 DEFAULT_BRAIN_AGENT_ID = "agent_brain"
 
 
@@ -94,6 +99,7 @@ def register_thread_send_methods(
     registry: ProviderRegistry,
     agent_records: AgentRecordsStore | None = None,
     action_registry: ActionRegistry | None = None,
+    pending_actions: PendingActionStore | None = None,
     memory_store: MemoryStore | None = None,
     projects_store: ProjectsStore | None = None,
     classifier: Classifier | None = None,
@@ -148,6 +154,7 @@ def register_thread_send_methods(
             registry,
             agent_records,
             action_registry,
+            pending_actions,
             memory_store,
             projects_store,
             classifier,
@@ -175,6 +182,7 @@ async def _handle_thread_send(
     registry: ProviderRegistry,
     agent_records: AgentRecordsStore | None,
     action_registry: ActionRegistry | None = None,
+    pending_actions: PendingActionStore | None = None,
     memory_store: MemoryStore | None = None,
     projects_store: ProjectsStore | None = None,
     classifier: Classifier | None = None,
@@ -290,14 +298,68 @@ async def _handle_thread_send(
     # Y in this project", "remember that …", "make this project
     # local-only", "set up Slack", …) before delegating; on a hit the
     # registry runs the executor and the brain's reply is the
-    # executor's confirmation. Misses fall through to the regular
-    # reply flow.
+    # executor's confirmation. Hard-gated actions (per F12.5) are
+    # staged for explicit user approval rather than executed inline;
+    # the brain's reply tells the user to confirm in the dialog the
+    # ``action.approval_required`` notification surfaces. Misses fall
+    # through to the regular reply flow.
     if action_registry is not None:
         match = action_registry.try_match(
             prompt,
             context={"project_id": project_id} if project_id else {},
         )
         if match is not None and not match.missing_inputs:
+            action = action_registry.get(match.action_name)
+            if action.hard_gate:
+                if pending_actions is None:
+                    raise RpcError(
+                        code=INTERNAL_ERROR,
+                        message=(
+                            f"action {match.action_name!r} is hard-gated but no "
+                            "pending-action store is wired"
+                        ),
+                    )
+                pending = await pending_actions.stage(
+                    action_name=match.action_name,
+                    inputs=match.inputs,
+                    hard_gate_kind=action.hard_gate_kind,
+                    preview=match.preview,
+                    thread_id=thread_id,
+                    turn_id=brain_turn_id,
+                )
+                event = ActionApprovalRequiredEvent(
+                    approval_id=pending.approval_id,
+                    action_name=match.action_name,
+                    hard_gate_kind=action.hard_gate_kind,
+                    preview=match.preview,
+                    inputs=match.inputs,
+                    thread_id=thread_id,
+                    turn_id=brain_turn_id,
+                    requested_at_ms=pending.requested_at_ms,
+                )
+                await notify(ACTION_APPROVAL_REQUIRED, event.to_wire())
+                confirmation = (
+                    f"This needs your explicit approval before it can run "
+                    f"({match.preview or match.action_name}). I've staged it "
+                    "— approve it in the dialog and I'll continue."
+                )
+                return await _handle_action_reply(
+                    notify=notify,
+                    store=store,
+                    provider_id=provider_id,
+                    thread_id=thread_id,
+                    user_turn=user_turn,
+                    project_id=project_id,
+                    brain_turn_id=brain_turn_id,
+                    confirmation=confirmation,
+                    action_name=match.action_name,
+                    followup={
+                        "approvalId": pending.approval_id,
+                        "hardGateKind": action.hard_gate_kind,
+                        "status": "pending",
+                    },
+                    assembled=assembled,
+                )
             result = await action_registry.execute(match.action_name, match.inputs)
             return await _handle_action_reply(
                 notify=notify,

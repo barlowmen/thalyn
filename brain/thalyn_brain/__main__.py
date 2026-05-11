@@ -6,6 +6,7 @@ import asyncio
 import sys
 
 from thalyn_brain.action_registry import ActionRegistry
+from thalyn_brain.action_rpc import register_action_methods
 from thalyn_brain.agents import AgentRecordsStore
 from thalyn_brain.approval_rpc import register_approval_methods
 from thalyn_brain.auth_registry import AuthBackendRegistry
@@ -35,6 +36,7 @@ from thalyn_brain.orchestration.storage import (
     default_data_dir,
 )
 from thalyn_brain.parent_watchdog import watch_parent
+from thalyn_brain.pending_actions import PendingActionStore
 from thalyn_brain.project_classifier import LlmJudgeClassifier
 from thalyn_brain.project_rpc import register_project_methods
 from thalyn_brain.projects import ProjectsStore
@@ -137,6 +139,12 @@ def main() -> int:
     )
     register_memory_actions(action_registry, memory_store=memory_store)
     register_connector_actions(action_registry, manager=mcp_manager)
+    pending_actions_store = PendingActionStore()
+    register_action_methods(
+        dispatcher,
+        registry=action_registry,
+        pending_actions=pending_actions_store,
+    )
     # F3.5 default classifier: the brain's provider judges which
     # active project an untagged turn belongs to. The classifier is
     # advisory — ``classify_for_routing`` keeps the foreground bias
@@ -150,6 +158,7 @@ def main() -> int:
         registry=registry,
         agent_records=agent_records_store,
         action_registry=action_registry,
+        pending_actions=pending_actions_store,
         memory_store=memory_store,
         projects_store=projects_store,
         classifier=project_classifier,
