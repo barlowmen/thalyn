@@ -1,12 +1,12 @@
 """End-to-end test for the conversational routing-edit path inside
-``thread.send`` (per ADR-0023).
+``thread.send`` (per ADR-0023, now hosted in the action registry).
 
 The brain recognises "route coding to ollama in this project" before
-delegating, dispatches the action against ``RoutingOverridesStore``,
-and the user sees the dispatcher's confirmation as the brain's
-reply. The next routing-table lookup for ``coding`` in that project
-returns the new override — exactly what the spawn-time routing layer
-will see.
+delegating, the registry executes ``routing.set_override`` against
+``RoutingOverridesStore``, and the user sees the executor's
+confirmation as the brain's reply. The next routing-table lookup for
+``coding`` in that project returns the new override — exactly what
+the spawn-time routing layer will see.
 """
 
 from __future__ import annotations
@@ -16,11 +16,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from thalyn_brain.action_registry import ActionRegistry
 from thalyn_brain.agents import AgentRecordsStore
 from thalyn_brain.projects import Project, ProjectsStore, new_project_id
 from thalyn_brain.provider import AnthropicProvider, ProviderRegistry
 from thalyn_brain.routing import RoutingOverridesStore
-from thalyn_brain.routing_intents import RoutingActionsDispatcher
+from thalyn_brain.routing_intents import register_routing_actions
 from thalyn_brain.rpc import Dispatcher
 from thalyn_brain.thread_send import register_thread_send_methods
 from thalyn_brain.threads import Thread, ThreadsStore, new_thread_id
@@ -72,6 +73,22 @@ async def _seed_project(projects: ProjectsStore) -> Project:
     return project
 
 
+def _build_action_registry(
+    overrides: RoutingOverridesStore,
+    projects: ProjectsStore,
+    *,
+    valid_provider_ids: set[str],
+) -> ActionRegistry:
+    registry = ActionRegistry()
+    register_routing_actions(
+        registry,
+        overrides_store=overrides,
+        projects_store=projects,
+        valid_provider_ids=valid_provider_ids,
+    )
+    return registry
+
+
 @pytest.mark.asyncio
 async def test_thread_send_recognizes_routing_intent_and_writes_override(
     tmp_path: Path,
@@ -84,9 +101,9 @@ async def test_thread_send_recognizes_routing_intent_and_writes_override(
     _fake, factory = factory_for([])  # No LLM calls expected.
     provider = AnthropicProvider(client_factory=factory)
     registry = _registry_with(provider)
-    routing_actions = RoutingActionsDispatcher(
-        overrides_store=overrides,
-        projects_store=projects,
+    action_registry = _build_action_registry(
+        overrides,
+        projects,
         valid_provider_ids={"anthropic", "ollama", "mlx"},
     )
 
@@ -96,7 +113,7 @@ async def test_thread_send_recognizes_routing_intent_and_writes_override(
         threads_store=threads,
         registry=registry,
         agent_records=agents,
-        routing_actions=routing_actions,
+        action_registry=action_registry,
     )
 
     thread = await _seed_thread(threads)
@@ -123,7 +140,7 @@ async def test_thread_send_recognizes_routing_intent_and_writes_override(
     )
     assert response is not None
     result = response["result"]
-    assert result["routingAction"] == "set"
+    assert result["actionName"] == "routing.set_override"
     assert "ollama" in result["finalResponse"]
     assert result["projectId"] == project.project_id
 
@@ -141,9 +158,9 @@ async def test_thread_send_recognizes_routing_intent_and_writes_override(
 
 @pytest.mark.asyncio
 async def test_thread_send_falls_through_when_no_intent_recognized(tmp_path: Path) -> None:
-    """A non-routing prompt with the dispatcher wired must fall through
-    to the regular reply flow — the dispatcher is opt-in matching, not
-    a gate over the entire surface."""
+    """A non-routing prompt with the registry wired must fall through
+    to the regular reply flow — action-registry dispatch is opt-in
+    matching, not a gate over the entire surface."""
     threads = ThreadsStore(data_dir=tmp_path)
     agents = AgentRecordsStore(data_dir=tmp_path)
     projects = ProjectsStore(data_dir=tmp_path)
@@ -159,9 +176,9 @@ async def test_thread_send_falls_through_when_no_intent_recognized(tmp_path: Pat
     )
     provider = AnthropicProvider(client_factory=factory)
     registry = _registry_with(provider)
-    routing_actions = RoutingActionsDispatcher(
-        overrides_store=overrides,
-        projects_store=projects,
+    action_registry = _build_action_registry(
+        overrides,
+        projects,
         valid_provider_ids={"anthropic"},
     )
 
@@ -171,7 +188,7 @@ async def test_thread_send_falls_through_when_no_intent_recognized(tmp_path: Pat
         threads_store=threads,
         registry=registry,
         agent_records=agents,
-        routing_actions=routing_actions,
+        action_registry=action_registry,
     )
 
     thread = await _seed_thread(threads)
@@ -197,6 +214,6 @@ async def test_thread_send_falls_through_when_no_intent_recognized(tmp_path: Pat
     )
     assert response is not None
     result = response["result"]
-    # Regular reply flow, not a routing action.
-    assert "routingAction" not in result
+    # Regular reply flow, not an action match.
+    assert "actionName" not in result
     assert result["finalResponse"] == "Sure, here's a quick answer."

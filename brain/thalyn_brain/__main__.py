@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
+from thalyn_brain.action_registry import ActionRegistry
 from thalyn_brain.agents import AgentRecordsStore
 from thalyn_brain.approval_rpc import register_approval_methods
 from thalyn_brain.auth_registry import AuthBackendRegistry
@@ -39,7 +40,7 @@ from thalyn_brain.provider import AnthropicProvider, build_registry
 from thalyn_brain.provider.auth import AuthBackend
 from thalyn_brain.provider_rpc import register_provider_methods
 from thalyn_brain.routing import RoutingOverridesStore
-from thalyn_brain.routing_intents import RoutingActionsDispatcher
+from thalyn_brain.routing_intents import register_routing_actions
 from thalyn_brain.routing_rpc import register_routing_methods
 from thalyn_brain.rpc import build_default_dispatcher
 from thalyn_brain.runs import RunsStore
@@ -125,7 +126,9 @@ def main() -> int:
     # write-side thread.send and the recovery-status helpers for the
     # in-progress recovery flow.
     register_thread_methods(dispatcher, threads_store)
-    routing_actions = RoutingActionsDispatcher(
+    action_registry = ActionRegistry()
+    register_routing_actions(
+        action_registry,
         overrides_store=routing_overrides_store,
         projects_store=projects_store,
         valid_provider_ids={meta.id for meta in registry.list_meta()},
@@ -142,7 +145,7 @@ def main() -> int:
         threads_store=threads_store,
         registry=registry,
         agent_records=agent_records_store,
-        routing_actions=routing_actions,
+        action_registry=action_registry,
         memory_store=memory_store,
         projects_store=projects_store,
         classifier=project_classifier,

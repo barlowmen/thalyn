@@ -25,10 +25,11 @@ lead lands in v0.23 alongside the lead-as-first-class primitive.
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 from typing import Any
 
+from thalyn_brain.action_registry import ActionRegistry
 from thalyn_brain.agents import AgentRecordsStore
 from thalyn_brain.digest_runner import (
     maybe_compress_old_digests,
@@ -64,7 +65,6 @@ from thalyn_brain.provider import (
     ProviderNotImplementedError,
     ProviderRegistry,
 )
-from thalyn_brain.routing_intents import RoutingActionsDispatcher
 from thalyn_brain.rpc import (
     INTERNAL_ERROR,
     INVALID_PARAMS,
@@ -83,6 +83,7 @@ from thalyn_brain.threads import (
 
 THREAD_CHUNK = "thread.chunk"
 LEAD_ESCALATION = "lead.escalation"
+ACTION_FOLLOWUP = "action.followup"
 DEFAULT_BRAIN_AGENT_ID = "agent_brain"
 
 
@@ -92,7 +93,7 @@ def register_thread_send_methods(
     threads_store: ThreadsStore,
     registry: ProviderRegistry,
     agent_records: AgentRecordsStore | None = None,
-    routing_actions: RoutingActionsDispatcher | None = None,
+    action_registry: ActionRegistry | None = None,
     memory_store: MemoryStore | None = None,
     projects_store: ProjectsStore | None = None,
     classifier: Classifier | None = None,
@@ -112,11 +113,12 @@ def register_thread_send_methods(
     store is wired in, ``thread.send`` runs the lead-delegation
     classify-and-route step before assembling the brain's reply.
 
-    ``routing_actions`` (per ADR-0023) is the action-registry stub for
-    routing-edit intents. When wired, ``thread.send`` recognises
-    phrases like "route coding to ollama in this project" before
-    delegating, dispatches the action, and replies with the
-    confirmation directly.
+    ``action_registry`` (per F9.4 / F9.5) is the conversational
+    substrate for every configurable surface — routing, memory,
+    connectors, project lifecycle, schedules, etc. When wired,
+    ``thread.send`` runs the registry's matchers against the prompt
+    before delegating; a hit dispatches the action and replies with
+    its confirmation. Misses fall through to the regular reply flow.
 
     ``memory_store`` enables personal-memory recall during context
     assembly: when a turn references tokens that didn't resolve in
@@ -145,7 +147,7 @@ def register_thread_send_methods(
             threads_store,
             registry,
             agent_records,
-            routing_actions,
+            action_registry,
             memory_store,
             projects_store,
             classifier,
@@ -172,7 +174,7 @@ async def _handle_thread_send(
     store: ThreadsStore,
     registry: ProviderRegistry,
     agent_records: AgentRecordsStore | None,
-    routing_actions: RoutingActionsDispatcher | None = None,
+    action_registry: ActionRegistry | None = None,
     memory_store: MemoryStore | None = None,
     projects_store: ProjectsStore | None = None,
     classifier: Classifier | None = None,
@@ -283,14 +285,21 @@ async def _handle_thread_send(
         memory_store=memory_store,
     )
 
-    # 7a. Routing-edit intent (per ADR-0023). Recognise "route X to Y
-    # in this project" before delegating; on a hit the action lands
-    # against the per-project routing table and the brain's reply is
-    # the dispatcher's confirmation. Misses fall through.
-    if routing_actions is not None:
-        routing_intent = await routing_actions.dispatch(prompt, project_id=project_id)
-        if routing_intent is not None:
-            return await _handle_routing_reply(
+    # 7a. Action-registry dispatch (per F9.4 / F9.5). The matcher
+    # pipeline recognises configurable-surface phrasings ("route X to
+    # Y in this project", "remember that …", "make this project
+    # local-only", "set up Slack", …) before delegating; on a hit the
+    # registry runs the executor and the brain's reply is the
+    # executor's confirmation. Misses fall through to the regular
+    # reply flow.
+    if action_registry is not None:
+        match = action_registry.try_match(
+            prompt,
+            context={"project_id": project_id} if project_id else {},
+        )
+        if match is not None and not match.missing_inputs:
+            result = await action_registry.execute(match.action_name, match.inputs)
+            return await _handle_action_reply(
                 notify=notify,
                 store=store,
                 provider_id=provider_id,
@@ -298,8 +307,9 @@ async def _handle_thread_send(
                 user_turn=user_turn,
                 project_id=project_id,
                 brain_turn_id=brain_turn_id,
-                confirmation=routing_intent.confirmation,
-                action=routing_intent.action,
+                confirmation=result.confirmation,
+                action_name=match.action_name,
+                followup=result.followup,
                 assembled=assembled,
             )
 
@@ -593,7 +603,7 @@ async def _handle_delegated_reply(
     }
 
 
-async def _handle_routing_reply(
+async def _handle_action_reply(
     *,
     notify: Notifier,
     store: ThreadsStore,
@@ -603,20 +613,26 @@ async def _handle_routing_reply(
     project_id: str | None,
     brain_turn_id: str,
     confirmation: str,
-    action: str,
+    action_name: str,
+    followup: Mapping[str, Any] | None,
     assembled: AssembledContext,
 ) -> JsonValue:
-    """Reply with the action dispatcher's confirmation text.
+    """Reply with the action executor's confirmation text.
 
-    The routing-edit action has already landed against the store by
-    the time this runs; this turn's job is to surface the
-    confirmation to the user in the eternal thread the same shape a
-    direct brain reply would. Streamed as text deltas so the renderer
-    sees the same chunk shape as a normal reply.
+    The action has already landed against its store by the time this
+    runs; this turn's job is to surface the confirmation to the user
+    in the eternal thread the same shape a direct brain reply would.
+    Streamed as text deltas so the renderer sees the same chunk shape
+    as a normal reply.
+
+    ``followup`` is an optional structured payload (e.g. an OAuth URL
+    + drawer hint) the renderer subscribes to via ``action.followup``
+    so it can open the in-app browser drawer at the same time as the
+    confirmation reaches the chat.
     """
     await notify(
         THREAD_CHUNK,
-        {"turnId": brain_turn_id, "chunk": {"kind": "start", "model": "thalyn-routing"}},
+        {"turnId": brain_turn_id, "chunk": {"kind": "start", "model": "thalyn-action"}},
     )
     await notify(
         THREAD_CHUNK,
@@ -626,6 +642,15 @@ async def _handle_routing_reply(
         THREAD_CHUNK,
         {"turnId": brain_turn_id, "chunk": {"kind": "stop", "reason": "end_turn"}},
     )
+    if followup is not None:
+        await notify(
+            ACTION_FOLLOWUP,
+            {
+                "turnId": brain_turn_id,
+                "actionName": action_name,
+                "followup": dict(followup),
+            },
+        )
 
     brain_turn = ThreadTurn(
         turn_id=brain_turn_id,
@@ -636,7 +661,7 @@ async def _handle_routing_reply(
         body=confirmation,
         provenance={
             "providerId": provider_id,
-            "routingAction": action,
+            "actionName": action_name,
         },
         confidence=None,
         episodic_index_ptr=None,
@@ -655,7 +680,7 @@ async def _handle_routing_reply(
         "status": "completed",
         "finalResponse": confirmation,
         "context": _context_summary(assembled),
-        "routingAction": action,
+        "actionName": action_name,
     }
 
 

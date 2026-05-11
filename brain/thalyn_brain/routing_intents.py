@@ -1,25 +1,24 @@
-"""Conversational edit path for the worker-routing surface.
+"""Routing-edit actions for the action registry.
 
-A focused intent parser the brain consults before delegating a turn:
-when the user's prompt asks Thalyn to change the project's routing
-(``"route coding to Sonnet 4.6 in this project"``), the parser
-recognises the intent, dispatches to the routing-actions module, and
-the brain replies with a confirmation instead of opening an LLM
-turn. Patterns that don't match fall through and the regular reply
-flow runs.
+A focused intent parser + a trio of executors the brain consults
+before delegating a turn. When the user's prompt asks Thalyn to
+change the project's routing (``"route coding to Sonnet 4.6"``) or
+flip its local-only flag (``"make this project local-only"``), the
+matcher recognises the intent, the registry runs the executor, and
+the brain replies with the executor's confirmation instead of
+opening an LLM turn. Patterns that don't match return ``None`` so
+the regular reply flow runs unchanged.
 
-This is the *action-registry stub* the build plan calls for: a thin
-shim over ``RoutingOverridesStore`` + ``ProjectsStore`` that exposes
-the routing-specific actions in a shape the action registry (v0.32)
-can absorb without rewriting. The full LLM tool-use path lands when
-the registry materialises.
+The actions registered here are the v0.34 conversational surface
+for ADR-0023's per-project routing table:
 
-Scope on purpose tight:
-- "route <tag> to <name>" / "use <name> for <tag>" — set an override.
-- "make this project local-only" / "stop being local-only" — flip the
-  project's privacy flag.
-- Patterns that don't match return ``None`` so the regular reply
-  flow runs unchanged.
+- ``routing.set_override`` — set a per-project (task_tag → provider)
+  override.
+- ``routing.clear_override`` — clear a per-project override.
+- ``project.set_local_only`` — flip the project's privacy flag.
+
+Each executor takes its inputs from the matcher (or, in v1.x, from
+the LLM tool-use path) and lands the write against the right store.
 """
 
 from __future__ import annotations
@@ -27,8 +26,15 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from typing import Any
 
+from thalyn_brain.action_registry import (
+    Action,
+    ActionInput,
+    ActionMatch,
+    ActionRegistry,
+    ActionResult,
+)
 from thalyn_brain.projects import ProjectsStore
 from thalyn_brain.routing import (
     RoutingOverride,
@@ -62,6 +68,10 @@ DEFAULT_PROVIDER_ALIASES: Mapping[str, str] = {
     "llama.cpp": "llama_cpp",
 }
 
+ROUTING_SET_ACTION = "routing.set_override"
+ROUTING_CLEAR_ACTION = "routing.clear_override"
+PROJECT_LOCAL_ONLY_ACTION = "project.set_local_only"
+
 
 _TAG_ALTERNATION = "|".join(re.escape(tag) for tag in sorted(TASK_TAGS, key=len, reverse=True))
 _NAME_TOKEN = r"[A-Za-z][A-Za-z0-9._\-]*"
@@ -94,19 +104,6 @@ _LOCAL_ONLY_OFF = re.compile(
     r"turn\s+off\s+local[\s\-]?only)\b",
     re.IGNORECASE,
 )
-
-
-@dataclass(frozen=True)
-class RoutingIntent:
-    """Parsed shape of a routing-edit utterance.
-
-    ``confirmation`` is the brain's reply text the caller should
-    surface back to the user — short, unambiguous, and explicit
-    about what changed.
-    """
-
-    action: str
-    confirmation: str
 
 
 def parse_provider_alias(raw: str, *, aliases: Mapping[str, str] | None = None) -> str | None:
@@ -157,143 +154,247 @@ def find_routing_intent(
     return None
 
 
-class RoutingActionsDispatcher:
-    """Action-registry stub for routing-specific edits.
+class RoutingMatcher:
+    """``ActionMatcher`` implementation for the routing-edit phrasings.
 
-    The dispatcher executes the recognised intent against
-    ``RoutingOverridesStore`` / ``ProjectsStore`` and returns a
-    ``RoutingIntent`` carrying the brain's confirmation reply. When a
-    requested provider id isn't installed, the dispatcher returns a
-    refusal message rather than writing a dangling override.
+    Reads ``context["project_id"]`` (the project the user's turn is
+    addressed to) and folds it into the match inputs so the executors
+    can write through to ``RoutingOverridesStore`` / ``ProjectsStore``
+    without re-deriving it.
     """
 
-    def __init__(
-        self,
-        *,
-        overrides_store: RoutingOverridesStore,
-        projects_store: ProjectsStore,
-        valid_provider_ids: Iterable[str] | None = None,
-    ) -> None:
-        self._overrides_store = overrides_store
-        self._projects_store = projects_store
-        self._allowed_providers = (
-            frozenset(valid_provider_ids) if valid_provider_ids is not None else None
-        )
+    def __init__(self, aliases: Mapping[str, str] | None = None) -> None:
+        self._aliases = aliases
 
-    async def dispatch(
+    def try_match(
         self,
         prompt: str,
         *,
-        project_id: str | None,
-        aliases: Mapping[str, str] | None = None,
-    ) -> RoutingIntent | None:
-        intent = find_routing_intent(prompt, aliases=aliases)
+        context: Mapping[str, Any],
+    ) -> ActionMatch | None:
+        intent = find_routing_intent(prompt, aliases=self._aliases)
         if intent is None:
             return None
         verb, tag, provider = intent
-
-        if verb in {"set", "clear"} and project_id is None:
-            return RoutingIntent(
-                action=verb,
-                confirmation=(
-                    "I can change routing once a project is in focus — "
-                    "this turn isn't tied to one yet."
-                ),
-            )
-
+        project_id = context.get("project_id")
+        project_input = (
+            {"project_id": project_id} if isinstance(project_id, str) and project_id else {}
+        )
         if verb == "set":
-            if self._allowed_providers is not None and provider not in self._allowed_providers:
-                return RoutingIntent(
-                    action="set",
-                    confirmation=(
-                        f"I don't have a provider that matches that. "
-                        f"Try one of: {', '.join(sorted(self._allowed_providers))}."
-                    ),
-                )
-            assert project_id is not None
-            await self._overrides_store.upsert(
-                RoutingOverride(
-                    routing_override_id=new_routing_override_id(),
-                    project_id=project_id,
-                    task_tag=tag,
-                    provider_id=provider,
-                    updated_at_ms=int(time.time() * 1000),
-                )
+            return ActionMatch(
+                action_name=ROUTING_SET_ACTION,
+                inputs={"task_tag": tag, "provider_id": provider, **project_input},
+                preview=f"Route ``{tag}`` to ``{provider}`` in this project",
             )
-            return RoutingIntent(
-                action="set",
-                confirmation=(
-                    f"Routing updated: ``{tag}`` tasks in this project now go to ``{provider}``."
-                ),
-            )
-
         if verb == "clear":
-            assert project_id is not None
-            cleared = await self._overrides_store.delete(project_id, tag)
-            if cleared:
-                return RoutingIntent(
-                    action="clear",
-                    confirmation=(
-                        f"Cleared the ``{tag}`` override for this project — "
-                        f"it routes through the global default again."
-                    ),
-                )
-            return RoutingIntent(
-                action="clear",
-                confirmation=(
-                    f"No override was set for ``{tag}`` in this project; nothing to clear."
-                ),
+            return ActionMatch(
+                action_name=ROUTING_CLEAR_ACTION,
+                inputs={"task_tag": tag, **project_input},
+                preview=f"Clear the ``{tag}`` routing override for this project",
             )
-
-        if verb in {"local_only_on", "local_only_off"} and project_id is None:
-            return RoutingIntent(
-                action=verb,
-                confirmation=(
-                    "I can flip the local-only flag once a project is in focus — "
-                    "this turn isn't tied to one yet."
-                ),
-            )
-
         if verb == "local_only_on":
-            assert project_id is not None
-            project = await self._projects_store.get(project_id)
-            if project is None:
-                return RoutingIntent(
-                    action=verb,
-                    confirmation="I couldn't find that project to flip its local-only flag.",
-                )
-            await self._projects_store.set_local_only(project_id, True)
-            return RoutingIntent(
-                action="local_only_on",
-                confirmation=(
-                    "This project is now local-only — workers will route to local providers, "
-                    "and the spawn path will refuse cloud tokens for this project's runs."
-                ),
+            return ActionMatch(
+                action_name=PROJECT_LOCAL_ONLY_ACTION,
+                inputs={"value": True, **project_input},
+                preview="Make this project local-only",
             )
-
         if verb == "local_only_off":
-            assert project_id is not None
-            project = await self._projects_store.get(project_id)
-            if project is None:
-                return RoutingIntent(
-                    action=verb,
-                    confirmation="I couldn't find that project to flip its local-only flag.",
-                )
-            await self._projects_store.set_local_only(project_id, False)
-            return RoutingIntent(
-                action="local_only_off",
-                confirmation=(
-                    "Local-only is off for this project — overrides + the global default "
-                    "are back in charge of routing."
-                ),
+            return ActionMatch(
+                action_name=PROJECT_LOCAL_ONLY_ACTION,
+                inputs={"value": False, **project_input},
+                preview="Disable local-only on this project",
             )
         return None
 
 
+def register_routing_actions(
+    registry: ActionRegistry,
+    *,
+    overrides_store: RoutingOverridesStore,
+    projects_store: ProjectsStore,
+    valid_provider_ids: Iterable[str] | None = None,
+) -> None:
+    """Register the routing-edit actions + matcher on ``registry``.
+
+    Caller passes the same stores the GUI's routing-RPC handlers use,
+    so the conversational and GUI paths share their write surface
+    (per F9.5 — "the same one the GUI calls").
+    """
+
+    allowed_providers = frozenset(valid_provider_ids) if valid_provider_ids is not None else None
+
+    async def set_override(inputs: Mapping[str, Any]) -> ActionResult:
+        project_id = inputs.get("project_id")
+        task_tag = inputs["task_tag"]
+        provider_id = inputs["provider_id"]
+        if not isinstance(project_id, str) or not project_id:
+            return ActionResult(
+                confirmation=(
+                    "I can change routing once a project is in focus — "
+                    "this turn isn't tied to one yet."
+                )
+            )
+        if allowed_providers is not None and provider_id not in allowed_providers:
+            return ActionResult(
+                confirmation=(
+                    f"I don't have a provider that matches that. "
+                    f"Try one of: {', '.join(sorted(allowed_providers))}."
+                )
+            )
+        await overrides_store.upsert(
+            RoutingOverride(
+                routing_override_id=new_routing_override_id(),
+                project_id=project_id,
+                task_tag=task_tag,
+                provider_id=provider_id,
+                updated_at_ms=int(time.time() * 1000),
+            )
+        )
+        return ActionResult(
+            confirmation=(
+                f"Routing updated: ``{task_tag}`` tasks in this project now "
+                f"go to ``{provider_id}``."
+            )
+        )
+
+    async def clear_override(inputs: Mapping[str, Any]) -> ActionResult:
+        project_id = inputs.get("project_id")
+        task_tag = inputs["task_tag"]
+        if not isinstance(project_id, str) or not project_id:
+            return ActionResult(
+                confirmation=(
+                    "I can change routing once a project is in focus — "
+                    "this turn isn't tied to one yet."
+                )
+            )
+        cleared = await overrides_store.delete(project_id, task_tag)
+        if cleared:
+            return ActionResult(
+                confirmation=(
+                    f"Cleared the ``{task_tag}`` override for this project — "
+                    "it routes through the global default again."
+                )
+            )
+        return ActionResult(
+            confirmation=(
+                f"No override was set for ``{task_tag}`` in this project; nothing to clear."
+            )
+        )
+
+    async def set_local_only(inputs: Mapping[str, Any]) -> ActionResult:
+        project_id = inputs.get("project_id")
+        value = bool(inputs["value"])
+        if not isinstance(project_id, str) or not project_id:
+            return ActionResult(
+                confirmation=(
+                    "I can flip the local-only flag once a project is in focus — "
+                    "this turn isn't tied to one yet."
+                )
+            )
+        project = await projects_store.get(project_id)
+        if project is None:
+            return ActionResult(
+                confirmation="I couldn't find that project to flip its local-only flag.",
+            )
+        await projects_store.set_local_only(project_id, value)
+        if value:
+            return ActionResult(
+                confirmation=(
+                    "This project is now local-only — workers will route to "
+                    "local providers, and the spawn path will refuse cloud "
+                    "tokens for this project's runs."
+                )
+            )
+        return ActionResult(
+            confirmation=(
+                "Local-only is off for this project — overrides + the global "
+                "default are back in charge of routing."
+            )
+        )
+
+    registry.register(
+        Action(
+            name=ROUTING_SET_ACTION,
+            description=(
+                "Route a task tag to a specific provider in the current project "
+                "(e.g. 'route coding to ollama')."
+            ),
+            inputs=(
+                ActionInput(
+                    name="task_tag",
+                    description="Which task tag to route (coding / research / image / etc.).",
+                    kind="task_tag",
+                ),
+                ActionInput(
+                    name="provider_id",
+                    description="The provider to route the tag to.",
+                    kind="provider_id",
+                ),
+                ActionInput(
+                    name="project_id",
+                    description="The project whose routing table to edit.",
+                    kind="project_id",
+                    required=False,
+                ),
+            ),
+            executor=set_override,
+        )
+    )
+    registry.register(
+        Action(
+            name=ROUTING_CLEAR_ACTION,
+            description=(
+                "Clear a routing override so the task tag falls back to the global default."
+            ),
+            inputs=(
+                ActionInput(
+                    name="task_tag",
+                    description="Which task tag's override to clear.",
+                    kind="task_tag",
+                ),
+                ActionInput(
+                    name="project_id",
+                    description="The project whose routing table to edit.",
+                    kind="project_id",
+                    required=False,
+                ),
+            ),
+            executor=clear_override,
+        )
+    )
+    registry.register(
+        Action(
+            name=PROJECT_LOCAL_ONLY_ACTION,
+            description=(
+                "Flip a project's local-only flag — when on, workers route to "
+                "local providers and cloud tokens are refused for the project."
+            ),
+            inputs=(
+                ActionInput(
+                    name="value",
+                    description="True to make local-only, False to disable.",
+                    kind="bool",
+                ),
+                ActionInput(
+                    name="project_id",
+                    description="The project to flip.",
+                    kind="project_id",
+                    required=False,
+                ),
+            ),
+            executor=set_local_only,
+        )
+    )
+    registry.register_matcher(RoutingMatcher())
+
+
 __all__ = [
     "DEFAULT_PROVIDER_ALIASES",
-    "RoutingActionsDispatcher",
-    "RoutingIntent",
+    "PROJECT_LOCAL_ONLY_ACTION",
+    "ROUTING_CLEAR_ACTION",
+    "ROUTING_SET_ACTION",
+    "RoutingMatcher",
     "find_routing_intent",
     "parse_provider_alias",
+    "register_routing_actions",
 ]
