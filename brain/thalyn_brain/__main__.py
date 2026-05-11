@@ -13,6 +13,7 @@ from thalyn_brain.auth_rpc import register_auth_methods
 from thalyn_brain.browser import BrowserManager
 from thalyn_brain.browser_rpc import register_browser_methods
 from thalyn_brain.chat import register_chat_methods
+from thalyn_brain.connector_actions import register_connector_actions
 from thalyn_brain.email import EmailAccountStore, EmailManager
 from thalyn_brain.email.credentials import EmailCredentialsCache
 from thalyn_brain.email_rpc import register_email_methods
@@ -135,6 +136,7 @@ def main() -> int:
         valid_provider_ids={meta.id for meta in registry.list_meta()},
     )
     register_memory_actions(action_registry, memory_store=memory_store)
+    register_connector_actions(action_registry, manager=mcp_manager)
     # F3.5 default classifier: the brain's provider judges which
     # active project an untagged turn belongs to. The classifier is
     # advisory — ``classify_for_routing`` keeps the foreground bias
