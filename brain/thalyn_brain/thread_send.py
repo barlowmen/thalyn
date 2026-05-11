@@ -308,6 +308,27 @@ async def _handle_thread_send(
             prompt,
             context={"project_id": project_id} if project_id else {},
         )
+        if match is not None and match.missing_inputs:
+            # Walk-input fallback (per F9.5 schema-discovery): the
+            # matcher recognised the intent but didn't pull every
+            # required slot from the prompt. Surface a question using
+            # the action's own schema description rather than failing
+            # — Thalyn walks the user the rest of the way.
+            action = action_registry.get(match.action_name)
+            return await _handle_walk_input_reply(
+                notify=notify,
+                store=store,
+                provider_id=provider_id,
+                thread_id=thread_id,
+                user_turn=user_turn,
+                project_id=project_id,
+                brain_turn_id=brain_turn_id,
+                action_name=match.action_name,
+                missing_inputs=match.missing_inputs,
+                action=action,
+                preview=match.preview,
+                assembled=assembled,
+            )
         if match is not None and not match.missing_inputs:
             action = action_registry.get(match.action_name)
             if action.hard_gate:
@@ -663,6 +684,60 @@ async def _handle_delegated_reply(
             "sanityCheck": _verdict_to_wire(verdict),
         },
     }
+
+
+async def _handle_walk_input_reply(
+    *,
+    notify: Notifier,
+    store: ThreadsStore,
+    provider_id: str,
+    thread_id: str,
+    user_turn: ThreadTurn,
+    project_id: str | None,
+    brain_turn_id: str,
+    action_name: str,
+    missing_inputs: tuple[str, ...],
+    action: Any,
+    preview: str | None,
+    assembled: AssembledContext,
+) -> JsonValue:
+    """Ask the user for the inputs the matcher couldn't fill.
+
+    Surfaces a short question composed from the action's schema —
+    the first missing input's description, since asking about one
+    field at a time keeps the conversational pattern simple. The
+    user's follow-up re-issues the full command with the field in
+    place. Multi-turn slot-filling (the EM auto-folds the next
+    answer into the pending action) is a v1.x extension.
+    """
+
+    first_missing = missing_inputs[0]
+    slot = action.find_input(first_missing)
+    description = slot.description if slot is not None else f"the value of ``{first_missing}``"
+    intro = f"I can do that ({preview})" if preview else "I can help with that"
+    question = f"{intro} — which {first_missing.replace('_', ' ')}? ({description})"
+    extras = [f"``{name}``" for name in missing_inputs[1:]]
+    if extras:
+        question += f" Once we have that, I'll also need {', '.join(extras)}."
+
+    confirmation = question
+    followup = {
+        "missingInputs": list(missing_inputs),
+        "promptedFor": first_missing,
+    }
+    return await _handle_action_reply(
+        notify=notify,
+        store=store,
+        provider_id=provider_id,
+        thread_id=thread_id,
+        user_turn=user_turn,
+        project_id=project_id,
+        brain_turn_id=brain_turn_id,
+        confirmation=confirmation,
+        action_name=action_name,
+        followup=followup,
+        assembled=assembled,
+    )
 
 
 async def _handle_action_reply(
