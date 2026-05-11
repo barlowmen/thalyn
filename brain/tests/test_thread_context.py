@@ -13,6 +13,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+from thalyn_brain.action_registry import ActionSummary
 from thalyn_brain.memory import MemoryEntry, MemoryStore, new_memory_id
 from thalyn_brain.thread_context import assemble_context
 from thalyn_brain.threads import (
@@ -194,3 +195,54 @@ async def test_personal_memory_hit_count_capped(tmp_path: Path) -> None:
     )
 
     assert len(assembled.personal_memory_hits) <= 3
+
+
+async def test_action_summaries_render_into_system_prompt(tmp_path: Path) -> None:
+    """When the action registry is wired, the assembler folds the
+    lean (name + description) summary list into the system prompt so
+    the LLM knows the conversational actions exist without paying
+    the schema cost on every turn."""
+    threads = ThreadsStore(data_dir=tmp_path)
+    thread = await _seed_thread(threads)
+
+    summaries = [
+        ActionSummary(
+            name="routing.set_override",
+            description="Route a task tag to a specific provider in the current project.",
+            hard_gate=False,
+        ),
+        ActionSummary(
+            name="email.send",
+            description="Send an email on the user's behalf.",
+            hard_gate=True,
+        ),
+    ]
+    assembled = await assemble_context(
+        threads,
+        thread_id=thread.thread_id,
+        user_message="hello",
+        base_system_prompt="You are Thalyn.",
+        action_summaries=summaries,
+    )
+
+    assert "# Conversational actions available" in assembled.system_prompt
+    assert "``routing.set_override``" in assembled.system_prompt
+    assert "[hard-gated]" in assembled.system_prompt
+    # Hard-gated marker rides next to ``email.send`` specifically.
+    assert "``email.send`` [hard-gated]" in assembled.system_prompt
+
+
+async def test_action_summaries_block_omitted_when_registry_not_wired(tmp_path: Path) -> None:
+    """A fresh thread with no action registry must not render an
+    empty 'available actions' header."""
+    threads = ThreadsStore(data_dir=tmp_path)
+    thread = await _seed_thread(threads)
+
+    assembled = await assemble_context(
+        threads,
+        thread_id=thread.thread_id,
+        user_message="hello",
+        base_system_prompt="You are Thalyn.",
+        action_summaries=None,
+    )
+    assert "Conversational actions available" not in assembled.system_prompt

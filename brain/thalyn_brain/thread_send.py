@@ -283,14 +283,16 @@ async def _handle_thread_send(
     brain_turn_id = new_turn_id()
 
     # 7. Assemble the per-turn context bundle (rolling digest + recent
-    # turns + conditional episodic recall + personal-memory recall)
-    # per §9.4 / F6.4 / F6.5.
+    # turns + conditional episodic recall + personal-memory recall +
+    # lean action-registry summaries) per §9.4 / F6.4 / F6.5 / F9.4.
+    action_summaries = action_registry.list_summaries() if action_registry is not None else None
     assembled = await assemble_context(
         store,
         thread_id=thread_id,
         user_message=prompt,
         base_system_prompt=base_system_prompt,
         memory_store=memory_store,
+        action_summaries=action_summaries,
     )
 
     # 7a. Action-registry dispatch (per F9.4 / F9.5). The matcher

@@ -25,8 +25,10 @@ prompt formatting stays the orchestration's problem.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from thalyn_brain.action_registry import ActionSummary
 from thalyn_brain.memory import MemoryEntry, MemoryStore
 from thalyn_brain.threads import (
     SessionDigest,
@@ -114,6 +116,7 @@ async def assemble_context(
     episodic_limit: int = DEFAULT_EPISODIC_LIMIT,
     memory_store: MemoryStore | None = None,
     personal_memory_limit: int = DEFAULT_PERSONAL_MEMORY_LIMIT,
+    action_summaries: Sequence[ActionSummary] | None = None,
 ) -> AssembledContext:
     """Build the per-turn context bundle.
 
@@ -169,6 +172,7 @@ async def assemble_context(
         recent_turns=recent_turns,
         episodic_hits=episodic_hits,
         personal_memory_hits=personal_memory_hits,
+        action_summaries=action_summaries,
     )
     return AssembledContext(
         system_prompt=system_prompt,
@@ -263,14 +267,20 @@ def _render_system_prompt(
     recent_turns: list[ThreadTurn],
     episodic_hits: list[ThreadTurnSearchHit],
     personal_memory_hits: list[MemoryEntry],
+    action_summaries: Sequence[ActionSummary] | None = None,
 ) -> str:
     """Compose the assembled system prompt as plain text.
 
     Section ordering matches §9.4: caller's base system prompt first
     (Thalyn identity), then the rolling digest, then the recent
     verbatim window, then episodic transcript hits, then personal
-    memory references. Each section is omitted when empty so a fresh
-    thread doesn't paste empty headers.
+    memory references, then the lean conversational-action index.
+    Each section is omitted when empty so a fresh thread doesn't paste
+    empty headers.
+
+    The action index is lean by design (per F9.4 / F9.5): names +
+    one-line descriptions only. Schemas come from ``action.describe``
+    on demand so the per-turn context stays cheap.
     """
     parts: list[str] = []
     if base:
@@ -287,7 +297,31 @@ def _render_system_prompt(
     if personal_memory_hits:
         parts.append("# Personal memory references")
         parts.append(_format_personal_memory(personal_memory_hits))
+    if action_summaries:
+        parts.append("# Conversational actions available")
+        parts.append(_format_action_summaries(action_summaries))
     return "\n\n".join(parts)
+
+
+def _format_action_summaries(summaries: Sequence[ActionSummary]) -> str:
+    """Render the action registry as a short bullet list.
+
+    The block tells the LLM what surfaces it can suggest the user
+    invoke (e.g. "ask me to set up Slack"). Hard-gated actions carry
+    a marker so the LLM knows the user must approve them explicitly
+    even when Thalyn initiates.
+    """
+
+    lines: list[str] = []
+    lines.append(
+        "When the user wants to configure something, you can suggest these "
+        "actions — they are reachable in chat ('Thalyn, do X'). Hard-gated "
+        "actions still require the user's explicit approval before running."
+    )
+    for summary in summaries:
+        marker = " [hard-gated]" if summary.hard_gate else ""
+        lines.append(f"- ``{summary.name}``{marker} — {summary.description}")
+    return "\n".join(lines)
 
 
 def _format_digest(digest: SessionDigest) -> str:
