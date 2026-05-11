@@ -25,6 +25,7 @@ from thalyn_brain.lsp_rpc import register_lsp_methods
 from thalyn_brain.mcp import ConnectorRegistry, McpManager, builtin_catalog
 from thalyn_brain.mcp_rpc import register_mcp_methods
 from thalyn_brain.memory import MemoryStore
+from thalyn_brain.memory_actions import register_memory_actions
 from thalyn_brain.memory_rpc import register_memory_methods
 from thalyn_brain.orchestration import Runner
 from thalyn_brain.orchestration.resume import resume_unfinished_runs
@@ -133,6 +134,7 @@ def main() -> int:
         projects_store=projects_store,
         valid_provider_ids={meta.id for meta in registry.list_meta()},
     )
+    register_memory_actions(action_registry, memory_store=memory_store)
     # F3.5 default classifier: the brain's provider judges which
     # active project an untagged turn belongs to. The classifier is
     # advisory — ``classify_for_routing`` keeps the foreground bias
