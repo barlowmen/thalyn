@@ -1,0 +1,19 @@
+{
+  "engine": "mlx-whisper",
+  "model": "base.en",
+  "fixture": "delegation",
+  "audio_s": 12.6433125,
+  "runs_s": [
+    0.4830984160071239,
+    0.193411709042266,
+    0.20080358302220702
+  ],
+  "cold_s": 0.4830984160071239,
+  "median_s": 0.20080358302220702,
+  "warm_median_s": 0.19710764603223652,
+  "rtf_cold": 0.038209797947106335,
+  "rtf_warm": 0.01558987377969472,
+  "rss_mb": 0.0,
+  "transcript": "Delegate the whisper stream timeout regression to lead SAM. The lane graph runner is dropping interim transcripts when enhanced whisper vad processor is enabled. Check the CPEL callback cadence and the mic permission denied error path.",
+  "wer": 0.2903225806451613
+}

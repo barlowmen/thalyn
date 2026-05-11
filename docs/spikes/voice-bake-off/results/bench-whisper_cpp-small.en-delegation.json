@@ -1,0 +1,19 @@
+{
+  "engine": "whisper.cpp",
+  "model": "small.en",
+  "fixture": "delegation",
+  "audio_s": 12.6433125,
+  "runs_s": [
+    1.1058849999681115,
+    1.0917536669876426,
+    1.0857858330127783
+  ],
+  "cold_s": 1.1058849999681115,
+  "median_s": 1.0917536669876426,
+  "warm_median_s": 1.0887697500002105,
+  "rtf_cold": 0.08746797961120643,
+  "rtf_warm": 0.08611427978231262,
+  "rss_mb": 456.875,
+  "transcript": "Delegate the WhisperStream timeout regression to lead SAM. The lane graph runner is dropping interim transcripts when enhanced WhisperVAD processor is enabled. Check the CPAL callback cadence and the mic permission denied error path.",
+  "wer": 0.16129032258064516
+}

@@ -1,0 +1,19 @@
+{
+  "engine": "whisper.cpp",
+  "model": "base.en",
+  "fixture": "jfk",
+  "audio_s": 11.0,
+  "runs_s": [
+    0.581831166986376,
+    0.5760054999846034,
+    0.5909933330258355
+  ],
+  "cold_s": 0.581831166986376,
+  "median_s": 0.581831166986376,
+  "warm_median_s": 0.5834994165052194,
+  "rtf_cold": 0.05289374245330691,
+  "rtf_warm": 0.053045401500474494,
+  "rss_mb": 0.0,
+  "transcript": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
+  "wer": 0.0
+}

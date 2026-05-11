@@ -1,0 +1,1 @@
+Delegate the WhisperStream timeout regression to Lead-Sam. The LangGraph runner is dropping interim transcripts when EnhancedWhisperVadProcessor is enabled. Check the cpal callback cadence and the mic permission denied error path.

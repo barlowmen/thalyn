@@ -2,124 +2,343 @@
   {
     "engine": "whisper.cpp",
     "model": "tiny.en",
+    "fixture": "delegation",
+    "audio_s": 12.6433125,
+    "runs_s": [
+      0.7784174999687821,
+      0.5877530839643441,
+      0.5877770410152152
+    ],
+    "cold_s": 0.7784174999687821,
+    "median_s": 0.5877770410152152,
+    "warm_median_s": 0.5877650624897797,
+    "rtf_cold": 0.061567528285706934,
+    "rtf_warm": 0.04648821758457522,
+    "rss_mb": 230.5,
+    "transcript": "delegate the whisper stream timeout regression to lead SAM. The lane graph runner is dropping interim transcripts when enhanced whisper VAD processor is enabled. Check the C-PAL callback cadence and the mic permission denied error path.",
+    "wer": 0.3225806451612903
+  },
+  {
+    "engine": "whisper.cpp",
+    "model": "base.en",
+    "fixture": "delegation",
+    "audio_s": 12.6433125,
+    "runs_s": [
+      0.5781429170165211,
+      0.5989010829944164,
+      0.5847360410261899
+    ],
+    "cold_s": 0.5781429170165211,
+    "median_s": 0.5847360410261899,
+    "warm_median_s": 0.5918185620103031,
+    "rtf_cold": 0.04572717134188695,
+    "rtf_warm": 0.046808821818673164,
+    "rss_mb": 109.171875,
+    "transcript": "Delegate the whisper stream timeout regression to LeadSam. The lane graph runner is dropping interim transcripts when enhanced whisper vad processor is enabled. Check the CPAL callback cadence and the mic permission denied error path.",
+    "wer": 0.3225806451612903
+  },
+  {
+    "engine": "whisper.cpp",
+    "model": "small.en",
+    "fixture": "delegation",
+    "audio_s": 12.6433125,
+    "runs_s": [
+      1.1058849999681115,
+      1.0917536669876426,
+      1.0857858330127783
+    ],
+    "cold_s": 1.1058849999681115,
+    "median_s": 1.0917536669876426,
+    "warm_median_s": 1.0887697500002105,
+    "rtf_cold": 0.08746797961120643,
+    "rtf_warm": 0.08611427978231262,
+    "rss_mb": 456.875,
+    "transcript": "Delegate the WhisperStream timeout regression to lead SAM. The lane graph runner is dropping interim transcripts when enhanced WhisperVAD processor is enabled. Check the CPAL callback cadence and the mic permission denied error path.",
+    "wer": 0.16129032258064516
+  },
+  {
+    "engine": "faster-whisper",
+    "model": "tiny.en",
+    "fixture": "delegation",
+    "audio_s": 12.6433125,
+    "runs_s": [
+      0.7209884579642676,
+      0.4848295830306597,
+      0.49467079201713204
+    ],
+    "cold_s": 0.7209884579642676,
+    "median_s": 0.49467079201713204,
+    "warm_median_s": 0.4897501875238959,
+    "rtf_cold": 0.05702528178151632,
+    "rtf_warm": 0.038735907818769476,
+    "rss_mb": 352.3125,
+    "transcript": "delegate the whisper stream timeout regression to lead SAM. The lane graph runner is dropping interim transcripts when enhanced whisper VAD processor is enabled. Check the C-PEL callback cadence and the mic permission denied error path.",
+    "wer": 0.3225806451612903
+  },
+  {
+    "engine": "faster-whisper",
+    "model": "base.en",
+    "fixture": "delegation",
+    "audio_s": 12.6433125,
+    "runs_s": [
+      0.8318698339862749,
+      0.8100970409577712,
+      0.9516184999956749
+    ],
+    "cold_s": 0.8318698339862749,
+    "median_s": 0.8318698339862749,
+    "warm_median_s": 0.8808577704767231,
+    "rtf_cold": 0.06579524424364856,
+    "rtf_warm": 0.06966985673072014,
+    "rss_mb": 211.640625,
+    "transcript": "Delegate the whisper stream timeout regression to lead SAM. The lane graph runner is dropping interim transcripts when enhanced whisper vad processor is enabled. Check the C-PAL callback cadence and the mic permission denied error path.",
+    "wer": 0.3225806451612903
+  },
+  {
+    "engine": "faster-whisper",
+    "model": "small.en",
+    "fixture": "delegation",
+    "audio_s": 12.6433125,
+    "runs_s": [
+      2.28736191598,
+      2.1768979159533046,
+      2.345710334018804
+    ],
+    "cold_s": 2.28736191598,
+    "median_s": 2.28736191598,
+    "warm_median_s": 2.2613041249860544,
+    "rtf_cold": 0.18091476549203384,
+    "rtf_warm": 0.17885377150853896,
+    "rss_mb": 549.84375,
+    "transcript": "Delegate the Whisper stream timeout regression to lead SAM. The lane graph runner is dropping interim transcripts when enhanced Whisper VAD processor is enabled. Check the CPAL callback cadence and the mic permission denied error path.",
+    "wer": 0.25806451612903225
+  },
+  {
+    "engine": "mlx-whisper",
+    "model": "tiny.en",
+    "fixture": "delegation",
+    "audio_s": 12.6433125,
+    "runs_s": [
+      0.4378744999994524,
+      0.137075915990863,
+      0.13878774998011068
+    ],
+    "cold_s": 0.4378744999994524,
+    "median_s": 0.13878774998011068,
+    "warm_median_s": 0.13793183298548684,
+    "rtf_cold": 0.034632893871716953,
+    "rtf_warm": 0.010909469570216416,
+    "rss_mb": 0.0,
+    "transcript": "delegate the Whisper Stream timeout regression to lead Sam. The Lane Graphrunner is dropping interim transcripts when enhanced Whisper VAD processor is enabled. Check the C-PEL callback cadence and the mic permission denied error path.",
+    "wer": 0.3225806451612903
+  },
+  {
+    "engine": "mlx-whisper",
+    "model": "base.en",
+    "fixture": "delegation",
+    "audio_s": 12.6433125,
+    "runs_s": [
+      0.4830984160071239,
+      0.193411709042266,
+      0.20080358302220702
+    ],
+    "cold_s": 0.4830984160071239,
+    "median_s": 0.20080358302220702,
+    "warm_median_s": 0.19710764603223652,
+    "rtf_cold": 0.038209797947106335,
+    "rtf_warm": 0.01558987377969472,
+    "rss_mb": 0.0,
+    "transcript": "Delegate the whisper stream timeout regression to lead SAM. The lane graph runner is dropping interim transcripts when enhanced whisper vad processor is enabled. Check the CPEL callback cadence and the mic permission denied error path.",
+    "wer": 0.2903225806451613
+  },
+  {
+    "engine": "mlx-whisper",
+    "model": "small.en",
+    "fixture": "delegation",
+    "audio_s": 12.6433125,
+    "runs_s": [
+      1.309927832975518,
+      0.4858365830150433,
+      0.536186125013046
+    ],
+    "cold_s": 1.309927832975518,
+    "median_s": 0.536186125013046,
+    "warm_median_s": 0.5110113540140446,
+    "rtf_cold": 0.1036063794971071,
+    "rtf_warm": 0.04041752143783875,
+    "rss_mb": 83.640625,
+    "transcript": "Delegate the Whisper Stream timeout regression to lead SAM. The lane graph runner is dropping interim transcripts when enhanced Whisper VAD processor is enabled. Check the CPAL callback cadence and the mic permission denied error path.",
+    "wer": 0.25806451612903225
+  },
+  {
+    "engine": "whisper.cpp",
+    "model": "tiny.en",
+    "fixture": "jfk",
     "audio_s": 11.0,
     "runs_s": [
-      1.0930769170518033,
-      0.5870751250186004,
-      0.587844124995172
+      7.983291334006935,
+      0.5875273330020718,
+      0.594584374979604
     ],
-    "cold_s": 1.0930769170518033,
-    "median_s": 0.587844124995172,
-    "warm_median_s": 0.5874596250068862,
-    "rtf_cold": 0.09937062882289122,
-    "rtf_warm": 0.05340542045517147,
-    "rss_mb": 227.484375,
+    "cold_s": 7.983291334006935,
+    "median_s": 0.594584374979604,
+    "warm_median_s": 0.5910558539908379,
+    "rtf_cold": 0.7257537576369941,
+    "rtf_warm": 0.053732350362803445,
+    "rss_mb": 0.0,
     "transcript": "And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
     "wer": 0.0
   },
   {
     "engine": "whisper.cpp",
     "model": "base.en",
+    "fixture": "jfk",
     "audio_s": 11.0,
     "runs_s": [
-      0.5649789579911157,
-      0.5623040840146132,
-      0.5835989590268582
+      0.581831166986376,
+      0.5760054999846034,
+      0.5909933330258355
     ],
-    "cold_s": 0.5649789579911157,
-    "median_s": 0.5649789579911157,
-    "warm_median_s": 0.5729515215207357,
-    "rtf_cold": 0.051361723453737795,
-    "rtf_warm": 0.05208650195643052,
-    "rss_mb": 109.265625,
+    "cold_s": 0.581831166986376,
+    "median_s": 0.581831166986376,
+    "warm_median_s": 0.5834994165052194,
+    "rtf_cold": 0.05289374245330691,
+    "rtf_warm": 0.053045401500474494,
+    "rss_mb": 0.0,
     "transcript": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
     "wer": 0.0
   },
   {
     "engine": "whisper.cpp",
     "model": "small.en",
+    "fixture": "jfk",
     "audio_s": 11.0,
     "runs_s": [
-      1.094541999977082,
-      1.0923058749758638,
-      1.0851503749727271
+      1.2094857089687139,
+      1.1027722919825464,
+      1.0967373750172555
     ],
-    "cold_s": 1.094541999977082,
-    "median_s": 1.0923058749758638,
-    "warm_median_s": 1.0887281249742955,
-    "rtf_cold": 0.09950381817973473,
-    "rtf_warm": 0.09897528408857231,
-    "rss_mb": 473.1875,
+    "cold_s": 1.2094857089687139,
+    "median_s": 1.1027722919825464,
+    "warm_median_s": 1.099754833499901,
+    "rtf_cold": 0.10995324626988308,
+    "rtf_warm": 0.09997771213635463,
+    "rss_mb": 0.0,
     "transcript": "And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country.",
     "wer": 0.0
   },
   {
     "engine": "faster-whisper",
     "model": "tiny.en",
+    "fixture": "jfk",
     "audio_s": 11.0,
     "runs_s": [
-      3.364182124962099,
-      0.405951458029449,
-      0.38316166697768494
+      0.5241139160352759,
+      0.3710454169777222,
+      0.4545738339656964
     ],
-    "cold_s": 3.364182124962099,
-    "median_s": 0.405951458029449,
-    "warm_median_s": 0.39455656250356697,
-    "rtf_cold": 0.3058347386329181,
-    "rtf_warm": 0.03586877840941518,
-    "rss_mb": 364.34375,
+    "cold_s": 0.5241139160352759,
+    "median_s": 0.4545738339656964,
+    "warm_median_s": 0.4128096254717093,
+    "rtf_cold": 0.04764671963957054,
+    "rtf_warm": 0.03752814777015539,
+    "rss_mb": 0.0,
     "transcript": "And so, my fellow Americans ask not what your country can do for you ask what you can do for your country.",
     "wer": 0.0
   },
   {
     "engine": "faster-whisper",
     "model": "base.en",
+    "fixture": "jfk",
     "audio_s": 11.0,
     "runs_s": [
-      4.364183500001673,
-      0.6692788330256008,
-      0.6373944579972886
+      0.6570616660173982,
+      0.6557156670023687,
+      0.5937841670238413
     ],
-    "cold_s": 4.364183500001673,
-    "median_s": 0.6692788330256008,
-    "warm_median_s": 0.6533366455114447,
-    "rtf_cold": 0.3967439545456066,
-    "rtf_warm": 0.059394240501040425,
-    "rss_mb": 263.109375,
+    "cold_s": 0.6570616660173982,
+    "median_s": 0.6557156670023687,
+    "warm_median_s": 0.624749917013105,
+    "rtf_cold": 0.05973287872885438,
+    "rtf_warm": 0.056795447001191365,
+    "rss_mb": 0.0,
     "transcript": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
     "wer": 0.0
   },
   {
     "engine": "faster-whisper",
     "model": "small.en",
+    "fixture": "jfk",
     "audio_s": 11.0,
     "runs_s": [
-      13.528193083999213,
-      2.175545374979265,
-      1.8168976249871776
+      1.7658321249764413,
+      1.607585082994774,
+      1.6323990829987451
     ],
-    "cold_s": 13.528193083999213,
-    "median_s": 2.175545374979265,
-    "warm_median_s": 1.9962214999832213,
-    "rtf_cold": 1.2298357349090194,
-    "rtf_warm": 0.1814746818166565,
-    "rss_mb": 745.109375,
+    "cold_s": 1.7658321249764413,
+    "median_s": 1.6323990829987451,
+    "warm_median_s": 1.6199920829967596,
+    "rtf_cold": 0.16053019317967648,
+    "rtf_warm": 0.14727200754515996,
+    "rss_mb": 0.0,
     "transcript": "And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country.",
     "wer": 0.0
   },
   {
     "engine": "mlx-whisper",
     "model": "tiny.en",
-    "error": "[Errno 2] No such file or directory: 'ffmpeg'"
+    "fixture": "jfk",
+    "audio_s": 11.0,
+    "runs_s": [
+      0.26831891702022403,
+      0.08847283403156325,
+      0.08826929202768952
+    ],
+    "cold_s": 0.26831891702022403,
+    "median_s": 0.08847283403156325,
+    "warm_median_s": 0.08837106302962638,
+    "rtf_cold": 0.024392628820020367,
+    "rtf_warm": 0.008033733002693307,
+    "rss_mb": 0.0,
+    "transcript": "And so my fellow Americans ask not what your country can do for you ask what you can do for your country",
+    "wer": 0.0
   },
   {
     "engine": "mlx-whisper",
     "model": "base.en",
-    "error": "[Errno 2] No such file or directory: 'ffmpeg'"
+    "fixture": "jfk",
+    "audio_s": 11.0,
+    "runs_s": [
+      0.3384225830086507,
+      0.13044854201143607,
+      0.128496624995023
+    ],
+    "cold_s": 0.3384225830086507,
+    "median_s": 0.13044854201143607,
+    "warm_median_s": 0.12947258350322954,
+    "rtf_cold": 0.03076568936442279,
+    "rtf_warm": 0.011770234863929958,
+    "rss_mb": 0.0,
+    "transcript": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
+    "wer": 0.0
   },
   {
     "engine": "mlx-whisper",
     "model": "small.en",
-    "error": "[Errno 2] No such file or directory: 'ffmpeg'"
+    "fixture": "jfk",
+    "audio_s": 11.0,
+    "runs_s": [
+      0.7221166670206003,
+      0.31950583297293633,
+      0.3124854589696042
+    ],
+    "cold_s": 0.7221166670206003,
+    "median_s": 0.31950583297293633,
+    "warm_median_s": 0.3159956459712703,
+    "rtf_cold": 0.06564696972914548,
+    "rtf_warm": 0.028726876906479116,
+    "rss_mb": 174.421875,
+    "transcript": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
+    "wer": 0.0
   }
 ]

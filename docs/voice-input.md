@@ -27,6 +27,37 @@ the cloud-fallback flow.
 The default routing: local Whisper.cpp on every supported
 platform; the user opts in to MLX or Deepgram in settings.
 
+## Accuracy
+
+The bake-off matrix at
+[`docs/spikes/voice-bake-off/`](spikes/voice-bake-off/) measures
+both engines on two M4-recorded fixtures: a broadcast-quality
+JFK clip and a synthesised delegation request loaded with
+project-specific identifiers (`WhisperStream`,
+`EnhancedWhisperVadProcessor`, `Lead-Sam`, `cpal`, …).
+
+Two observations from the v0.33 re-run drive the defaults here:
+
+1. **WER ties at 0.000 on JFK across every (engine, model) cell.**
+   Easy speech can't differentiate model sizes. The engine and
+   model pick comes down to latency + RSS, which is what
+   ADR-0025 settled.
+2. **WER spreads cleanly on the delegation fixture.**
+   small.en cuts the error rate roughly in half versus
+   tiny / base on technical jargon (whisper.cpp small.en
+   lands at 0.161; tiny.en and base.en at 0.323). That's the
+   case for picking small.en as the default model when the
+   hardware floor allows it.
+
+The bake-off doesn't pass an `initial_prompt` — by design, the
+numbers above are a **floor**. The project-vocabulary slice
+from `voice.project_vocabulary` (a brain RPC the engine
+consumes via Whisper's `initial_prompt`) folds project
+identifiers into the prompt, which drops WER meaningfully on
+the kind of words the matrix surfaces as errors. The
+Direct-lead-chat section below has more on how the slice flows
+through.
+
 ## Hardware floor
 
 Voice input is interactive (push-to-talk, < 1 s from release to
@@ -38,13 +69,29 @@ cloud STT is the recommended path on these.
 
 ### Apple Silicon (Mac)
 
-- **M1 / M2 / M3 / M4, 16 GB+, Core ML enabled** —
-  **interactive.** small.en at ~ 0.03–0.05× RTF; final
-  transcript ready ≤ 250 ms after release on a 5–10 s
-  utterance.
-- **M1 baseline (8 GB), Core ML enabled** — **interactive
-  with base.en**, **workable with small.en**. The hardware
-  probe picks base.en by default; the user can override.
+Measured on M4 / 16 GB; see
+[`docs/spikes/voice-bake-off/`](spikes/voice-bake-off/) for the
+full matrix.
+
+- **M4, 16 GB, whisper.cpp + Metal (default)** —
+  **interactive.** base.en at ~0.58 s warm (RTF 0.05×),
+  small.en at ~1.10 s warm (RTF 0.10×). Without Core ML
+  (going-public checklist), small.en is over the ADR-0025
+  ≤ 250 ms budget; base.en is close. UX still feels live
+  because of the sub-second band.
+- **M4, 16 GB, MLX-Whisper (opt-in)** — **interactive,
+  fastest.** base.en at ~0.13 s warm, small.en at ~0.32 s
+  warm. Hits the ADR-0025 budget on base.en; small.en is
+  ~25% over but still a faster path than whisper.cpp + Metal
+  by ~3×.
+- **M1 / M2 / M3 (16 GB+), Core ML enabled** —
+  **interactive.** Cited M1 numbers from the spike's
+  reference benchmarks (interpolated, not measured on this
+  dev box); cross-platform re-runs land on the
+  going-public checklist.
+- **M1 baseline (8 GB)** — **interactive with base.en**,
+  **workable with small.en**. The hardware probe picks
+  base.en by default; the user can override.
 - **Intel Mac** — **not supported.** Same posture as
   [`docs/local-models.md`](local-models.md): v1 doesn't ship
   on Intel Mac. Cloud STT is the only path.
