@@ -78,7 +78,9 @@ plan are maintained outside this repository by the project author.
         └──────────────────────────────────┘
 ```
 
-For details, see [`02-architecture.md`](02-architecture.md).
+Each load-bearing technical decision is captured as an ADR under
+[`docs/adr/`](docs/adr/) — those are the public design record for
+how the pieces fit together.
 
 ## Configuring things by asking
 
