@@ -39,6 +39,8 @@ Each item links to the ADR it overrides or extends.
 - [ ] **Dependency pinning by hash** in `Cargo.lock`, `pnpm-lock.yaml`, and the Python sidecar's lockfile (already in v0.x).
 - [ ] **Dependency-update policy** (Renovate / Dependabot config), with a human-review gate before merge.
 - [ ] **Vendored MCP servers** — first-party connectors are vendored or version-pinned by hash; community connectors are gated behind explicit user installation. (Today the first-party Slack / Office / Calendar descriptors point at `npx @modelcontextprotocol/server-*` invocations; vendoring or hash-pinning those packages is still pending.)
+- [ ] **GitHub Actions pinned by commit SHA.** Settings → Actions → General → "Require actions to be pinned to a full-length commit SHA." Currently every `uses:` line in `.github/workflows/*.yml` references a tag (`actions/checkout@v5`, `pnpm/action-setup@v4`, `astral-sh/setup-uv@v6`, etc.); a tag can be moved to point at a malicious commit, a SHA cannot. Enabling forces every `uses:` line to be rewritten with a SHA pin and adds maintenance overhead per upgrade — appropriate when the binary distribution starts, premature today.
+- [ ] **Restrict allowed GitHub Actions providers.** Settings → Actions → General → Actions permissions. Currently set to "Allow all actions and reusable workflows" because the workflow only references well-known publishers and the maintainer audits every CI change. Tighten to "Allow {owner}, and select non-{owner} actions and reusable workflows" with an explicit allowlist when external contributors start landing CI changes that reference unfamiliar actions.
 
 ### Disclosure & community
 - [ ] **`SECURITY.md`** — coordinated-disclosure policy, private contact channel, 90-day public-disclosure default.
