@@ -1,7 +1,8 @@
 /**
  * Project bindings: ``project.list`` / ``project.create`` /
  * ``project.update`` / ``project.archive`` / ``project.pause`` /
- * ``project.resume`` from the renderer's perspective.
+ * ``project.resume`` / ``project.merge`` from the renderer's
+ * perspective.
  *
  * The brain owns the project store; these helpers wrap the Tauri
  * commands that proxy ``project_list`` / ``project_create`` / … to
@@ -90,4 +91,83 @@ export function resumeProject(projectId: string): Promise<ProjectMutationResult>
 
 export function archiveProject(projectId: string): Promise<ProjectMutationResult> {
   return invoke<ProjectMutationResult>("project_archive", { projectId });
+}
+
+export type RoutingOverrideMigration = {
+  taskTag: string;
+  routingOverrideId: string;
+  providerId: string;
+};
+
+export type RoutingOverrideConflict = {
+  taskTag: string;
+  survivingProviderId: string;
+  absorbedProviderId: string;
+  absorbedRoutingOverrideId: string;
+};
+
+export type ConnectorGrantConflict = {
+  key: string;
+  survivingValue: unknown;
+  absorbedValue: unknown;
+};
+
+export type MergePlan = {
+  mergeId: string;
+  fromProject: Project;
+  intoProject: Project;
+  threadTurnIds: string[];
+  memoryEntryIds: string[];
+  absorbedLead: { agentId: string; displayName: string } | null;
+  survivingLead: { agentId: string; displayName: string } | null;
+  reParentSubLeadIds: string[];
+  routingOverridesToMigrate: RoutingOverrideMigration[];
+  routingOverrideConflicts: RoutingOverrideConflict[];
+  mergedConnectorGrants: Record<string, unknown> | null;
+  connectorGrantConflicts: ConnectorGrantConflict[];
+  computedAtMs: number;
+  counts: {
+    threadTurns: number;
+    memoryEntries: number;
+    subLeadReParents: number;
+    routingMigrations: number;
+    routingConflicts: number;
+    connectorConflicts: number;
+  };
+};
+
+export type MergeOutcome = {
+  mergeId: string;
+  appliedAtMs: number;
+  threadTurnsRewritten: number;
+  memoryEntriesMigrated: number;
+  absorbedLeadArchived: boolean;
+  subLeadsReparented: number;
+  routingOverridesMigrated: number;
+  routingOverridesDropped: number;
+  connectorGrantsUpdated: boolean;
+  logPath: string;
+};
+
+export type MergeResult = {
+  plan: MergePlan;
+  outcome: MergeOutcome | null;
+};
+
+/**
+ * Run a project merge in two phases. Without ``apply`` (or
+ * ``apply: false``) the brain returns the dry-run plan only — show it
+ * to the user, then call again with ``apply: true`` to commit. The
+ * outcome field is null on the dry-run path.
+ */
+export function mergeProject(input: {
+  fromProjectId: string;
+  intoProjectId: string;
+  apply?: boolean;
+}): Promise<MergeResult> {
+  return invoke<MergeResult>("project_merge", {
+    fromProjectId: input.fromProjectId,
+    intoProjectId: input.intoProjectId,
+    apply: input.apply,
+  });
 }

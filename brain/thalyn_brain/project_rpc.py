@@ -1,6 +1,6 @@
 """JSON-RPC bindings for the project lifecycle surface.
 
-Six methods replace the v0.20 ``NOT_IMPLEMENTED`` stubs:
+Eight methods replace the v0.20 ``NOT_IMPLEMENTED`` stubs:
 
 - ``project.create``  — create a new active project.
 - ``project.list``    — enumerate projects (filterable by status).
@@ -11,6 +11,8 @@ Six methods replace the v0.20 ``NOT_IMPLEMENTED`` stubs:
 - ``project.classify`` — ask the wired classifier which active
   project a message belongs to. Used by tests and by future
   affordances that surface "this seems to be about X" prompts.
+- ``project.merge`` — plan-first / apply-on-confirmation merge of
+  project A into project B (F3.4 / ADR-0024).
 
 The handlers thin-wrap ``ProjectsStore`` plus ``LeadLifecycle`` for
 the lead-archival cascade. The state machine itself owns the
@@ -20,14 +22,23 @@ invariants; the RPC layer parses params and translates errors into
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+from thalyn_brain.agents import AgentRecordsStore
 from thalyn_brain.lead_lifecycle import (
     LeadLifecycle,
     LeadLifecycleError,
 )
+from thalyn_brain.memory import MemoryStore
 from thalyn_brain.project_classifier import Classifier, classify_for_routing
+from thalyn_brain.project_merge import (
+    ProjectMergeError,
+    apply_merge_plan,
+    compute_merge_plan,
+)
 from thalyn_brain.projects import Project, ProjectsStore
+from thalyn_brain.routing import RoutingOverridesStore
 from thalyn_brain.rpc import (
     INVALID_PARAMS,
     Dispatcher,
@@ -35,6 +46,7 @@ from thalyn_brain.rpc import (
     RpcError,
     RpcParams,
 )
+from thalyn_brain.threads import ThreadsStore
 
 
 def register_project_methods(
@@ -43,6 +55,11 @@ def register_project_methods(
     projects: ProjectsStore,
     lead_lifecycle: LeadLifecycle | None = None,
     classifier: Classifier | None = None,
+    threads: ThreadsStore | None = None,
+    memory: MemoryStore | None = None,
+    agents: AgentRecordsStore | None = None,
+    routing_overrides: RoutingOverridesStore | None = None,
+    data_dir: Path | None = None,
 ) -> None:
     """Wire the ``project.*`` methods onto ``dispatcher``.
 
@@ -54,6 +71,14 @@ def register_project_methods(
     ``classifier`` is optional for the same reason — when omitted
     ``project.classify`` returns the foreground project unchanged
     (the no-classifier sticky-foreground default per F3.5).
+
+    ``threads`` / ``memory`` / ``agents`` / ``routing_overrides`` are
+    the stores ``project.merge`` reads to plan and the columns it
+    writes during apply. They're optional so the existing v0.20 / v0.31
+    tests can keep their narrow setups; when any of them is missing
+    ``project.merge`` errors with a clear "not configured" message
+    rather than silently degrading. The data dir flows through to the
+    audit writer's NDJSON path.
     """
 
     async def project_create(params: RpcParams) -> JsonValue:
@@ -178,6 +203,40 @@ def register_project_methods(
         )
         return {"projectId": resolved, "verdict": verdict_wire}
 
+    async def project_merge(params: RpcParams) -> JsonValue:
+        if threads is None or memory is None or agents is None or routing_overrides is None:
+            raise RpcError(
+                code=INVALID_PARAMS,
+                message="project.merge is not configured on this dispatcher",
+            )
+        from_project_id = _require_str(params, "fromProjectId")
+        into_project_id = _require_str(params, "intoProjectId")
+        apply_flag = bool(params.get("apply", False))
+        try:
+            plan = await compute_merge_plan(
+                from_project_id=from_project_id,
+                into_project_id=into_project_id,
+                projects=projects,
+                threads=threads,
+                memory=memory,
+                agents=agents,
+                routing_overrides=routing_overrides,
+            )
+        except ProjectMergeError as exc:
+            raise RpcError(code=INVALID_PARAMS, message=str(exc)) from exc
+        if not apply_flag:
+            # Dry-run path: the renderer reads the plan, asks the user
+            # to confirm, then calls again with ``apply: true``. The
+            # ``apply`` flag missing from the payload is treated as
+            # False so the renderer can't accidentally apply by
+            # forgetting to set it.
+            return {"plan": plan.to_wire(), "outcome": None}
+        try:
+            outcome = await apply_merge_plan(plan, data_dir=data_dir)
+        except ProjectMergeError as exc:
+            raise RpcError(code=INVALID_PARAMS, message=str(exc)) from exc
+        return {"plan": plan.to_wire(), "outcome": outcome.to_wire()}
+
     dispatcher.register("project.create", project_create)
     dispatcher.register("project.list", project_list)
     dispatcher.register("project.update", project_update)
@@ -185,6 +244,7 @@ def register_project_methods(
     dispatcher.register("project.resume", project_resume)
     dispatcher.register("project.archive", project_archive)
     dispatcher.register("project.classify", project_classify)
+    dispatcher.register("project.merge", project_merge)
 
 
 def _require_str(params: RpcParams, key: str) -> str:

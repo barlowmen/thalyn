@@ -661,6 +661,26 @@ async fn project_archive(state: State<'_, AppState>, project_id: String) -> Resu
 }
 
 #[tauri::command]
+async fn project_merge(
+    state: State<'_, AppState>,
+    from_project_id: String,
+    into_project_id: String,
+    apply: Option<bool>,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    params.insert("fromProjectId".into(), Value::from(from_project_id));
+    params.insert("intoProjectId".into(), Value::from(into_project_id));
+    if let Some(flag) = apply {
+        params.insert("apply".into(), Value::from(flag));
+    }
+    state
+        .brain
+        .call("project.merge", Value::Object(params), BRAIN_CALL_TIMEOUT)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 async fn create_schedule(
     state: State<'_, AppState>,
     title: String,
@@ -2319,6 +2339,7 @@ pub fn run() {
             project_pause,
             project_resume,
             project_archive,
+            project_merge,
             list_memory,
             add_memory,
             update_memory,

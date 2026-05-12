@@ -193,6 +193,11 @@ def main() -> int:
         projects=projects_store,
         lead_lifecycle=lead_lifecycle,
         classifier=project_classifier,
+        threads=threads_store,
+        memory=memory_store,
+        agents=agent_records_store,
+        routing_overrides=routing_overrides_store,
+        data_dir=data_dir,
     )
     # Worker-routing surface (ADR-0023). Real handlers replace the v2
     # ``routing.*`` stubs; backed by ``RoutingOverridesStore`` plus the
