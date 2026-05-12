@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Pre-alpha status
+    url: https://github.com/barlowmen/thalyn#status
+    about: Thalyn is pre-alpha. There are no installers and external code contributions are reviewed slowly. Read the README's "Status" and "If you found this repo" sections before opening an issue.
+  - name: Going-public checklist
+    url: https://github.com/barlowmen/thalyn/blob/main/docs/going-public-checklist.md
+    about: Tracks what still has to land before Thalyn ships an installable application.
