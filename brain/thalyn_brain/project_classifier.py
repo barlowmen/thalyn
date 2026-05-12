@@ -60,13 +60,20 @@ object of this shape:
 {
   "projectId": "<one of the listed projectIds, or null>",
   "confidence": 0.0,
-  "reasoning": "<one short sentence>"
+  "reasoning": "<one short sentence>",
+  "suggestNewProject": {"name": "<short project name>", "rationale": "<one sentence>"}
 }
 
 Confidence is a float in [0.0, 1.0]. Use null for ``projectId`` and
 a low confidence when the message doesn't clearly map to any
 listed project — that's the safe default; a wrong tag is worse
 than no tag.
+
+Set ``suggestNewProject`` to null in the common case. Populate it
+ONLY when the message clearly opens a new, lasting topic that none
+of the listed projects cover — not for one-off questions, casual
+chatter, or follow-ups. The name should be 1-4 words; the rationale
+one short sentence.
 """
 
 ClassifierMode = Literal["suggest", "auto"]
@@ -82,6 +89,26 @@ _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 @dataclass(frozen=True)
+class NewProjectSuggestion:
+    """Classifier-proposed new project, surfaced when no candidate fits.
+
+    The classifier may emit a suggestion alongside a null
+    ``project_id`` when the message clearly opens a new lasting
+    topic. v1 default behaviour is "suggest, not auto" — the
+    renderer prompts the user, who confirms before any project
+    actually gets created via ``project.create``. Slug is derived at
+    create time so the classifier doesn't have to know about the
+    slug-uniqueness rules.
+    """
+
+    name: str
+    rationale: str
+
+    def to_wire(self) -> dict[str, object]:
+        return {"name": self.name, "rationale": self.rationale}
+
+
+@dataclass(frozen=True)
 class ClassifierVerdict:
     """One classifier's call: pick a project and how sure it is.
 
@@ -89,17 +116,28 @@ class ClassifierVerdict:
     declined to choose — the caller leaves the turn untagged. A
     project_id with confidence below the threshold is the same
     decline shape; ``classify_into`` collapses both paths.
+
+    ``suggest_new_project`` is the conservative "this seems to be a
+    fresh topic" channel — populated only when the classifier sees a
+    clear new-project signal. F3.5's default ``suggest`` mode keeps
+    the caller in charge: the suggestion surfaces, the user confirms,
+    the project gets created through the normal ``project.create``
+    path. Auto-create is opt-in (v1.x).
     """
 
     project_id: str | None
     confidence: float
     reasoning: str
+    suggest_new_project: NewProjectSuggestion | None = None
 
     def to_wire(self) -> dict[str, object]:
         return {
             "projectId": self.project_id,
             "confidence": self.confidence,
             "reasoning": self.reasoning,
+            "suggestNewProject": (
+                self.suggest_new_project.to_wire() if self.suggest_new_project else None
+            ),
         }
 
 
@@ -306,15 +344,43 @@ async def classify_for_routing(
     mentions) — that wins over both the classifier and the
     foreground bias because the user explicitly named the lead.
     """
+    resolved, _verdict = await classify_with_verdict(
+        classifier,
+        message,
+        candidates,
+        foreground_project_id=foreground_project_id,
+        threshold=threshold,
+    )
+    return resolved
+
+
+async def classify_with_verdict(
+    classifier: Classifier | None,
+    message: str,
+    candidates: Sequence[Project],
+    *,
+    foreground_project_id: str | None,
+    threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
+) -> tuple[str | None, ClassifierVerdict | None]:
+    """Same precedence logic as ``classify_for_routing`` but also returns
+    the classifier's raw verdict.
+
+    Callers that want to surface ``suggest_new_project`` (the
+    "this opens a new topic" channel — per ADR-0024 / F3.5) need
+    the full verdict, not just the resolved id. The verdict is
+    ``None`` only when no classifier was wired *or* the candidate
+    set was empty; in those cases there's nothing to suggest.
+    """
     if not candidates:
-        return foreground_project_id
+        return foreground_project_id, None
     candidate_ids = {p.project_id for p in candidates}
     if classifier is None:
         # Without a classifier wired (narrow tests), the foreground
         # bias is the only signal we have. A foreground project that
         # isn't in the active candidate set falls through to None so
         # we don't tag a turn against an archived row.
-        return foreground_project_id if foreground_project_id in candidate_ids else None
+        resolved = foreground_project_id if foreground_project_id in candidate_ids else None
+        return resolved, None
     verdict = await classifier.classify(
         message, candidates, foreground_project_id=foreground_project_id
     )
@@ -323,10 +389,10 @@ async def classify_for_routing(
         and verdict.project_id in candidate_ids
         and verdict.confidence >= threshold
     ):
-        return verdict.project_id
+        return verdict.project_id, verdict
     if foreground_project_id in candidate_ids:
-        return foreground_project_id
-    return None
+        return foreground_project_id, verdict
+    return None, verdict
 
 
 def _build_prompt(
@@ -384,11 +450,34 @@ def _parse_verdict(text: str, *, valid_ids: set[str]) -> ClassifierVerdict | Non
         confidence = 0.0
     reasoning_raw = payload.get("reasoning")
     reasoning = reasoning_raw if isinstance(reasoning_raw, str) else ""
+    suggestion = _parse_suggestion(payload.get("suggestNewProject"))
     return ClassifierVerdict(
         project_id=project_id,
         confidence=confidence,
         reasoning=reasoning,
+        suggest_new_project=suggestion,
     )
+
+
+def _parse_suggestion(value: object) -> NewProjectSuggestion | None:
+    """Permissive parse for the new-project-suggestion sub-object.
+
+    Drops the suggestion when either field is missing or empty — a
+    suggestion without a name is useless, and the LLM emitting a
+    half-baked one shouldn't surface to the user. Mirrors
+    ``_parse_verdict``'s tolerance for noisy model output.
+    """
+    if not isinstance(value, dict):
+        return None
+    name_raw = value.get("name")
+    rationale_raw = value.get("rationale")
+    if not isinstance(name_raw, str):
+        return None
+    name = name_raw.strip()
+    if not name:
+        return None
+    rationale = rationale_raw.strip() if isinstance(rationale_raw, str) else ""
+    return NewProjectSuggestion(name=name, rationale=rationale)
 
 
 __all__ = [
@@ -400,6 +489,8 @@ __all__ = [
     "ClassifierVerdict",
     "CompositeClassifier",
     "LlmJudgeClassifier",
+    "NewProjectSuggestion",
     "RegisteredClassifier",
     "classify_for_routing",
+    "classify_with_verdict",
 ]

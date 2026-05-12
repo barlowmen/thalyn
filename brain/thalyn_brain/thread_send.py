@@ -54,7 +54,8 @@ from thalyn_brain.pending_actions import (
 )
 from thalyn_brain.project_classifier import (
     Classifier,
-    classify_for_routing,
+    ClassifierVerdict,
+    classify_with_verdict,
 )
 from thalyn_brain.project_context import ProjectContext, load_project_context
 from thalyn_brain.projects import ProjectsStore
@@ -243,11 +244,12 @@ async def _handle_thread_send(
     #      project.
     #   3. Foreground attention from the renderer is the sticky default.
     addressed = await _maybe_address_lead(prompt, agent_records)
+    classifier_verdict: ClassifierVerdict | None = None
     if addressed is not None:
         project_id = addressed.lead.project_id or project_id
     elif classifier is not None and projects_store is not None:
         active_projects = await projects_store.list_all(status="active")
-        project_id = await classify_for_routing(
+        project_id, classifier_verdict = await classify_with_verdict(
             classifier,
             prompt,
             active_projects,
@@ -491,7 +493,7 @@ async def _handle_thread_send(
     await store.complete_turn_pair(user_turn_id=user_turn.turn_id, brain_turn=brain_turn)
     await store.touch_thread(thread_id, brain_turn.at_ms)
 
-    return {
+    response: dict[str, Any] = {
         "threadId": thread_id,
         "userTurnId": user_turn.turn_id,
         "turnId": brain_turn_id,
@@ -501,6 +503,10 @@ async def _handle_thread_send(
         "finalResponse": final_response,
         "context": _context_summary(assembled),
     }
+    suggestion = _new_project_suggestion(project_id, classifier_verdict)
+    if suggestion is not None:
+        response["projectSuggestion"] = suggestion
+    return response
 
 
 async def _maybe_address_lead(
@@ -825,6 +831,27 @@ async def _handle_action_reply(
 
 def _verdict_to_wire(verdict: SanityCheckVerdict) -> dict[str, Any]:
     return {"ok": verdict.ok, "note": verdict.note}
+
+
+def _new_project_suggestion(
+    resolved_project_id: str | None,
+    verdict: ClassifierVerdict | None,
+) -> dict[str, Any] | None:
+    """Surface ``suggest_new_project`` only when no candidate fit.
+
+    A successful route to an existing project is the strongest "this
+    isn't a new topic" signal — even if the LLM emitted a suggestion
+    alongside, the user already has a home for the turn. The
+    suggestion fires only when ``project_id`` stayed null *and* the
+    classifier proposed something. v1 mode is suggest, not auto: the
+    renderer prompts the user to confirm before any project is
+    actually created via ``project.create``.
+    """
+    if resolved_project_id is not None:
+        return None
+    if verdict is None or verdict.suggest_new_project is None:
+        return None
+    return verdict.suggest_new_project.to_wire()
 
 
 async def _handle_recovery_status(

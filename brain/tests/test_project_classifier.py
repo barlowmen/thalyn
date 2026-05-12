@@ -17,8 +17,10 @@ from thalyn_brain.project_classifier import (
     ClassifierVerdict,
     CompositeClassifier,
     LlmJudgeClassifier,
+    NewProjectSuggestion,
     RegisteredClassifier,
     classify_for_routing,
+    classify_with_verdict,
 )
 from thalyn_brain.projects import Project, new_project_id
 from thalyn_brain.provider import (
@@ -435,3 +437,111 @@ async def test_composite_routes_through_classify_for_routing() -> None:
     )
     # Foreground was Thalyn; regex confidently picks UI; UI wins.
     assert resolved == ui.project_id
+
+
+# ---------- New-project suggestion ----------
+
+
+async def test_judge_parses_new_project_suggestion() -> None:
+    target = _project("Target")
+    other = _project("Other")
+    payload = (
+        "{"
+        '"projectId": null, '
+        '"confidence": 0.0, '
+        '"reasoning": "no match", '
+        '"suggestNewProject": {"name": "Side Quest", "rationale": "new lasting topic"}'
+        "}"
+    )
+    provider = _ScriptedProvider(payload)
+    judge = LlmJudgeClassifier(cast(LlmProvider, provider))
+    verdict = await judge.classify("let me ask about a totally new thing", [other, target])
+    assert verdict.project_id is None
+    assert verdict.suggest_new_project is not None
+    assert verdict.suggest_new_project.name == "Side Quest"
+    assert verdict.suggest_new_project.rationale == "new lasting topic"
+
+
+async def test_judge_drops_suggestion_without_name() -> None:
+    other = _project("Other")
+    target = _project("Target")
+    payload = (
+        "{"
+        '"projectId": null, '
+        '"confidence": 0.0, '
+        '"suggestNewProject": {"name": "   ", "rationale": "no name"}'
+        "}"
+    )
+    judge = LlmJudgeClassifier(cast(LlmProvider, _ScriptedProvider(payload)))
+    verdict = await judge.classify("anything", [other, target])
+    assert verdict.suggest_new_project is None
+
+
+async def test_judge_drops_suggestion_when_not_an_object() -> None:
+    other = _project("Other")
+    target = _project("Target")
+    payload = '{"projectId": null, "confidence": 0.0, "suggestNewProject": "not-a-dict"}'
+    judge = LlmJudgeClassifier(cast(LlmProvider, _ScriptedProvider(payload)))
+    verdict = await judge.classify("anything", [other, target])
+    assert verdict.suggest_new_project is None
+
+
+async def test_verdict_to_wire_includes_suggestion_field() -> None:
+    verdict = ClassifierVerdict(
+        project_id=None,
+        confidence=0.0,
+        reasoning="r",
+        suggest_new_project=NewProjectSuggestion(name="Side", rationale="why"),
+    )
+    wire = verdict.to_wire()
+    assert wire["suggestNewProject"] == {"name": "Side", "rationale": "why"}
+
+    bare = ClassifierVerdict(project_id=None, confidence=0.0, reasoning="r")
+    assert bare.to_wire()["suggestNewProject"] is None
+
+
+async def test_classify_with_verdict_returns_both_resolved_and_verdict() -> None:
+    target = _project("Target")
+    other = _project("Other")
+    stub = _StubClassifier(
+        ClassifierVerdict(
+            project_id=target.project_id,
+            confidence=0.9,
+            reasoning="match",
+        )
+    )
+    resolved, verdict = await classify_with_verdict(
+        stub,
+        "this is about target",
+        [other, target],
+        foreground_project_id=None,
+    )
+    assert resolved == target.project_id
+    assert verdict is not None
+    assert verdict.project_id == target.project_id
+
+
+async def test_classify_with_verdict_returns_verdict_even_when_not_routed() -> None:
+    """Low-confidence verdicts collapse the resolved id to None (or
+    foreground) — but the verdict's still returned so the caller can
+    surface ``suggest_new_project`` independently."""
+    other = _project("Other")
+    target = _project("Target")
+    stub = _StubClassifier(
+        ClassifierVerdict(
+            project_id=None,
+            confidence=0.0,
+            reasoning="no match",
+            suggest_new_project=NewProjectSuggestion(name="Side", rationale="new"),
+        )
+    )
+    resolved, verdict = await classify_with_verdict(
+        stub,
+        "fresh topic",
+        [other, target],
+        foreground_project_id=None,
+    )
+    assert resolved is None
+    assert verdict is not None
+    assert verdict.suggest_new_project is not None
+    assert verdict.suggest_new_project.name == "Side"

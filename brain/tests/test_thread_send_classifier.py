@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from thalyn_brain.agents import AgentRecordsStore
-from thalyn_brain.project_classifier import ClassifierVerdict
+from thalyn_brain.project_classifier import ClassifierVerdict, NewProjectSuggestion
 from thalyn_brain.projects import ProjectsStore
 from thalyn_brain.provider import AnthropicProvider, ProviderRegistry
 from thalyn_brain.rpc import Dispatcher
@@ -220,3 +220,70 @@ async def test_default_project_alone_short_circuits_classifier(tmp_path: Path) -
     # short-circuits to confidence=1.0 internally — the route lands
     # on the sole project.
     assert response["result"]["projectId"] == sole.project_id
+
+
+async def test_suggest_new_project_surfaces_when_untagged(tmp_path: Path) -> None:
+    """Classifier proposes a fresh project; no candidate matches → the
+    suggestion lands in the response so the renderer can prompt
+    'create a new project named X?'."""
+    classifier = _ScriptedClassifier(
+        ClassifierVerdict(
+            project_id=None,
+            confidence=0.0,
+            reasoning="no fit",
+            suggest_new_project=NewProjectSuggestion(
+                name="Coffee Shop App",
+                rationale="user is opening a fresh coding-side topic",
+            ),
+        )
+    )
+    dispatcher, threads, projects = await _build(tmp_path, classifier=classifier)
+    await projects.create(name="UI")
+    await projects.create(name="Thalyn")
+    thread = await _seed_thread(threads)
+
+    response = await _send(
+        dispatcher,
+        thread_id=thread.thread_id,
+        prompt="I want to start working on a coffee shop scheduling app",
+    )
+
+    assert response["result"]["projectId"] is None
+    assert response["result"]["projectSuggestion"] == {
+        "name": "Coffee Shop App",
+        "rationale": "user is opening a fresh coding-side topic",
+    }
+
+
+async def test_suggest_new_project_suppressed_when_route_lands(tmp_path: Path) -> None:
+    """A successful route to an existing project beats any suggestion —
+    even if the LLM emitted one alongside its confident verdict, the
+    user already has a home for the turn."""
+    classifier = _ScriptedClassifier(
+        ClassifierVerdict(
+            project_id="placeholder",
+            confidence=0.9,
+            reasoning="match",
+            suggest_new_project=NewProjectSuggestion(name="Side", rationale="unused"),
+        )
+    )
+    dispatcher, threads, projects = await _build(tmp_path, classifier=classifier)
+    target = await projects.create(name="Target")
+    other = await projects.create(name="Other")
+    classifier.verdict = ClassifierVerdict(
+        project_id=target.project_id,
+        confidence=0.9,
+        reasoning="match",
+        suggest_new_project=NewProjectSuggestion(name="Side", rationale="unused"),
+    )
+    thread = await _seed_thread(threads)
+
+    response = await _send(
+        dispatcher,
+        thread_id=thread.thread_id,
+        prompt="about target",
+        project_id=other.project_id,
+    )
+
+    assert response["result"]["projectId"] == target.project_id
+    assert "projectSuggestion" not in response["result"]
