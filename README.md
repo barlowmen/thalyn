@@ -141,5 +141,7 @@ developer.
 
 ## License
 
-[MIT](LICENSE). The license decision will be revisited before public
-release per the going-public checklist.
+[Apache License 2.0](LICENSE) (see also [`NOTICE`](NOTICE)). Apache-2.0's
+explicit patent grant matters once the source is visible to anyone who
+might also hold relevant patents; the prior MIT choice (ADR-0016) was
+provisional and is superseded by ADR-0030.

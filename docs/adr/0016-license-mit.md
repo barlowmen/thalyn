@@ -1,7 +1,7 @@
 # ADR-0016 — License: MIT (revisit before public)
 
-- **Status:** Accepted (provisional)
-- **Date:** 2026-04-25
+- **Status:** Superseded by [ADR-0030](0030-license-apache-2.md)
+- **Date:** 2026-04-25 (Accepted, provisional) · 2026-05-12 (Superseded)
 
 ## Context
 
