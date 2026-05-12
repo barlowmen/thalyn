@@ -1,8 +1,10 @@
-"""Tests for ``project_classifier`` (v0.31).
+"""Tests for ``project_classifier``.
 
-Covers the routing-precedence helper (``classify_for_routing``) and
-the default ``LlmJudgeClassifier`` parsing — including the
-permissive-on-junk path that mirrors ``digest_runner``.
+Covers the routing-precedence helper (``classify_for_routing``), the
+default ``LlmJudgeClassifier`` parsing (including the permissive-on-
+junk path that mirrors ``digest_runner``), and the
+``CompositeClassifier`` priority cascade (a fake ``RegexClassifier``
+proves the ``Classifier`` Protocol is wired through end-to-end).
 """
 
 from __future__ import annotations
@@ -13,7 +15,9 @@ from typing import Any, cast
 
 from thalyn_brain.project_classifier import (
     ClassifierVerdict,
+    CompositeClassifier,
     LlmJudgeClassifier,
+    RegisteredClassifier,
     classify_for_routing,
 )
 from thalyn_brain.projects import Project, new_project_id
@@ -265,3 +269,169 @@ async def test_judge_handles_provider_exception_as_low_confidence() -> None:
     assert verdict.project_id is None
     assert verdict.confidence == 0.0
     assert "provider down" in verdict.reasoning
+
+
+# ---------- CompositeClassifier (pluggable interface) ----------
+
+
+class _RegexClassifier:
+    """Deterministic classifier that fires on a regex match.
+
+    Used to prove the ``Classifier`` Protocol is the real interface
+    — the composite routes through it identically to the LLM judge,
+    and (per F3.5) outranks the LLM judge whenever both match.
+    """
+
+    def __init__(self, pattern: str, project_resolver: dict[str, Project]) -> None:
+        import re
+
+        self._re = re.compile(pattern, re.IGNORECASE)
+        self._project_resolver = project_resolver
+        self.calls = 0
+
+    async def classify(
+        self,
+        message: str,
+        candidates: Sequence[Project],
+        *,
+        foreground_project_id: str | None = None,
+    ) -> ClassifierVerdict:
+        self.calls += 1
+        match = self._re.search(message)
+        if match is None:
+            return ClassifierVerdict(
+                project_id=None,
+                confidence=0.0,
+                reasoning="regex did not match",
+            )
+        candidate_key = match.group(0).lower()
+        candidate = self._project_resolver.get(candidate_key)
+        if candidate is None:
+            return ClassifierVerdict(
+                project_id=None,
+                confidence=0.0,
+                reasoning=f"regex matched '{candidate_key}' but no project mapped",
+            )
+        return ClassifierVerdict(
+            project_id=candidate.project_id,
+            confidence=1.0,
+            reasoning=f"regex matched '{candidate_key}'",
+        )
+
+
+async def test_composite_returns_higher_priority_confident_verdict() -> None:
+    ui = _project("UI")
+    thalyn = _project("Thalyn")
+    regex = _RegexClassifier(r"ui", project_resolver={"ui": ui})
+    llm = _StubClassifier(
+        ClassifierVerdict(
+            project_id=thalyn.project_id, confidence=0.9, reasoning="LLM thinks Thalyn"
+        ),
+    )
+    composite = CompositeClassifier(
+        entries=(
+            RegisteredClassifier(classifier=regex, priority=10, name="regex"),
+            RegisteredClassifier(classifier=llm, priority=100, name="llm-judge"),
+        ),
+    )
+    verdict = await composite.classify("this is about ui", [ui, thalyn])
+    # Deterministic rule wins even though LLM is also confident.
+    assert verdict.project_id == ui.project_id
+    assert verdict.confidence == 1.0
+    assert "[regex]" in verdict.reasoning
+
+
+async def test_composite_falls_through_to_llm_when_regex_misses() -> None:
+    ui = _project("UI")
+    thalyn = _project("Thalyn")
+    regex = _RegexClassifier(r"\bnonsense\b", project_resolver={"nonsense": ui})
+    llm = _StubClassifier(
+        ClassifierVerdict(
+            project_id=thalyn.project_id, confidence=0.85, reasoning="LLM picked Thalyn"
+        ),
+    )
+    composite = CompositeClassifier(
+        entries=(
+            RegisteredClassifier(classifier=regex, priority=10, name="regex"),
+            RegisteredClassifier(classifier=llm, priority=100, name="llm-judge"),
+        ),
+    )
+    verdict = await composite.classify("nothing matching here", [ui, thalyn])
+    assert verdict.project_id == thalyn.project_id
+    assert verdict.confidence == 0.85
+    assert "[llm-judge]" in verdict.reasoning
+
+
+async def test_composite_returns_last_verdict_when_no_one_confident() -> None:
+    ui = _project("UI")
+    thalyn = _project("Thalyn")
+    regex = _RegexClassifier(r"\bnonsense\b", project_resolver={"nonsense": ui})
+    llm = _StubClassifier(
+        ClassifierVerdict(project_id=ui.project_id, confidence=0.3, reasoning="weak guess"),
+    )
+    composite = CompositeClassifier(
+        entries=(
+            RegisteredClassifier(classifier=regex, priority=10, name="regex"),
+            RegisteredClassifier(classifier=llm, priority=100, name="llm-judge"),
+        ),
+    )
+    verdict = await composite.classify("ambiguous prompt", [ui, thalyn])
+    # No classifier reached threshold — the LLM's verdict surfaces
+    # (unannotated, so the caller's threshold check collapses it to
+    # the foreground bias in classify_for_routing).
+    assert verdict.project_id == ui.project_id
+    assert verdict.confidence == 0.3
+    assert "weak guess" in verdict.reasoning
+
+
+async def test_composite_ties_break_on_registration_order() -> None:
+    ui = _project("UI")
+    thalyn = _project("Thalyn")
+    a = _StubClassifier(
+        ClassifierVerdict(project_id=ui.project_id, confidence=0.9, reasoning="A says UI"),
+    )
+    b = _StubClassifier(
+        ClassifierVerdict(project_id=thalyn.project_id, confidence=0.9, reasoning="B says Thalyn"),
+    )
+    composite = CompositeClassifier(
+        entries=(
+            RegisteredClassifier(classifier=a, priority=50, name="a"),
+            RegisteredClassifier(classifier=b, priority=50, name="b"),
+        ),
+    )
+    verdict = await composite.classify("anything", [ui, thalyn])
+    # A registered first; the stable sort preserves order on ties.
+    assert verdict.project_id == ui.project_id
+
+
+async def test_composite_requires_at_least_one_entry() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="at least one entry"):
+        CompositeClassifier(entries=())
+
+
+async def test_composite_routes_through_classify_for_routing() -> None:
+    """End-to-end smoke: classify_for_routing accepts a composite via
+    the Classifier Protocol — no special-casing — and the deterministic
+    classifier still wins."""
+    ui = _project("UI")
+    thalyn = _project("Thalyn")
+    regex = _RegexClassifier(r"ui", project_resolver={"ui": ui})
+    llm = _StubClassifier(
+        ClassifierVerdict(project_id=thalyn.project_id, confidence=0.85, reasoning="LLM"),
+    )
+    composite = CompositeClassifier(
+        entries=(
+            RegisteredClassifier(classifier=regex, priority=10, name="regex"),
+            RegisteredClassifier(classifier=llm, priority=100, name="llm"),
+        ),
+    )
+    resolved = await classify_for_routing(
+        composite,
+        "this concerns ui work",
+        [ui, thalyn],
+        foreground_project_id=thalyn.project_id,
+    )
+    # Foreground was Thalyn; regex confidently picks UI; UI wins.
+    assert resolved == ui.project_id

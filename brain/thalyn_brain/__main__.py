@@ -38,7 +38,12 @@ from thalyn_brain.orchestration.storage import (
 from thalyn_brain.parent_watchdog import watch_parent
 from thalyn_brain.pending_actions import PendingActionStore
 from thalyn_brain.project_actions import register_project_actions
-from thalyn_brain.project_classifier import LlmJudgeClassifier
+from thalyn_brain.project_classifier import (
+    DEFAULT_LLM_PRIORITY,
+    CompositeClassifier,
+    LlmJudgeClassifier,
+    RegisteredClassifier,
+)
 from thalyn_brain.project_rpc import register_project_methods
 from thalyn_brain.projects import ProjectsStore
 from thalyn_brain.provider import AnthropicProvider, build_registry
@@ -159,9 +164,18 @@ def main() -> int:
     # active project an untagged turn belongs to. The classifier is
     # advisory — ``classify_for_routing`` keeps the foreground bias
     # sticky unless the verdict clears the confidence threshold. v1.x
-    # will register user-supplied declarative classifiers without
-    # touching this wiring.
-    project_classifier = LlmJudgeClassifier(registry.get("anthropic"))
+    # will register user-supplied declarative classifiers at lower
+    # priorities so they outrank the LLM judge on ties; v1 ships the
+    # composite with exactly the LLM judge registered.
+    project_classifier = CompositeClassifier(
+        entries=(
+            RegisteredClassifier(
+                classifier=LlmJudgeClassifier(registry.get("anthropic")),
+                priority=DEFAULT_LLM_PRIORITY,
+                name="llm-judge",
+            ),
+        ),
+    )
     register_thread_send_methods(
         dispatcher,
         threads_store=threads_store,
