@@ -16,11 +16,14 @@ import time
 from pathlib import Path
 
 import pytest
-from thalyn_brain.agents import AgentRecordsStore
+from thalyn_brain.agents import AgentRecord, AgentRecordsStore
 from thalyn_brain.lead_lifecycle import (
+    DEPTH_CAP,
+    DepthCapExceededError,
     LeadLifecycle,
     LeadLifecycleError,
     SpawnRequest,
+    SubLeadSpawnRequest,
 )
 from thalyn_brain.projects import Project, ProjectsStore, new_project_id
 
@@ -259,3 +262,209 @@ async def test_list_leads_rejects_non_lifecycle_kind(tmp_path: Path) -> None:
     lifecycle, _projects, _agents = await _make_lifecycle(tmp_path)
     with pytest.raises(LeadLifecycleError):
         await lifecycle.list_leads(kind="brain")
+
+
+# -----------------------------------------------------------------
+# Sub-lead spawn (F2.3 / Phase v0.36)
+# -----------------------------------------------------------------
+
+
+async def _spawn_top_level(
+    lifecycle: LeadLifecycle,
+    projects: ProjectsStore,
+    *,
+    name: str = "Alpha",
+    slug: str = "alpha",
+) -> tuple[Project, AgentRecord]:
+    project = await _seed_project(projects, name=name, slug=slug)
+    lead = await lifecycle.spawn(SpawnRequest(project_id=project.project_id))
+    return project, lead
+
+
+async def test_spawn_sub_lead_creates_active_record_under_parent(tmp_path: Path) -> None:
+    lifecycle, projects, _agents = await _make_lifecycle(tmp_path)
+    project, lead = await _spawn_top_level(lifecycle, projects)
+
+    sub = await lifecycle.spawn_sub_lead(
+        SubLeadSpawnRequest(parent_agent_id=lead.agent_id, scope_facet="ui"),
+    )
+
+    assert sub.kind == "sub_lead"
+    assert sub.parent_agent_id == lead.agent_id
+    assert sub.project_id == project.project_id
+    assert sub.scope_facet == "ui"
+    assert sub.status == "active"
+    assert sub.display_name == "SubLead-Ui"
+    # Namespace nests under the parent's so direct-DB queries respect
+    # isolation by construction (F2.3 / project_agent_hierarchy memo).
+    assert sub.memory_namespace == f"{lead.memory_namespace}/ui"
+    # Provider falls back to the parent's when the request omits one.
+    assert sub.default_provider_id == lead.default_provider_id
+
+
+async def test_spawn_sub_lead_uses_caller_overrides(tmp_path: Path) -> None:
+    lifecycle, projects, _agents = await _make_lifecycle(tmp_path)
+    _project, lead = await _spawn_top_level(lifecycle, projects)
+
+    sub = await lifecycle.spawn_sub_lead(
+        SubLeadSpawnRequest(
+            parent_agent_id=lead.agent_id,
+            scope_facet="harness",
+            display_name="SubLead-Harness-Custom",
+            default_provider_id="ollama",
+            system_prompt="You audit the harness.",
+        ),
+    )
+
+    assert sub.display_name == "SubLead-Harness-Custom"
+    assert sub.default_provider_id == "ollama"
+    assert sub.system_prompt == "You audit the harness."
+
+
+async def test_spawn_sub_lead_slugifies_multiword_facet(tmp_path: Path) -> None:
+    lifecycle, projects, _agents = await _make_lifecycle(tmp_path)
+    _project, lead = await _spawn_top_level(lifecycle, projects)
+
+    sub = await lifecycle.spawn_sub_lead(
+        SubLeadSpawnRequest(
+            parent_agent_id=lead.agent_id,
+            scope_facet="cost monitoring",
+        ),
+    )
+
+    assert sub.scope_facet == "cost monitoring"
+    assert sub.display_name == "SubLead-Cost-Monitoring"
+    assert sub.memory_namespace.endswith("/cost-monitoring")
+
+
+async def test_spawn_sub_lead_rejects_blank_facet(tmp_path: Path) -> None:
+    lifecycle, projects, _agents = await _make_lifecycle(tmp_path)
+    _project, lead = await _spawn_top_level(lifecycle, projects)
+
+    with pytest.raises(LeadLifecycleError, match="scope_facet"):
+        await lifecycle.spawn_sub_lead(
+            SubLeadSpawnRequest(parent_agent_id=lead.agent_id, scope_facet="   "),
+        )
+
+
+async def test_spawn_sub_lead_rejects_unknown_parent(tmp_path: Path) -> None:
+    lifecycle, _projects, _agents = await _make_lifecycle(tmp_path)
+    with pytest.raises(LeadLifecycleError, match="does not exist"):
+        await lifecycle.spawn_sub_lead(
+            SubLeadSpawnRequest(parent_agent_id="agent_missing", scope_facet="ui"),
+        )
+
+
+async def test_spawn_sub_lead_refuses_paused_parent(tmp_path: Path) -> None:
+    lifecycle, projects, _agents = await _make_lifecycle(tmp_path)
+    _project, lead = await _spawn_top_level(lifecycle, projects)
+    await lifecycle.pause(lead.agent_id)
+
+    with pytest.raises(LeadLifecycleError, match="active parent"):
+        await lifecycle.spawn_sub_lead(
+            SubLeadSpawnRequest(parent_agent_id=lead.agent_id, scope_facet="ui"),
+        )
+
+
+async def test_spawn_sub_lead_refuses_brain_parent(tmp_path: Path) -> None:
+    lifecycle, _projects, _agents = await _make_lifecycle(tmp_path)
+    # The seeded brain (agent_id='agent_brain') is not lifecycle-managed.
+    with pytest.raises(LeadLifecycleError, match="leads or sub-leads"):
+        await lifecycle.spawn_sub_lead(
+            SubLeadSpawnRequest(parent_agent_id="agent_brain", scope_facet="ui"),
+        )
+
+
+async def test_spawn_sub_lead_enforces_depth_cap(tmp_path: Path) -> None:
+    lifecycle, projects, _agents = await _make_lifecycle(tmp_path)
+    _project, lead = await _spawn_top_level(lifecycle, projects)
+    sub = await lifecycle.spawn_sub_lead(
+        SubLeadSpawnRequest(parent_agent_id=lead.agent_id, scope_facet="ui"),
+    )
+
+    # Attempting to spawn a sub-lead under another sub-lead lands at
+    # depth 3, which exceeds the v1 cap.
+    with pytest.raises(DepthCapExceededError) as excinfo:
+        await lifecycle.spawn_sub_lead(
+            SubLeadSpawnRequest(parent_agent_id=sub.agent_id, scope_facet="extra"),
+        )
+    assert excinfo.value.attempted_depth == DEPTH_CAP + 1
+    assert excinfo.value.parent_agent_id == sub.agent_id
+
+
+async def test_spawn_sub_lead_allows_explicit_depth_override(tmp_path: Path) -> None:
+    lifecycle, projects, _agents = await _make_lifecycle(tmp_path)
+    _project, lead = await _spawn_top_level(lifecycle, projects)
+    sub = await lifecycle.spawn_sub_lead(
+        SubLeadSpawnRequest(parent_agent_id=lead.agent_id, scope_facet="ui"),
+    )
+
+    deeper = await lifecycle.spawn_sub_lead(
+        SubLeadSpawnRequest(
+            parent_agent_id=sub.agent_id,
+            scope_facet="bench",
+            override_depth_cap=True,
+        ),
+    )
+
+    assert deeper.parent_agent_id == sub.agent_id
+    assert deeper.kind == "sub_lead"
+    # Namespace continues to nest so isolation invariants hold even
+    # past the cap.
+    assert deeper.memory_namespace == f"{sub.memory_namespace}/bench"
+
+
+async def test_spawn_sub_lead_does_not_replace_project_lead_pointer(tmp_path: Path) -> None:
+    lifecycle, projects, _agents = await _make_lifecycle(tmp_path)
+    project, lead = await _spawn_top_level(lifecycle, projects)
+    await lifecycle.spawn_sub_lead(
+        SubLeadSpawnRequest(parent_agent_id=lead.agent_id, scope_facet="ui"),
+    )
+
+    refetched = await projects.get(project.project_id)
+    assert refetched is not None
+    # The project's pointer still references the top-level lead — sub-leads
+    # never replace the project's lead pointer (F3.1 invariant).
+    assert refetched.lead_agent_id == lead.agent_id
+
+
+async def test_list_leads_includes_sub_leads_by_default(tmp_path: Path) -> None:
+    lifecycle, projects, _agents = await _make_lifecycle(tmp_path)
+    project, lead = await _spawn_top_level(lifecycle, projects)
+    sub = await lifecycle.spawn_sub_lead(
+        SubLeadSpawnRequest(parent_agent_id=lead.agent_id, scope_facet="ui"),
+    )
+
+    leads = await lifecycle.list_leads(project_id=project.project_id)
+    ids = {r.agent_id for r in leads}
+    assert lead.agent_id in ids
+    assert sub.agent_id in ids
+
+
+async def test_pause_resume_round_trip_for_sub_lead(tmp_path: Path) -> None:
+    lifecycle, projects, _agents = await _make_lifecycle(tmp_path)
+    _project, lead = await _spawn_top_level(lifecycle, projects)
+    sub = await lifecycle.spawn_sub_lead(
+        SubLeadSpawnRequest(parent_agent_id=lead.agent_id, scope_facet="ui"),
+    )
+
+    paused = await lifecycle.pause(sub.agent_id)
+    assert paused.status == "paused"
+    resumed = await lifecycle.resume(sub.agent_id)
+    assert resumed.status == "active"
+
+
+async def test_archive_sub_lead_does_not_clear_project_lead_pointer(tmp_path: Path) -> None:
+    lifecycle, projects, _agents = await _make_lifecycle(tmp_path)
+    project, lead = await _spawn_top_level(lifecycle, projects)
+    sub = await lifecycle.spawn_sub_lead(
+        SubLeadSpawnRequest(parent_agent_id=lead.agent_id, scope_facet="ui"),
+    )
+
+    await lifecycle.archive(sub.agent_id)
+
+    refetched = await projects.get(project.project_id)
+    assert refetched is not None
+    # Top-level lead pointer survives sub-lead archive — only archive
+    # of the lead itself unlinks the project.
+    assert refetched.lead_agent_id == lead.agent_id

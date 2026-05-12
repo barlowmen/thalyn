@@ -15,7 +15,7 @@ from typing import Any
 
 from thalyn_brain.agents import AgentRecordsStore
 from thalyn_brain.lead_lifecycle import LeadLifecycle
-from thalyn_brain.lead_rpc import register_lead_methods
+from thalyn_brain.lead_rpc import DEPTH_CAP_EXCEEDED, register_lead_methods
 from thalyn_brain.projects import Project, ProjectsStore, new_project_id
 from thalyn_brain.rpc import INVALID_PARAMS, Dispatcher
 
@@ -207,3 +207,104 @@ async def test_lead_pause_on_brain_returns_invalid_params(tmp_path: Path) -> Non
     assert "error" in response
     assert response["error"]["code"] == INVALID_PARAMS
     assert "lifecycle" in response["error"]["message"]
+
+
+async def test_lead_spawn_sub_lead_returns_wire_record(tmp_path: Path) -> None:
+    dispatcher, _lifecycle, projects = await _setup(tmp_path)
+    project = await _seed_project(projects, slug="alpha")
+    spawn = await _call(dispatcher, "lead.spawn", {"projectId": project.project_id})
+    parent_id = spawn["result"]["agent"]["agentId"]
+
+    response = await _call(
+        dispatcher,
+        "lead.spawn_sub_lead",
+        {"parentAgentId": parent_id, "scopeFacet": "ui"},
+        request_id=2,
+    )
+
+    assert "result" in response, response
+    sub = response["result"]["agent"]
+    assert sub["kind"] == "sub_lead"
+    assert sub["parentAgentId"] == parent_id
+    assert sub["scopeFacet"] == "ui"
+    assert sub["status"] == "active"
+
+
+async def test_lead_spawn_sub_lead_depth_cap_returns_structured_error(
+    tmp_path: Path,
+) -> None:
+    dispatcher, _lifecycle, projects = await _setup(tmp_path)
+    project = await _seed_project(projects, slug="alpha")
+    spawn = await _call(dispatcher, "lead.spawn", {"projectId": project.project_id})
+    parent_id = spawn["result"]["agent"]["agentId"]
+    sub = await _call(
+        dispatcher,
+        "lead.spawn_sub_lead",
+        {"parentAgentId": parent_id, "scopeFacet": "ui"},
+        request_id=2,
+    )
+    sub_id = sub["result"]["agent"]["agentId"]
+
+    response = await _call(
+        dispatcher,
+        "lead.spawn_sub_lead",
+        {"parentAgentId": sub_id, "scopeFacet": "deeper"},
+        request_id=3,
+    )
+
+    assert "error" in response, response
+    assert response["error"]["code"] == DEPTH_CAP_EXCEEDED
+    data = response["error"]["data"]
+    assert data["parentAgentId"] == sub_id
+    assert data["attemptedDepth"] == 3
+    assert data["depthCap"] == 2
+
+
+async def test_lead_spawn_sub_lead_override_depth_cap_succeeds(
+    tmp_path: Path,
+) -> None:
+    dispatcher, _lifecycle, projects = await _setup(tmp_path)
+    project = await _seed_project(projects, slug="alpha")
+    spawn = await _call(dispatcher, "lead.spawn", {"projectId": project.project_id})
+    parent_id = spawn["result"]["agent"]["agentId"]
+    sub = await _call(
+        dispatcher,
+        "lead.spawn_sub_lead",
+        {"parentAgentId": parent_id, "scopeFacet": "ui"},
+        request_id=2,
+    )
+    sub_id = sub["result"]["agent"]["agentId"]
+
+    response = await _call(
+        dispatcher,
+        "lead.spawn_sub_lead",
+        {
+            "parentAgentId": sub_id,
+            "scopeFacet": "bench",
+            "overrideDepthCap": True,
+        },
+        request_id=3,
+    )
+
+    assert "result" in response, response
+    deeper = response["result"]["agent"]
+    assert deeper["parentAgentId"] == sub_id
+
+
+async def test_lead_spawn_sub_lead_missing_facet_returns_invalid_params(
+    tmp_path: Path,
+) -> None:
+    dispatcher, _lifecycle, projects = await _setup(tmp_path)
+    project = await _seed_project(projects, slug="alpha")
+    spawn = await _call(dispatcher, "lead.spawn", {"projectId": project.project_id})
+    parent_id = spawn["result"]["agent"]["agentId"]
+
+    response = await _call(
+        dispatcher,
+        "lead.spawn_sub_lead",
+        {"parentAgentId": parent_id},
+        request_id=2,
+    )
+
+    assert "error" in response
+    assert response["error"]["code"] == INVALID_PARAMS
