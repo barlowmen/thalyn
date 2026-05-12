@@ -1,7 +1,7 @@
 # ADR-0024 — Project mobility (merge) + pluggable classifier interface
 
-- **Status:** Proposed
-- **Date:** 2026-05-11 (Proposed)
+- **Status:** Accepted
+- **Date:** 2026-05-11 (Proposed) · 2026-05-11 (Accepted)
 - **Deciders:** Barlow
 - **Supersedes:** —
 - **Superseded by:** —
