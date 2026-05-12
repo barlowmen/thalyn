@@ -1,7 +1,8 @@
 # Build workflow — session-by-session
 
-Quick reference for building Thalyn one phase at a time. The full
-plan is in ``; this doc is the operating manual.
+Operating manual for working on Thalyn one phase at a time. The
+project is sequenced as numbered phases (`vN.NN`), each with exit
+criteria and a verification recipe.
 
 ---
 
@@ -10,12 +11,12 @@ plan is in ``; this doc is the operating manual.
 Open a fresh harness session at the repo root and paste this prompt
 (replace `vN.NN` with the phase you're starting):
 
-> Read `.claude/CLAUDE.md`, then `` §1–§9 (the
-> preamble), then the entry for **Phase vN.NN**. Then load the
-> "Read first" pointers from that phase entry.
+> Read `.claude/CLAUDE.md`, then load the entry for **Phase vN.NN**
+> from the build plan. Then load the "Read first" pointers from
+> that phase entry.
 >
 > Begin Phase vN.NN. Use `/commit` for every commit, `/adr <slug>`
-> for any new ADR, follow the §8 stuck protocol if you can't make
+> for any new ADR, follow the stuck protocol if you can't make
 > progress, and watch CI after every push (the snippet in
 > `.claude/CLAUDE.md` is authoritative).
 >
@@ -23,10 +24,10 @@ Open a fresh harness session at the repo root and paste this prompt
 > session. When you stop (phase done, blocked, or stepping away),
 > update `PROGRESS.md` so the next session can pick up cold.
 
-That prompt is the whole opener. Don't preload more — the §6
+That prompt is the whole opener. Don't preload more — the
 cross-session-continuity discipline is "everything load-bearing
-lives in git history, ADRs, and the plan; the conversation is the
-least durable thing."
+lives in git history and ADRs; the conversation is the least durable
+thing."
 
 ---
 
@@ -34,8 +35,8 @@ least durable thing."
 
 A phase ends when:
 
-1. Every exit criterion in the phase's §10–§26 entry holds, verified
-   against the phase's "How to verify" recipe.
+1. Every exit criterion in the phase entry holds, verified against
+   the phase's "How to verify" recipe.
 2. The pre-commit gate sequence passes on the final commit
    (`/commit` enforces).
 3. `gh run watch` reports CI green on the pushed sha.
@@ -54,8 +55,8 @@ A session ends mid-phase when:
 
 If the harness gets stuck (3 retries on the same problem, no
 progress for 30 minutes, gates failing in ways it can't diagnose):
-write `STUCK.md` per `` §8 and pause for human
-review. Never `--no-verify`, never lower thresholds.
+write `STUCK.md` and pause for human review. Never `--no-verify`,
+never lower thresholds.
 
 ---
 
@@ -67,8 +68,8 @@ sequence; never invoke `git commit` directly.
 | Command | When to use |
 |---|---|
 | `/commit` | Every commit. Runs lint + types + tests + leakage scan + sanity smoke + ADR/doc check. Only commits if every gate passes. |
-| `/adr <slug>` | When the harness chooses between meaningful alternatives, replaces a load-bearing library, changes a public interface, or revises a §10 posture from `01-requirements.md`. Scaffolds `docs/adr/NNNN-<slug>.md` from MADR. |
-| `/architecture-review` | Triggered automatically at the end of every third phase (see `` §7). Re-searches state of the field, compares to active ADRs, files updates. |
+| `/adr <slug>` | When the harness chooses between meaningful alternatives, replaces a load-bearing library, changes a public interface, or revises a posture. Scaffolds `docs/adr/NNNN-<slug>.md` from MADR. |
+| `/architecture-review` | Triggered at the cadence defined in the build plan. Re-searches state of the field, compares to active ADRs, files updates. |
 | `/dependency-review` | Quarterly. Independent of phase cadence. Dep upgrades, deprecation calendar, CVE scan, model deprecations. |
 | `/spike <slug>` | Time-boxed investigation on a named risk. Produces `docs/spikes/YYYY-MM-DD-<slug>.md`. The outcome supersedes or refines an ADR. |
 
@@ -76,7 +77,7 @@ sequence; never invoke `git commit` directly.
 
 ## Where state lives
 
-Per `` §6 — the only durable state across sessions:
+The only durable state across sessions:
 
 - **Git history** — every change ever shipped. Commit messages
   capture *why*. The narrative memory of the project.
@@ -86,8 +87,7 @@ Per `` §6 — the only durable state across sessions:
 - **`docs/architecture-reviews/`** — per-cycle re-evaluation
   summaries.
 - **`docs/spikes/`** — risk investigations and outcomes.
-- **``** — the phase catalogue and rules.
-- **`docs/going-public-checklist.md`** — deferred public-release
+- **`docs/going-public-checklist.md`** — deferred public-binary-release
   hardening.
 - **`PROGRESS.md`** — your local notebook (gitignored). See below.
 
@@ -115,7 +115,6 @@ What *not* to put in it:
 - Architecture decisions (those go in ADRs).
 - Anything another contributor would need to know (git history is
   authoritative).
-- The plan itself (`` is authoritative).
 
 Treat it like the sticky note on a real engineer's monitor: useful
 for the human, ignored by everything else.

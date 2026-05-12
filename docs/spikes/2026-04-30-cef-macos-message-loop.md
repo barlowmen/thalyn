@@ -276,7 +276,7 @@ What this means for the v0.29 phase scope:
   going-public-checklist.
 
 The plan revision (v0.29 reshape, v0.30 → v0.31 push, new v0.30
-slot) is a user-facing change to `` and warrants
+slot) is a user-facing change to the build sequence and warrants
 human review before the next code commit lands.
 
 ## Risks not retired
@@ -358,8 +358,8 @@ scaffold, drawer surface, rect plumbing) and is reusable; v0.30
 is reframed as the engine-swap-ship phase that lands the
 in-process embedding. The phase split this report originally
 recommended is unwound. ADR-0019's refinement section is
-revised to reflect the single-phase shape; ``
-§19 and §20 carry the new phase scopes.
+revised to reflect the single-phase shape; the build sequence
+carries the new phase scopes.
 
 The risks-not-retired list above stands except for "Cross-process
 child window UX on Linux X11/XWayland" — Linux X11 *does*

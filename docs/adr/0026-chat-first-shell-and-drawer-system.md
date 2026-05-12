@@ -30,11 +30,11 @@ three-panel mosaic as the layout topology. The token system stays
 exactly as it was; the layout choice doesn't survive contact with the
 v2 requirements.
 
-The drawer-host primitive itself is a separate piece of work
-(`` §17, the next phase). This ADR is about the
-**topology** — the shape the user sees when the drawer-host primitive
-slots in — and about the **migration path** that gets us from the v1
-mosaic to the v2 shell without ripping out the working surfaces.
+The drawer-host primitive itself is a separate piece of work that
+follows this ADR. This ADR is about the **topology** — the shape the
+user sees when the drawer-host primitive slots in — and about the
+**migration path** that gets us from the v1 mosaic to the v2 shell
+without ripping out the working surfaces.
 
 ## Decision
 

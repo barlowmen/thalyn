@@ -27,12 +27,13 @@ brain orchestrating sub-agents inside one self-contained desktop app,
 with the brain swappable for a local model." That's the gap Thalyn
 fills.
 
-The full thesis lives in [`01-requirements.md`](01-requirements.md);
-the system architecture lives in
-[`02-architecture.md`](02-architecture.md); the build plan that
-sequences the work lives in [``]();
 ADRs for individual technology choices live in
-[`docs/adr/`](docs/adr/).
+[`docs/adr/`](docs/adr/); per-cycle stack re-evaluation summaries live
+in [`docs/architecture-reviews/`](docs/architecture-reviews/); the
+hardening list that gates a public binary release lives in
+[`docs/going-public-checklist.md`](docs/going-public-checklist.md). The
+broader product specification, system architecture document, and build
+plan are maintained outside this repository by the project author.
 
 ## Architecture, briefly
 
@@ -121,10 +122,8 @@ pre-commit`) and run `pre-commit install` in the repo.
 | `brain/` | Python sidecar (JSON-RPC dispatcher, agent runtime) |
 | `scripts/` | Repo-wide tooling, including the leakage scanner |
 | `docs/adr/` | Architecture Decision Records (MADR) |
-| `docs/going-public-checklist.md` | Hardening list gating any public release |
-| `01-requirements.md` | Product spec |
-| `02-architecture.md` | System architecture |
-| `` | Build plan |
+| `docs/architecture-reviews/` | Per-cycle stack re-evaluation summaries |
+| `docs/going-public-checklist.md` | Hardening list gating a public binary release |
 
 ## Contributing
 

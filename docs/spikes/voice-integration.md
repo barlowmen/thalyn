@@ -31,7 +31,7 @@ adr: 0025 (drafts as Proposed off this spike)
   through the lead. Hotkey-anywhere, smart modes, power mode,
   LLM-powered transcript cleanup, and screen-context awareness ship
   as v1.x follow-ups, not v0.33. ADR-0025 drafts as Proposed against
-  these picks; `` §23 is rewritten to match.
+  these picks; the v0.33 phase scope is rewritten to match.
 
 ## Approach
 
@@ -405,7 +405,7 @@ local-default STT engine, with `small.en` as the default model,
 `base.en` as the low-RAM fallback, Deepgram Nova-3 as the opt-in
 cloud fallback, and MLX-Whisper documented as an opt-in
 power-user alternative on Apple Silicon.** ADR-0025 drafts as
-Proposed against this pick. `` §23 rewrites to
+Proposed against this pick. The v0.33 phase scope rewrites to
 match.
 
 ### What v0.33 actually builds (voice slice)
@@ -472,16 +472,15 @@ match.
   cloud fallback, bundle strategy, and the UX-patterns-carried-
   over set. v0.33 promotes to Accepted with any refinements
   implementation surfaces.
-- **`` §23 rewrites** to replace the
-  speculative "Whisper.cpp (or equivalent)" wording with the
-  spike's resolved picks — engine pinned, model defaults
-  pinned, cloud vendor pinned, UX patterns pinned to the v0.33
-  vs v1.x split above. The latency budget moves from "< 500 ms"
-  (the planning-time guess) to **"final transcript ready
-  ≤ 250 ms after release on Apple Silicon with `small.en`;
-  ≤ 800 ms on the Linux without GPU baseline with `base.en`"** —
-  numbers grounded in the bake-off plus published cross-platform
-  RTF, not vibes.
+- **The v0.33 phase scope rewrites** to replace the speculative
+  "Whisper.cpp (or equivalent)" wording with the spike's resolved
+  picks — engine pinned, model defaults pinned, cloud vendor
+  pinned, UX patterns pinned to the v0.33 vs v1.x split above.
+  The latency budget moves from "< 500 ms" (the planning-time
+  guess) to **"final transcript ready ≤ 250 ms after release on
+  Apple Silicon with `small.en`; ≤ 800 ms on the Linux without
+  GPU baseline with `base.en`"** — numbers grounded in the
+  bake-off plus published cross-platform RTF, not vibes.
 - **`02-architecture.md` §13 risk #9** ("Voice STT latency on
   Apple Silicon") flips from open to "addressed by ADR-0025"
   after v0.33 ships and the verification recipe re-runs the

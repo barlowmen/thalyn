@@ -128,10 +128,15 @@ The composer mic falls back to a no-op engine in that build.
 - `brain/` — Python sidecar, the agent reasoning layer.
 - `docs/adr/` — Architecture Decision Records. Read these before
   proposing a structural change.
-- `01-requirements.md`, `02-architecture.md`, `` —
-  the canonical product spec, architecture, and build plan.
-- `docs/going-public-checklist.md` — items that gate any public
+- `docs/architecture-reviews/` — per-cycle stack re-evaluation
+  summaries. Useful for understanding why a dependency choice still
+  holds (or has shifted).
+- `docs/going-public-checklist.md` — items that gate a public binary
   release.
+
+The deeper product specification, system architecture document, and
+build plan are maintained outside this repository by the project
+author. Public design decisions land in ADRs.
 
 ## How to propose a change
 
@@ -192,8 +197,7 @@ CI runs the same gates on every push and pull request.
 
 ## When you get stuck
 
-The escalation protocol in `` §8 applies to humans
-too: don't retry blindly, don't lower thresholds to make a check pass,
+Don't retry blindly, don't lower thresholds to make a check pass,
 don't bypass hooks. If a gate is wrong, fix the gate (in a separate
 commit) — don't bypass it. If you're truly stuck, file an issue with
 what you tried, what failed, and your best hypothesis.

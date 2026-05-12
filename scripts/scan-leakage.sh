@@ -25,13 +25,10 @@ PATTERNS=(
 )
 
 # Literal substrings that look like forbidden tokens but are legitimate
-# repo-local references — e.g. the on-disk filename of the build plan, which
-# reasonable docs need to cite. Stripped from the haystack before pattern
-# matching so the bare-word form still trips.
-ALLOWED_LITERALS=(
-  ''
-  ''
-)
+# repo-local references. Stripped from the haystack before pattern matching
+# so the bare-word form of the underlying token still trips. Empty today;
+# kept for future additions.
+ALLOWED_LITERALS=()
 
 # Files exempt from scanning. These either *define* the forbidden-token
 # vocabulary (and so must reference it) or are external documents brought
@@ -71,7 +68,7 @@ $(commit_msg_text "$@")"
 # bare-word patterns. After this, what remains is narrative text and the
 # patterns can be applied without false positives.
 filtered="$haystack"
-for literal in "${ALLOWED_LITERALS[@]}"; do
+for literal in "${ALLOWED_LITERALS[@]+"${ALLOWED_LITERALS[@]}"}"; do
   filtered="${filtered//${literal}/}"
 done
 

@@ -172,9 +172,8 @@ and screen-context awareness — explicitly out of scope for v0.33.
 - `whisper-cpp-plus` is MIT-licensed and active; the binding is
   not a single-source risk in the way archived alternatives are.
 - The bake-off matrix (engine × model × platform) is in the
-  repo. Every future re-evaluation cycle (per
-  `` §7) can re-run it without rebuilding the
-  setup.
+  repo. Every future architecture-review cycle can re-run it
+  without rebuilding the setup.
 
 ### Negative
 

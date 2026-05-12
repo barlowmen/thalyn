@@ -206,7 +206,5 @@ and remove the `thalyn:*` keychain entries.
 | MCP connector won't start | Check that `npx` is on your PATH and the upstream MCP server package can be installed. Errors surface inline on the connector card. |
 | Browser surface says "no Chromium found" | Install Chrome, Brave, Edge, or Chromium and restart Thalyn — discovery runs at lifecycle-start. |
 
-If you're well and truly stuck, the longer-form troubleshooting and
-escalation protocol is in `` §8. Open an issue with
-the symptoms, the last 50 lines of the `pnpm tauri dev` console, and
-your hypothesis.
+If you're well and truly stuck, open an issue with the symptoms, the
+last 50 lines of the `pnpm tauri dev` console, and your hypothesis.

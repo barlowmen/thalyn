@@ -26,15 +26,15 @@ created via `CREATE TABLE IF NOT EXISTS` inline in
 "Rust core writes app.db" is aspirational language that never matched the
 shipping code.
 
-The v2 build plan (``) introduces a set of new tables
-over the next several stages — `THREAD`, `THREAD_TURN`, `SESSION_DIGEST`,
-`AGENT_RECORD`, `AUTH_BACKEND`, `ROUTING_OVERRIDE`, plus a first-class
-`PROJECT` table, `APPROVAL`, and `action_log`. Every later stage puts the
-*logic* that reads and writes those tables in the brain: the
-eternal-thread write path, the lead-graph delegation, the worker routing
-function, the project classifier, the merge transaction, the drift critic.
-No stage requires synchronous Rust-side SQL access that brain-via-IPC
-can't serve.
+The v2 build introduces a set of new tables over several stages —
+`THREAD`, `THREAD_TURN`, `SESSION_DIGEST`, `AGENT_RECORD`,
+`AUTH_BACKEND`, `ROUTING_OVERRIDE`, plus a first-class `PROJECT` table,
+`APPROVAL`, and `action_log`. Every later stage puts the *logic* that
+reads and writes those tables in the brain: the eternal-thread write
+path, the lead-graph delegation, the worker routing function, the
+project classifier, the merge transaction, the drift critic. No stage
+requires synchronous Rust-side SQL access that brain-via-IPC can't
+serve.
 
 There is also no migration runner today. `runs.py` has runtime
 `ALTER TABLE ADD COLUMN` for forward-compat — fine for v1's tiny surface,
@@ -118,8 +118,8 @@ Concrete shape:
 ## Alternatives considered
 
 - **Rust core takes ownership of `app.db` per `02-architecture.md` §5's
-  literal claim.** Rejected. No stage in `` from
-  v0.20 through v0.37 functionally requires Rust-side SQL access.
+  literal claim.** Rejected. No stage in the v2 build from v0.20
+  through v0.37 functionally requires Rust-side SQL access.
   Adopting this would force a large infrastructure expansion — adding
   `sqlx` or `rusqlite`, a migration runner crate, and porting the
   read/write paths for v2 tables to Rust — for a benefit no planned
@@ -137,8 +137,7 @@ Concrete shape:
 - **Heavyweight migration tooling (alembic).** Rejected. Alembic
   couples to SQLAlchemy; the brain has no ORM and no plans to adopt
   one. yoyo's SQL-file format is closer to the
-  `migrations/NNN_*.sql` convention `02-architecture.md` and
-  `` describe.
+  `migrations/NNN_*.sql` convention `02-architecture.md` describes.
 - **Hand-rolled migration runner with a `schema_versions` table.**
   Rejected as reinvention. yoyo provides exactly this with a tested
   lockfile and rollback semantics.
@@ -147,8 +146,6 @@ Concrete shape:
 
 `02-architecture.md` §3, §4.2, §5, and §14 (ADR index) update in a
 companion commit that aligns the architecture-doc text with this ADR.
-`` §10 "Read first" and "Exit criteria" pointers swap
-from `crates/<core>/migrations/` to `brain/thalyn_brain/migrations/`.
 
 The going-public checklist gains no new rows from this decision —
 brain-owned SQLite was already the implicit shape of every storage row
