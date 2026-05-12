@@ -24,5 +24,5 @@ type Story = StoryObj<typeof meta>;
 export const Empty: Story = {};
 
 export const WithRoot: Story = {
-  args: { root: "/Users/barlow/Documents/projects/thalyn" },
+  args: { root: "/Users/me/projects/example" },
 };
