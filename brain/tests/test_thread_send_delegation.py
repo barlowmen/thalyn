@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from thalyn_brain.agents import AgentRecordsStore
-from thalyn_brain.lead_lifecycle import LeadLifecycle, SpawnRequest
+from thalyn_brain.lead_lifecycle import LeadLifecycle, SpawnRequest, SubLeadSpawnRequest
 from thalyn_brain.projects import Project, ProjectsStore, new_project_id
 from thalyn_brain.provider import AnthropicProvider, ProviderRegistry
 from thalyn_brain.rpc import Dispatcher
@@ -383,6 +383,70 @@ async def test_lead_session_without_workspace_path_skips_project_context(
     sys_prompt = fake.options.system_prompt if fake.options is not None else ""
     assert sys_prompt is not None
     assert "Project context" not in sys_prompt
+
+
+async def test_addressed_sub_lead_routes_through_attribution_chain(
+    tmp_path: Path,
+) -> None:
+    """A sub-lead can be addressed by name; the brain renders the
+    attribution chain in both the surface text and the brain turn's
+    provenance.
+
+    The chain is what F2.3 surfaces back to the user — they need to
+    see the message came through Lead-Alpha → SubLead-UI rather than
+    a bare ``"SubLead-UI says: ..."`` that hides the parent.
+    """
+    dispatcher, threads, _agents, lifecycle, projects = await _build(
+        tmp_path,
+        messages=[
+            text_message("UI bench is back at p99 < 50ms."),
+            result_message(),
+        ],
+    )
+    project = await _seed_project(projects)
+    lead = await lifecycle.spawn(
+        SpawnRequest(project_id=project.project_id, display_name="Lead-Alpha"),
+    )
+    sub = await lifecycle.spawn_sub_lead(
+        SubLeadSpawnRequest(
+            parent_agent_id=lead.agent_id,
+            scope_facet="ui",
+            display_name="SubLead-UI",
+        ),
+    )
+    thread = await _seed_thread(threads)
+
+    response, _ = await _send(
+        dispatcher,
+        thread_id=thread.thread_id,
+        prompt="SubLead-UI, where are we on the bench?",
+    )
+
+    result = response["result"]
+    delegation = result["delegation"]
+    assert delegation["leadId"] == sub.agent_id
+    assert delegation["leadDisplayName"] == "SubLead-UI"
+    assert delegation["parentLeadId"] == lead.agent_id
+    assert delegation["parentLeadDisplayName"] == "Lead-Alpha"
+    chain = delegation["attributionChain"]
+    assert chain["names"] == ["Thalyn", "Lead-Alpha", "SubLead-UI"]
+    assert chain["agentIds"] == ["agent_brain", lead.agent_id, sub.agent_id]
+
+    turns = await threads.list_turns(thread.thread_id)
+    assert [t.role for t in turns] == ["user", "lead", "brain"]
+    # The wrapped reply names the parent so the user sees the chain
+    # without drilling into provenance.
+    assert "SubLead-UI (under Lead-Alpha) says:" in turns[2].body
+    # The lead turn's provenance carries the parent pointer for the
+    # drill-down.
+    assert turns[1].provenance is not None
+    assert turns[1].provenance["parentLeadId"] == lead.agent_id
+    assert turns[2].provenance is not None
+    assert turns[2].provenance["attributionChain"]["names"] == [
+        "Thalyn",
+        "Lead-Alpha",
+        "SubLead-UI",
+    ]
 
 
 async def test_delegation_disabled_when_no_agent_records_store(tmp_path: Path) -> None:

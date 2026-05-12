@@ -40,8 +40,11 @@ from thalyn_brain.identity import THALYN_SYSTEM_PROMPT
 from thalyn_brain.lead_delegation import (
     LEAD_INTRO_TEMPLATE,
     LEAD_REPLY_PREFIX_TEMPLATE,
+    SUB_LEAD_REPLY_PREFIX_TEMPLATE,
     AddressedLead,
+    AttributionChain,
     SanityCheckVerdict,
+    build_attribution_chain,
     collect_lead_reply,
     evaluate_lead_escalation,
     find_addressed_lead,
@@ -419,6 +422,7 @@ async def _handle_thread_send(
             addressed=addressed,
             assembled=assembled,
             project_context=project_context,
+            agent_records=agent_records,
         )
 
     # 8. Stream the brain's reply chunk-by-chunk. Buffer text deltas
@@ -513,19 +517,24 @@ async def _maybe_address_lead(
     prompt: str,
     agent_records: AgentRecordsStore | None,
 ) -> AddressedLead | None:
-    """Look up active leads (if the registry is wired) and check
-    whether the user is addressing one.
+    """Look up active leads + sub-leads and check whether the user is
+    addressing one.
 
-    Returns ``None`` when no registry is configured, when the
-    matcher finds no unambiguous match, or when no active lead exists.
-    The caller falls back to a direct brain reply on ``None``.
+    Returns ``None`` when no registry is configured, when the matcher
+    finds no unambiguous match, or when no active lead/sub-lead
+    exists. The caller falls back to a direct brain reply on ``None``.
+    Sub-leads ride the same primitive as top-level leads (F2.3 / ADR-0021
+    recursive case): both kinds are searched in one pass so the user
+    can address either by name.
     """
     if agent_records is None:
         return None
     leads = await agent_records.list_all(kind="lead", status="active")
-    if not leads:
+    sub_leads = await agent_records.list_all(kind="sub_lead", status="active")
+    candidates = leads + sub_leads
+    if not candidates:
         return None
-    return find_addressed_lead(prompt, leads)
+    return find_addressed_lead(prompt, candidates)
 
 
 async def _load_lead_project_context(
@@ -564,6 +573,7 @@ async def _handle_delegated_reply(
     addressed: AddressedLead,
     assembled: AssembledContext,
     project_context: ProjectContext | None = None,
+    agent_records: AgentRecordsStore | None = None,
 ) -> JsonValue:
     """Delegate the turn to a project lead and stream the reply.
 
@@ -573,9 +583,15 @@ async def _handle_delegated_reply(
     (``role='brain'``, ``agent_id=brain``, with provenance pointing
     at the lead's turn id). The renderer's drill-down (F1.10) then
     has a real source row to navigate to.
+
+    When the addressed agent is a sub-lead, the reply prefix names
+    its parent (``"SubLead-UI (under Lead-Alpha) says: "``) and the
+    brain turn's provenance carries the full attribution chain so
+    the renderer can render it without an extra lookup.
     """
     lead = addressed.lead
     lead_provider = registry.get(lead.default_provider_id)
+    parent_lead, attribution = await _resolve_attribution(lead, agent_records)
 
     # Stream the start chunk immediately so the renderer reflects
     # activity, then surface the brain's preamble and the wrapped
@@ -597,6 +613,7 @@ async def _handle_delegated_reply(
         lead=lead,
         user_message=addressed.body,
         project_context=project_context,
+        parent_lead=parent_lead,
     )
     if lead_error is not None:
         # The lead's provider surfaced an error — leave the user turn
@@ -612,7 +629,14 @@ async def _handle_delegated_reply(
         raise RpcError(code=INTERNAL_ERROR, message=lead_error)
 
     verdict = sanity_check_lead_reply(lead_reply)
-    wrapped = LEAD_REPLY_PREFIX_TEMPLATE.format(name=lead.display_name) + lead_reply
+    if lead.kind == "sub_lead" and parent_lead is not None:
+        prefix = SUB_LEAD_REPLY_PREFIX_TEMPLATE.format(
+            name=lead.display_name,
+            parent_name=parent_lead.display_name,
+        )
+    else:
+        prefix = LEAD_REPLY_PREFIX_TEMPLATE.format(name=lead.display_name)
+    wrapped = prefix + lead_reply
     if verdict.note is not None:
         wrapped = wrapped + "\n\n" + verdict.note
     delta = "\n\n" + wrapped
@@ -635,6 +659,13 @@ async def _handle_delegated_reply(
 
     now_ms = int(time.time() * 1000)
     lead_turn_id = new_turn_id()
+    lead_provenance: dict[str, Any] = {
+        "leadId": lead.agent_id,
+        "providerId": lead.default_provider_id,
+    }
+    if parent_lead is not None:
+        lead_provenance["parentLeadId"] = parent_lead.agent_id
+        lead_provenance["parentLeadDisplayName"] = parent_lead.display_name
     lead_turn = ThreadTurn(
         turn_id=lead_turn_id,
         thread_id=thread_id,
@@ -642,16 +673,23 @@ async def _handle_delegated_reply(
         agent_id=lead.agent_id,
         role="lead",
         body=lead_reply,
-        provenance={
-            "leadId": lead.agent_id,
-            "providerId": lead.default_provider_id,
-        },
+        provenance=lead_provenance,
         confidence={"sanityCheck": _verdict_to_wire(verdict)},
         episodic_index_ptr=None,
         at_ms=now_ms,
         status="completed",
     )
     final_text = intro_text + delta
+    brain_provenance: dict[str, Any] = {
+        "delegatedTo": lead.agent_id,
+        "leadDisplayName": lead.display_name,
+        "leadTurnId": lead_turn_id,
+    }
+    if attribution is not None:
+        brain_provenance["attributionChain"] = attribution.to_wire()
+    if parent_lead is not None:
+        brain_provenance["parentLeadId"] = parent_lead.agent_id
+        brain_provenance["parentLeadDisplayName"] = parent_lead.display_name
     brain_turn = ThreadTurn(
         turn_id=brain_turn_id,
         thread_id=thread_id,
@@ -659,11 +697,7 @@ async def _handle_delegated_reply(
         agent_id=DEFAULT_BRAIN_AGENT_ID,
         role="brain",
         body=final_text,
-        provenance={
-            "delegatedTo": lead.agent_id,
-            "leadDisplayName": lead.display_name,
-            "leadTurnId": lead_turn_id,
-        },
+        provenance=brain_provenance,
         confidence={"sanityCheck": _verdict_to_wire(verdict)},
         episodic_index_ptr=None,
         at_ms=now_ms,
@@ -676,6 +710,17 @@ async def _handle_delegated_reply(
     )
     await store.touch_thread(thread_id, now_ms)
 
+    delegation: dict[str, Any] = {
+        "leadId": lead.agent_id,
+        "leadTurnId": lead_turn_id,
+        "leadDisplayName": lead.display_name,
+        "sanityCheck": _verdict_to_wire(verdict),
+    }
+    if attribution is not None:
+        delegation["attributionChain"] = attribution.to_wire()
+    if parent_lead is not None:
+        delegation["parentLeadId"] = parent_lead.agent_id
+        delegation["parentLeadDisplayName"] = parent_lead.display_name
     return {
         "threadId": thread_id,
         "userTurnId": user_turn.turn_id,
@@ -685,13 +730,29 @@ async def _handle_delegated_reply(
         "status": "completed",
         "finalResponse": final_text,
         "context": _context_summary(assembled),
-        "delegation": {
-            "leadId": lead.agent_id,
-            "leadTurnId": lead_turn_id,
-            "leadDisplayName": lead.display_name,
-            "sanityCheck": _verdict_to_wire(verdict),
-        },
+        "delegation": delegation,
     }
+
+
+async def _resolve_attribution(
+    addressed_lead: Any,
+    agent_records: AgentRecordsStore | None,
+) -> tuple[Any | None, AttributionChain | None]:
+    """Return the parent lead (if any) and the attribution chain.
+
+    Returns ``(None, None)`` when the registry isn't wired (older
+    test setups) or when the addressed agent is a top-level lead
+    with no parent. The chain is computed even for top-level leads
+    so the renderer can render the brain → lead path without
+    branching on kind.
+    """
+    if agent_records is None:
+        return None, None
+    parent: Any | None = None
+    if addressed_lead.parent_agent_id:
+        parent = await agent_records.get(addressed_lead.parent_agent_id)
+    chain = await build_attribution_chain(addressed_lead, agents=agent_records)
+    return parent, chain
 
 
 async def _handle_walk_input_reply(

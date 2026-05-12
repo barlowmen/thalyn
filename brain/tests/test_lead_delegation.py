@@ -8,14 +8,17 @@ critic, the default-system-prompt fallback. Integration with
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
-from thalyn_brain.agents import AgentRecord, new_agent_id
+from thalyn_brain.agents import AgentRecord, AgentRecordsStore, new_agent_id
 from thalyn_brain.lead_delegation import (
     DEFAULT_LEAD_SYSTEM_PROMPT_TEMPLATE,
+    DEFAULT_SUB_LEAD_SYSTEM_PROMPT_TEMPLATE,
     ESCALATION_QUESTION_THRESHOLD,
     LOW_CONFIDENCE_NOTE,
+    build_attribution_chain,
     effective_system_prompt,
     evaluate_lead_escalation,
     find_addressed_lead,
@@ -210,4 +213,92 @@ def test_evaluate_escalation_to_wire_round_trip() -> None:
         "questionCount": 3,
         "density": "high",
         "suggestion": "open_drawer",
+    }
+
+
+# -----------------------------------------------------------------
+# Sub-lead addressing + attribution chain (Phase v0.36 / F2.3)
+# -----------------------------------------------------------------
+
+
+def _sub_lead(parent: AgentRecord, **overrides: Any) -> AgentRecord:
+    base: dict[str, Any] = {
+        "agent_id": new_agent_id(),
+        "kind": "sub_lead",
+        "display_name": "SubLead-UI",
+        "parent_agent_id": parent.agent_id,
+        "project_id": parent.project_id,
+        "scope_facet": "ui",
+        "memory_namespace": f"{parent.memory_namespace}/ui",
+        "default_provider_id": parent.default_provider_id,
+        "system_prompt": "",
+        "status": "active",
+        "created_at_ms": _now(),
+        "last_active_at_ms": _now(),
+    }
+    base.update(overrides)
+    return AgentRecord(**base)
+
+
+def test_find_addressed_lead_includes_sub_leads_in_candidate_set() -> None:
+    parent = _lead()
+    sub = _sub_lead(parent)
+    addressed = find_addressed_lead("SubLead-UI, status?", [parent, sub])
+    assert addressed is not None
+    assert addressed.lead.agent_id == sub.agent_id
+
+
+def test_effective_system_prompt_for_sub_lead_names_parent_and_facet() -> None:
+    parent = _lead(display_name="Lead-Alpha")
+    sub = _sub_lead(parent, display_name="SubLead-UI", scope_facet="ui")
+    expected = DEFAULT_SUB_LEAD_SYSTEM_PROMPT_TEMPLATE.format(
+        name="SubLead-UI",
+        parent_name="Lead-Alpha",
+        scope_facet="ui",
+    )
+    assert effective_system_prompt(sub, parent_lead=parent) == expected
+
+
+def test_effective_system_prompt_sub_lead_falls_back_when_parent_missing() -> None:
+    parent = _lead()
+    sub = _sub_lead(parent)
+    rendered = effective_system_prompt(sub, parent_lead=None)
+    assert "the project lead" in rendered
+    assert "SubLead-UI" in rendered
+
+
+async def test_build_attribution_chain_for_top_level_lead(tmp_path: Path) -> None:
+    agents = AgentRecordsStore(data_dir=tmp_path)
+    parent = _lead(display_name="Lead-Alpha", project_id="proj_alpha")
+    await agents.insert(parent)
+
+    chain = await build_attribution_chain(parent, agents=agents)
+    assert chain.names == ("Thalyn", "Lead-Alpha")
+    assert chain.agent_ids == ("agent_brain", parent.agent_id)
+
+
+async def test_build_attribution_chain_for_sub_lead(tmp_path: Path) -> None:
+    agents = AgentRecordsStore(data_dir=tmp_path)
+    parent = _lead(display_name="Lead-Alpha", project_id="proj_alpha")
+    sub = _sub_lead(parent, display_name="SubLead-UI")
+    await agents.insert(parent)
+    await agents.insert(sub)
+
+    chain = await build_attribution_chain(sub, agents=agents)
+    assert chain.names == ("Thalyn", "Lead-Alpha", "SubLead-UI")
+    assert chain.agent_ids == ("agent_brain", parent.agent_id, sub.agent_id)
+
+
+async def test_build_attribution_chain_to_wire_round_trip(tmp_path: Path) -> None:
+    agents = AgentRecordsStore(data_dir=tmp_path)
+    parent = _lead(display_name="Lead-Alpha", project_id="proj_alpha")
+    sub = _sub_lead(parent, display_name="SubLead-UI")
+    await agents.insert(parent)
+    await agents.insert(sub)
+
+    chain = await build_attribution_chain(sub, agents=agents)
+    wire = chain.to_wire()
+    assert wire == {
+        "names": ["Thalyn", "Lead-Alpha", "SubLead-UI"],
+        "agentIds": ["agent_brain", parent.agent_id, sub.agent_id],
     }
