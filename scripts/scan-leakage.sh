@@ -41,6 +41,7 @@ EXEMPT_PATHSPECS=(
   ':!docs/adr/0015-commit-hygiene-conventional-commits.md'
   ':!docs/adr/README.md'
   ':!docs/architecture-reviews/'
+  ':!CONTRIBUTING.md'
 )
 
 added_diff() {

@@ -1,8 +1,27 @@
 # Contributing to Thalyn
 
-Thalyn is open source under MIT. The project is small and opinionated —
-patches are welcome, and the conventions below exist so a stranger can
-get a useful change landed without DM-ing anyone.
+Thalyn is open source under Apache-2.0. The project is small and
+opinionated — patches are welcome, and the conventions below exist
+so a stranger can get a useful change landed without DM-ing anyone.
+
+## A note on cadence
+
+The project is currently single-maintainer pre-alpha. External
+issues and PRs are welcome but reviewed on a "when bandwidth allows"
+schedule rather than a SLA. If you're filing something, please:
+
+- **Open an issue first** for non-trivial changes — a short
+  description of the problem and your proposed approach saves time
+  for both of us.
+- **Expect slow responses.** A week or two is normal; a month
+  isn't unusual mid-phase.
+- **Keep PRs small.** One logical change per PR, atomic commits,
+  the gate sequence below passing locally before you push.
+
+If you want a feature and don't see it on the roadmap, file an
+issue — it's the right way to surface intent. Drive-by PRs against
+unlanded design decisions tend to get bounced back with "let's
+discuss the shape first."
 
 ## Setting up
 
@@ -171,6 +190,25 @@ author. Public design decisions land in ADRs.
   in `scripts/scan-leakage.sh` and is authoritative; the scanner runs
   as a pre-commit hook and in CI. Commits read as if a human engineer
   wrote them in the natural course of work.
+
+  Concretely, the scanner blocks these phrases (as a courtesy to
+  external contributors who may hit them innocently):
+
+  - `phase N` — historical artifact of how the project is sequenced
+    internally; use the feature name instead ("the merge work",
+    "the routing layer").
+  - `vN.N.N` — bare semantic-version numbers without context. Tag
+    names (`v0.36`) are fine in commit bodies that explain release
+    boundaries; the regex catches stray numbers.
+  - `commit N of N`, `iteration N` — internal sequencing language.
+  - `prompt-plan`, `as instructed`, `per the prompt` — reveals an
+    automated authoring shape; humans don't write this way.
+  - `working name`, `Co-Authored-By: Claude`, `autopilot run` — the
+    project does not credit AI tools as commit co-authors.
+
+  If a phrase you legitimately need is on the list, open an issue
+  before working around the scanner — the carve-out goes into the
+  script, not into your commit.
 
 ## Pre-commit gates
 
