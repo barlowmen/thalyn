@@ -9,15 +9,40 @@ goal: editor, terminal, browser, email, productivity connectors, and the
 agent control plane in one self-contained desktop app, with sandboxing
 and drift monitoring that make unattended runs defensible.
 
-> **Status:** pre-alpha, single-developer scope. The desktop app
+> **Status:** pre-alpha, single-developer scope. **The source is
+> public; the application is not yet released.** The desktop app
 > builds and runs end-to-end on macOS today: chat with Claude (or a
 > local model via Ollama) flows through a LangGraph orchestrator with
 > plan approval, drift monitoring, and sub-agents; an embedded Monaco
 > editor, an xterm.js terminal, a sidecar Chromium for browser-use,
 > a connector marketplace for MCP servers, and an inbox surface for
-> Gmail / Microsoft Graph all sit beside the chat. The `docs/going-public-checklist.md`
-> enumerates what still has to land before this is safe to install for
-> anyone other than its developer.
+> Gmail / Microsoft Graph all sit beside the chat. There are no
+> signed installers; the threat model is "one developer who built it
+> runs it." The
+> [`docs/going-public-checklist.md`](docs/going-public-checklist.md)
+> enumerates what still has to land before this is safe to install
+> for anyone else.
+
+## If you found this repo
+
+You're welcome to read, clone, and learn from the source — the code
+is Apache-2.0 licensed (see [`LICENSE`](LICENSE) and
+[`NOTICE`](NOTICE)). What this repo is *not* yet:
+
+- **Not a downloadable application.** No binaries. The app builds
+  from source on macOS today; Linux and Windows builds work but
+  haven't shipped binaries.
+- **Not soliciting code contributions yet.** Issues and discussions
+  are welcome but expect slow triage. The project's design and
+  build cadence are owned by a single maintainer; external PRs
+  will be reviewed when bandwidth allows.
+- **Not stable.** Tags `v0.20`–`v0.36` are development checkpoints,
+  not user-installable releases. `v1.0` ships when
+  [`docs/going-public-checklist.md`](docs/going-public-checklist.md)
+  empties out.
+
+If you want to know when `v1.0` lands, **watch the repo** for new
+releases.
 
 ## What this is, in one paragraph
 
