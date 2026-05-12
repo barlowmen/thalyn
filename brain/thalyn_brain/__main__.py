@@ -61,6 +61,7 @@ from thalyn_brain.schedules import (
     SchedulesStore,
 )
 from thalyn_brain.schedules_rpc import register_schedule_methods
+from thalyn_brain.sub_lead_actions import register_sub_lead_actions
 from thalyn_brain.terminal_observer import TerminalObserver
 from thalyn_brain.terminal_rpc import register_terminal_methods
 from thalyn_brain.thread_send import register_thread_send_methods
@@ -153,6 +154,16 @@ def main() -> int:
         agents=agent_records_store,
         routing_overrides=routing_overrides_store,
         data_dir=data_dir,
+    )
+    # Sub-lead spawn (F2.3 / Phase v0.36) — the conversational
+    # substrate for the parent-suggests-sub-lead flow. Lifecycle
+    # invariants (depth-cap, parent-must-be-active) live in
+    # ``LeadLifecycle``; this registers the matcher + executor so
+    # Thalyn can run the spawn from chat.
+    register_sub_lead_actions(
+        action_registry,
+        agents=agent_records_store,
+        lifecycle=lead_lifecycle,
     )
     pending_actions_store = PendingActionStore()
     register_action_methods(
