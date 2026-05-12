@@ -42,6 +42,7 @@ EXEMPT_PATHSPECS=(
   ':!docs/adr/README.md'
   ':!docs/architecture-reviews/'
   ':!CONTRIBUTING.md'
+  ':!.gitignore'
 )
 
 added_diff() {

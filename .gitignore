@@ -150,3 +150,11 @@ STUCK.md
 
 # Local working notebook (per-developer; never committed)
 PROGRESS.md
+
+# Project planning docs are maintained outside the public repository
+# (per ADR-0031). They live on the maintainer's local filesystem at
+# the same paths but are never tracked here.
+01-requirements.md
+02-architecture.md
+
+docs/archive/
