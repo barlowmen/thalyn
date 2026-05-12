@@ -6,22 +6,20 @@ so a stranger can get a useful change landed without DM-ing anyone.
 
 ## A note on cadence
 
-The project is currently single-maintainer pre-alpha. External
-issues and PRs are welcome but reviewed on a "when bandwidth allows"
-schedule rather than a SLA. If you're filing something, please:
+PRs are welcome. The project is currently single-maintainer
+pre-alpha, so reviews are slow — that's the trade-off, and it's
+fine. A week or two between push and review is normal; a month
+isn't unusual mid-phase.
 
-- **Open an issue first** for non-trivial changes — a short
-  description of the problem and your proposed approach saves time
-  for both of us.
-- **Expect slow responses.** A week or two is normal; a month
-  isn't unusual mid-phase.
+A couple of things make slow review work better for both sides:
+
+- **Open an issue first** for non-trivial changes if you want
+  signal on whether the maintainer would merge the proposed
+  approach. Skipping this is fine for small, obviously-correct
+  changes; for larger work it saves you the cost of building
+  something that turns out to need a different shape.
 - **Keep PRs small.** One logical change per PR, atomic commits,
   the gate sequence below passing locally before you push.
-
-If you want a feature and don't see it on the roadmap, file an
-issue — it's the right way to surface intent. Drive-by PRs against
-unlanded design decisions tend to get bounced back with "let's
-discuss the shape first."
 
 ## Setting up
 
