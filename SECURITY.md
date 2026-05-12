@@ -27,24 +27,27 @@ themselves a contributor, that document is the contract — until every
 item on it is closed, this software has not been hardened for that use
 case.
 
-The longer-form architectural threat model lives in
-[`02-architecture.md`](02-architecture.md) §9.
-
 ## Reporting a vulnerability
 
-While the project is pre-public and pre-1.0, please report security
-issues by emailing **REDACTED-EMAIL** with `[security]` in the
-subject. Include:
+Please report security issues **privately** through GitHub's
+coordinated-disclosure flow:
+[**Report a vulnerability**](https://github.com/barlowmen/thalyn/security/advisories/new).
+
+This routes the report to a private security advisory only the
+maintainer can see; the public issue tracker is not the right place
+for vulnerability reports.
+
+Include:
 
 - A description of the issue and its impact.
 - Reproduction steps if you have them.
 - Whether you've shared the details with anyone else (please don't —
   this project does not yet have a coordinated-disclosure policy).
 
-You will get an acknowledgement within 7 days. The fix timeline depends
-on severity. Once Thalyn has a public disclosure policy (tracked on the
-going-public checklist), this section will be replaced with a formal
-coordinated-disclosure flow.
+You will get an acknowledgement within 7 days. The fix timeline
+depends on severity. Once Thalyn has a formal coordinated-disclosure
+policy (tracked on the going-public checklist), this section will be
+expanded with response SLAs and embargo terms.
 
 ## Operational hygiene
 
