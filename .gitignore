@@ -133,11 +133,8 @@ tmp/
 *.tmp
 .scratch/
 
-# Local-only Claude Code overrides
-.claude/settings.local.json
-.claude/agents/
-.claude/.local/
-.claude/scheduled_tasks.lock
+# Agent-tooling config is maintainer-local; not tracked in the public repo.
+.claude/
 
 # Thalyn runtime data (created at runtime; never committed)
 runs/
