@@ -37,6 +37,7 @@ from thalyn_brain.orchestration.storage import (
 )
 from thalyn_brain.parent_watchdog import watch_parent
 from thalyn_brain.pending_actions import PendingActionStore
+from thalyn_brain.project_actions import register_project_actions
 from thalyn_brain.project_classifier import LlmJudgeClassifier
 from thalyn_brain.project_rpc import register_project_methods
 from thalyn_brain.projects import ProjectsStore
@@ -139,6 +140,15 @@ def main() -> int:
     )
     register_memory_actions(action_registry, memory_store=memory_store)
     register_connector_actions(action_registry, manager=mcp_manager)
+    register_project_actions(
+        action_registry,
+        projects=projects_store,
+        threads=threads_store,
+        memory=memory_store,
+        agents=agent_records_store,
+        routing_overrides=routing_overrides_store,
+        data_dir=data_dir,
+    )
     pending_actions_store = PendingActionStore()
     register_action_methods(
         dispatcher,
