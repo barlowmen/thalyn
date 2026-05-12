@@ -76,6 +76,7 @@ async def test_write_truncates_preview_for_long_bodies(tmp_path: Path) -> None:
         scope="agent",
         kind="reference",
         author="agent",
+        agent_id="agent_brain",
         notify=notify,
     )
 

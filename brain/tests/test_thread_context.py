@@ -155,6 +155,7 @@ async def test_personal_memory_does_not_pull_other_scopes(tmp_path: Path) -> Non
         MemoryEntry(
             memory_id=new_memory_id(),
             project_id=None,
+            agent_id="agent_brain",
             scope="agent",
             kind="reference",
             body="auto-merge note from a worker run.",

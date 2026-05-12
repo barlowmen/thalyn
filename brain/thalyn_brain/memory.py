@@ -36,6 +36,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from thalyn_brain.agents import AgentRecordsStore
 from thalyn_brain.orchestration.storage import (
     apply_pending_migrations,
     default_data_dir,
@@ -56,7 +57,15 @@ MEMORY_KINDS = frozenset({"fact", "preference", "reference", "feedback"})
 
 @dataclass
 class MemoryEntry:
-    """One memory row exposed over JSON-RPC."""
+    """One memory row exposed over JSON-RPC.
+
+    ``agent_id`` is the lead / sub-lead / worker that owns the row in
+    the agent-scoped tier. Project / personal / episodic rows leave
+    it null. Surfacing it here lets the storage-layer isolation
+    helpers (``list_visible_for_agent`` etc.) enforce
+    "parent reads child, sibling can't read sibling" by direct-DB
+    query — the architecture invariant from F2.3 / project_agent_hierarchy.
+    """
 
     memory_id: str
     project_id: str | None
@@ -66,12 +75,14 @@ class MemoryEntry:
     author: str
     created_at_ms: int
     updated_at_ms: int
+    agent_id: str | None = None
 
     def to_wire(self) -> dict[str, Any]:
         d = asdict(self)
         return {
             "memoryId": d["memory_id"],
             "projectId": d["project_id"],
+            "agentId": d["agent_id"],
             "scope": d["scope"],
             "kind": d["kind"],
             "body": d["body"],
@@ -132,17 +143,23 @@ class MemoryStore:
             raise ValueError(f"invalid scope: {entry.scope}")
         if entry.kind not in MEMORY_KINDS:
             raise ValueError(f"invalid kind: {entry.kind}")
+        if entry.scope == "agent" and not entry.agent_id:
+            # Agent-scoped rows must name their owner so the
+            # parent-reads-child / sibling-can't-read-sibling
+            # isolation rule has something to key off of.
+            raise ValueError("agent-scope memory entries require an agent_id")
         with self._open() as conn:
             conn.execute(
                 """
                 INSERT INTO memory_entries (
-                    memory_id, project_id, scope, kind, body, author,
+                    memory_id, project_id, agent_id, scope, kind, body, author,
                     created_at_ms, updated_at_ms, embedding_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
                 """,
                 (
                     entry.memory_id,
                     entry.project_id,
+                    entry.agent_id,
                     entry.scope,
                     entry.kind,
                     entry.body,
@@ -259,6 +276,85 @@ class MemoryStore:
             ).fetchall()
         return [_row_to_entry(row) for row in rows]
 
+    async def list_visible_for_agent(
+        self,
+        agent_id: str,
+        *,
+        agents: AgentRecordsStore,
+        limit: int = 200,
+    ) -> list[MemoryEntry]:
+        """Return agent-scoped rows ``agent_id`` is allowed to read.
+
+        Per F2.3 / project_agent_hierarchy: a parent lead can read its
+        descendants' memory; a sub-lead reads only its own. Sibling
+        sub-leads cannot read each other. The visible set is therefore
+        ``{agent_id}`` plus every descendant (transitive children via
+        ``parent_agent_id``). Project / personal / episodic rows are
+        not narrowed here — those tiers are intentionally shared and
+        live behind their own scope filters in ``list_entries`` /
+        ``search``.
+
+        The tree walk runs against ``AgentRecordsStore`` so the
+        isolation rule honours whatever the registry currently holds —
+        a re-parent (e.g. project merge re-attaching sub-leads to a
+        new lead) immediately changes who can read what without a
+        cache invalidation step.
+        """
+        visible_ids = await _collect_visible_agent_ids(agents, agent_id)
+        async with self._lock:
+            return await asyncio.to_thread(
+                self._list_for_agents_sync,
+                visible_ids,
+                limit,
+            )
+
+    def _list_for_agents_sync(
+        self,
+        agent_ids: frozenset[str],
+        limit: int,
+    ) -> list[MemoryEntry]:
+        if not agent_ids:
+            return []
+        placeholders = ",".join("?" * len(agent_ids))
+        with self._open() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM memory_entries
+                WHERE scope = 'agent' AND agent_id IN ({placeholders})
+                ORDER BY created_at_ms DESC
+                LIMIT ?
+                """,
+                [*agent_ids, limit],
+            ).fetchall()
+        return [_row_to_entry(row) for row in rows]
+
+    async def assert_writable_by(
+        self,
+        memory_id: str,
+        *,
+        writer_agent_id: str,
+    ) -> None:
+        """Raise ``MemoryAccessError`` if ``writer_agent_id`` can't write
+        the given memory row.
+
+        The write rule is the strict version of the read rule: only the
+        owner writes its own agent-scoped memory. Parents read but
+        don't write, siblings see neither. Project / personal /
+        episodic rows route through their own write surfaces and skip
+        this check (this helper only fires when the row is
+        agent-scoped).
+        """
+        entry = await self.get(memory_id)
+        if entry is None:
+            raise MemoryAccessError(f"memory {memory_id!r} does not exist")
+        if entry.scope != "agent":
+            return
+        if entry.agent_id != writer_agent_id:
+            raise MemoryAccessError(
+                f"agent {writer_agent_id!r} cannot write memory {memory_id!r} "
+                f"owned by {entry.agent_id!r}",
+            )
+
     async def update(self, memory_id: str, update: MemoryUpdate) -> bool:
         async with self._lock:
             return await asyncio.to_thread(self._update_sync, memory_id, update)
@@ -304,10 +400,55 @@ class MemoryStore:
         return cursor.rowcount > 0
 
 
+class MemoryAccessError(Exception):
+    """Raised when a sub-lead / lead tries to read or write memory it
+    doesn't own per F2.3.
+
+    Distinct from ``ValueError`` so callers (RPC, tests, future
+    audit-tee) can branch on access violations without parsing
+    error messages.
+    """
+
+
+async def _collect_visible_agent_ids(
+    agents: AgentRecordsStore,
+    root_agent_id: str,
+) -> frozenset[str]:
+    """Return ``{root}`` plus every descendant via parent_agent_id.
+
+    Walked via the registry so a re-parent (e.g. project merge
+    re-attaching sub-leads) immediately reflects in the visible set.
+    The walk is breadth-first; v1 caps depth at 2 so the worst case
+    is one root + ~handful of children — no special-casing needed.
+    """
+    root = await agents.get(root_agent_id)
+    if root is None:
+        return frozenset()
+    visible: set[str] = {root_agent_id}
+    frontier = [root_agent_id]
+    seen: set[str] = set()
+    while frontier:
+        current = frontier.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        # ``list_all`` filters by attribute equality; we walk children
+        # of the current node by listing every record and matching
+        # parent_agent_id. The agent table is small (one row per
+        # persistent agent), so the linear scan is cheap.
+        children = await agents.list_all()
+        for child in children:
+            if child.parent_agent_id == current and child.agent_id not in visible:
+                visible.add(child.agent_id)
+                frontier.append(child.agent_id)
+    return frozenset(visible)
+
+
 def _row_to_entry(row: sqlite3.Row) -> MemoryEntry:
     return MemoryEntry(
         memory_id=row["memory_id"],
         project_id=row["project_id"],
+        agent_id=row["agent_id"],
         scope=row["scope"],
         kind=row["kind"],
         body=row["body"],
@@ -326,6 +467,7 @@ __all__ = [
     "MEMORY_KINDS",
     "MEMORY_SCOPES",
     "MEMORY_TIERS",
+    "MemoryAccessError",
     "MemoryEntry",
     "MemoryStore",
     "MemoryUpdate",

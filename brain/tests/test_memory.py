@@ -55,6 +55,7 @@ async def test_list_filters_by_scope_and_orders_by_created_desc(tmp_path: Path) 
     await store.insert(
         _entry(
             scope="agent",
+            agent_id="agent_brain",
             created_at_ms=base + 200,
             updated_at_ms=base + 200,
         )

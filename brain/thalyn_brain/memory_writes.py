@@ -45,6 +45,7 @@ async def record_memory_write(
     author: str,
     notify: Notifier | None = None,
     project_id: str | None = None,
+    agent_id: str | None = None,
     via_lead_id: str | None = None,
     writer_role: str | None = None,
 ) -> MemoryEntry:
@@ -70,6 +71,7 @@ async def record_memory_write(
     entry = MemoryEntry(
         memory_id=new_memory_id(),
         project_id=project_id,
+        agent_id=agent_id,
         scope=scope,
         kind=kind,
         body=body,
