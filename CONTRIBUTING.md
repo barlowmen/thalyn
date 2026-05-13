@@ -218,6 +218,20 @@ Before any commit lands, the following must pass:
 | Rust fmt + clippy + tests | `cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test --lib` |
 | Python lint + types + tests | `cd brain && uv run ruff check && uv run ruff format --check && uv run mypy && uv run pytest` |
 | Leakage scan | `scripts/scan-leakage.sh` |
+| Identity-strings scan | `scripts/scan-identity-strings.sh` |
+| Retired-models scan | `scripts/scan-retired-models.sh` |
+
+For UI changes specifically, also run the Storybook a11y harness
+(component-level WCAG 2.1 AA) and the Playwright visual + integrated
+a11y gates locally before pushing. Linux CI catches a11y rules that
+the macOS Storybook host doesn't — see CI for the same one-liner:
+
+```sh
+pnpm build-storybook --quiet
+pnpm dlx http-server storybook-static --port 6006 --silent &
+pnpm exec test-storybook --url http://127.0.0.1:6006 --browsers chromium
+pnpm exec playwright test --ignore-snapshots
+```
 
 To wire these in locally, install [pre-commit](https://pre-commit.com):
 

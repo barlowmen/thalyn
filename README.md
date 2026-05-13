@@ -36,8 +36,10 @@ is Apache-2.0 licensed (see [`LICENSE`](LICENSE) and
   are welcome but expect slow triage. The project's design and
   build cadence are owned by a single maintainer; external PRs
   will be reviewed when bandwidth allows.
-- **Not stable.** Tags `v0.20`–`v0.36` are development checkpoints,
-  not user-installable releases. `v1.0` ships when
+- **Not stable.** The `v0.x` tags are development checkpoints, not
+  user-installable releases. The full release history lives in
+  [`CHANGELOG.md`](CHANGELOG.md) (generated from Conventional Commits
+  by `git-cliff` at each tag). `v1.0` ships when
   [`docs/going-public-checklist.md`](docs/going-public-checklist.md)
   empties out.
 
@@ -147,10 +149,12 @@ pre-commit`) and run `pre-commit install` in the repo.
 | `src/`, `index.html`, `vite.config.ts` | React renderer, served by Vite |
 | `src-tauri/` | Rust core: window, sidecar supervisor, IPC, commands |
 | `brain/` | Python sidecar (JSON-RPC dispatcher, agent runtime) |
-| `scripts/` | Repo-wide tooling, including the leakage scanner |
+| `scripts/` | Repo-wide tooling — the leakage scanner, the icon-asset build pipeline, the CEF/whisper/brain staging helpers |
 | `docs/adr/` | Architecture Decision Records (MADR) |
 | `docs/architecture-reviews/` | Per-cycle stack re-evaluation summaries |
+| `docs/design/` | Visual-language source — icon direction, vector geometry, dock-validation proofs |
 | `docs/going-public-checklist.md` | Hardening list gating a public binary release |
+| `CHANGELOG.md` | Release history, generated from Conventional Commits |
 
 ## Contributing
 
