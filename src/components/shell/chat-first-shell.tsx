@@ -204,6 +204,25 @@ function ShellInner() {
                 <MessageList
                   messages={messages}
                   projectsById={projectsById}
+                  onDrillIntoSource={(audit) => {
+                    // F1.10: drill-into-source on a relayed claim
+                    // opens the relevant drawer at the audit's
+                    // sourceRef. Only the lead-turn shape lands a
+                    // drawer in v1 — worker tool calls and file
+                    // diffs route through the existing logs / editor
+                    // drawers once those source-refs flow through
+                    // the eternal-thread surface.
+                    const ref = audit.sourceRef;
+                    if (
+                      typeof ref.leadId === "string" &&
+                      (ref.kind === "lead_turn" || ref.kind === "lead_reply_text")
+                    ) {
+                      drawerHost.open({
+                        kind: "lead-chat",
+                        params: { agentId: ref.leadId },
+                      });
+                    }
+                  }}
                   header={<ThreadDigestGreeting />}
                   footer={
                     <>
