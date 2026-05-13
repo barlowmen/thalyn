@@ -118,3 +118,65 @@ read by the owning agent through its own namespace.
 
 The migration that closes out the v1→v2 rename ships in
 `007_memory_personal_scope.sql` (`scope='user'` → `scope='personal'`).
+
+### Refinement at v0.37 — provenance fields on `MEMORY_ENTRY`
+
+The five-tier model above settled *what* a memory row is and *who*
+owns it. v0.37 adds *where it came from*, so the F1.10 drill-into-
+source UX can navigate from a recalled memory row back to the
+underlying claim — the same shape ADR-0027's `InfoFlowAuditReport`
+uses for relayed claims. Without this, an episodic recall surface
+in chat can render the row's body but can't link to "the lead's
+report on 2026-04-30 at 11:14" or "the worker's tool call that
+produced this fact."
+
+`MEMORY_ENTRY.provenance` is a JSON-typed column carrying a shape
+parallel to the audit `sourceRef`:
+
+```jsonc
+{
+  // What kind of source produced this row. The renderer picks a
+  // drawer (lead-chat, worker detail, editor, browser) based on
+  // this kind.
+  "kind": "thread_turn" | "worker_action" | "tool_call"
+        | "file_diff" | "external_message" | "user",
+  // Stable ids for the source. Naming mirrors the wire shape of
+  // run.action_log / lead-chat refs so the renderer's existing
+  // drill helpers compose.
+  "turnId":   "...",     // thread_turn | external_message
+  "runId":    "...",     // worker_action | tool_call
+  "callId":   "...",     // tool_call
+  "leadId":   "...",     // any lead-attributed write
+  "filePath": "...",     // file_diff | editor-sourced
+  "atMs":     1714512840000,
+  // Optional free-text excerpt the recall surface can show
+  // inline so the user sees the source phrasing before clicking
+  // through.
+  "excerpt": "Sam: 'three commits shipped overnight…'"
+}
+```
+
+The column is **additive** and **optional** — v1 memory writes
+that don't carry provenance (the legacy `record_*_memory_write`
+helpers) keep working unchanged with `provenance` set to `NULL`.
+New write paths that *do* know their source (the info-flow audit's
+attached memory writes, the worker's tool-call → memory bridge,
+the lead's report → personal-memory recap) populate the column at
+write time. A future hardening pass can backfill historical rows
+from the audit log when the user opts in.
+
+**Schema landing.** The column ships in a migration paired with the
+first write path that populates it. v0.37 settles the ADR; the
+column lands when a memory-write codepath needs it (the
+info-flow-audit → personal-memory recap is the natural first
+caller). Until then, in-flight provenance flows through the
+existing `confidence.audit.sourceRef` channel on `THREAD_TURN`
+rows, which is enough for the chat surface to drill from a
+relayed message.
+
+**Read-side rendering.** The recall surface treats `provenance` as
+metadata, not as part of the body: the body is what the LLM
+prompted on, the provenance is what the user clicks to navigate
+to. A `null` provenance renders the row without a drill-down link
+(the row stands on its own, like any v1 memory) — no
+gracefully-degrade contortions required.
