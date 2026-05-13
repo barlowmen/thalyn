@@ -585,4 +585,27 @@ def report_to_confidence_payload(report: InfoFlowAuditReport) -> dict[str, Any]:
     return {
         "level": confidence_level_for_drift(report.drift_score),
         "audit": report.to_wire(),
+        "audits": [report.to_wire()],
+    }
+
+
+_LEVEL_RANK: dict[InfoFlowConfidence, int] = {"high": 0, "medium": 1, "low": 2}
+
+
+def combine_confidence_payloads(*reports: InfoFlowAuditReport) -> dict[str, Any]:
+    """Build a combined confidence payload from one or more audits.
+
+    The combined ``level`` is the worst across the inputs (a single
+    low-confidence audit pulls the combined level to low).
+    ``audit`` keeps the worst report as the primary surface for the
+    renderer's pill + drill-down; ``audits`` carries every audit so
+    the user can navigate to each underlying source.
+    """
+    if not reports:
+        raise ValueError("at least one audit report is required")
+    primary = max(reports, key=lambda r: _LEVEL_RANK[confidence_level_for_drift(r.drift_score)])
+    return {
+        "level": confidence_level_for_drift(primary.drift_score),
+        "audit": primary.to_wire(),
+        "audits": [r.to_wire() for r in reports],
     }

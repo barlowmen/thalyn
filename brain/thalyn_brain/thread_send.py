@@ -53,6 +53,7 @@ from thalyn_brain.orchestration.info_flow import (
     InfoFlowAuditReport,
     InfoFlowMode,
     audit_info_flow,
+    combine_confidence_payloads,
     confidence_level_for_drift,
     info_flow_check_log_entry,
     report_to_confidence_payload,
@@ -673,34 +674,56 @@ async def _handle_delegated_reply(
         {"turnId": brain_turn_id, "chunk": {"kind": "stop", "reason": "end_turn"}},
     )
 
+    # The brain → user hop runs its own audit comparing the relayed
+    # text (preamble + prefix + body + optional note) against the
+    # source the lead actually said. The v1 wrap is verbatim by
+    # design, so this audit normally scores 0 — but it lands the
+    # F12.7 audit fact on every hop and catches the day a future
+    # paraphrase shape drops content.
+    relay_audit = await audit_info_flow(
+        mode=InfoFlowMode.RELAYED_VS_SOURCE,
+        source=lead_reply,
+        output=wrapped,
+        source_ref={
+            "kind": "lead_reply_text",
+            "leadId": lead.agent_id,
+            "leadTurnId": lead_turn_id,
+        },
+        output_ref={
+            "kind": "brain_relay_turn",
+            "turnId": brain_turn_id,
+        },
+    )
+
     # Audit-trail emissions land on the wire whether the audit flagged
     # drift or not: a future hash-chained audit-log needs the run-of-
     # the-mill no-drift entries too. The synthetic ``runId`` mirrors
     # the brain turn so the renderer's drill-into-source UX has a
     # stable handle even without a worker-run agent_runs row.
     audit_run_id = f"chat:{brain_turn_id}"
-    await notify(
-        RUN_ACTION_LOG,
-        {"runId": audit_run_id, "entry": info_flow_check_log_entry(audit)},
-    )
-    await notify(
-        RUN_DRIFT,
-        {
-            "runId": audit_run_id,
-            "score": audit.drift_score,
-            "mode": audit.mode.value,
-            "deviationSummary": audit.summary,
-        },
-    )
-    if audit.should_raise_gate:
+    for hop_audit in (audit, relay_audit):
         await notify(
-            RUN_APPROVAL_REQUIRED,
+            RUN_ACTION_LOG,
+            {"runId": audit_run_id, "entry": info_flow_check_log_entry(hop_audit)},
+        )
+        await notify(
+            RUN_DRIFT,
             {
                 "runId": audit_run_id,
-                "gateKind": "info_flow",
-                "infoFlowSummary": audit.to_wire(),
+                "score": hop_audit.drift_score,
+                "mode": hop_audit.mode.value,
+                "deviationSummary": hop_audit.summary,
             },
         )
+        if hop_audit.should_raise_gate:
+            await notify(
+                RUN_APPROVAL_REQUIRED,
+                {
+                    "runId": audit_run_id,
+                    "gateKind": "info_flow",
+                    "infoFlowSummary": hop_audit.to_wire(),
+                },
+            )
 
     # F2.5 escalation: when the lead's reply is question-dense, surface
     # a "drop into Lead-X" CTA rather than relying on the user to read
@@ -711,7 +734,8 @@ async def _handle_delegated_reply(
         await notify(LEAD_ESCALATION, escalation.to_wire())
 
     now_ms = int(time.time() * 1000)
-    confidence_payload = report_to_confidence_payload(audit)
+    lead_confidence_payload = report_to_confidence_payload(audit)
+    brain_confidence_payload = combine_confidence_payloads(audit, relay_audit)
     lead_provenance: dict[str, Any] = {
         "leadId": lead.agent_id,
         "providerId": lead.default_provider_id,
@@ -727,7 +751,7 @@ async def _handle_delegated_reply(
         role="lead",
         body=lead_reply,
         provenance=lead_provenance,
-        confidence=confidence_payload,
+        confidence=lead_confidence_payload,
         episodic_index_ptr=None,
         at_ms=now_ms,
         status="completed",
@@ -751,7 +775,7 @@ async def _handle_delegated_reply(
         role="brain",
         body=final_text,
         provenance=brain_provenance,
-        confidence=confidence_payload,
+        confidence=brain_confidence_payload,
         episodic_index_ptr=None,
         at_ms=now_ms,
         status="completed",
@@ -767,7 +791,7 @@ async def _handle_delegated_reply(
         "leadId": lead.agent_id,
         "leadTurnId": lead_turn_id,
         "leadDisplayName": lead.display_name,
-        "confidence": confidence_payload,
+        "confidence": brain_confidence_payload,
     }
     if attribution is not None:
         delegation["attributionChain"] = attribution.to_wire()

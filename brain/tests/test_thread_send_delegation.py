@@ -315,9 +315,12 @@ async def test_addressed_lead_audit_emits_run_drift_with_mode(tmp_path: Path) ->
     )
 
     drift_events = [params for method, params in captured if method == "run.drift"]
-    assert len(drift_events) == 1
-    assert drift_events[0]["mode"] == "reported_vs_truth"
-    assert drift_events[0]["runId"].startswith("chat:")
+    # Both hops emit drift events (reported_vs_truth + relayed_vs_source).
+    assert [ev["mode"] for ev in drift_events] == [
+        "reported_vs_truth",
+        "relayed_vs_source",
+    ]
+    assert all(ev["runId"].startswith("chat:") for ev in drift_events)
     # No flagging on a clean reply → no info_flow gate.
     gates = [
         params
@@ -325,15 +328,52 @@ async def test_addressed_lead_audit_emits_run_drift_with_mode(tmp_path: Path) ->
         if method == "run.approval_required" and params.get("gateKind") == "info_flow"
     ]
     assert gates == []
-    # The audit fact still lands in the action log.
+    # The audit facts still land in the action log — one per hop.
     log_entries = [
         params
         for method, params in captured
         if method == "run.action_log" and params["entry"]["kind"] == "info_flow_check"
     ]
-    assert len(log_entries) == 1
-    assert log_entries[0]["entry"]["payload"]["mode"] == "reported_vs_truth"
+    assert [entry["entry"]["payload"]["mode"] for entry in log_entries] == [
+        "reported_vs_truth",
+        "relayed_vs_source",
+    ]
     assert response["result"]["delegation"]["confidence"]["level"] == "high"
+
+
+async def test_relay_audit_also_emits_run_drift(tmp_path: Path) -> None:
+    """The brain → user hop emits its own ``run.drift`` notification
+    with ``mode='relayed_vs_source'`` alongside the
+    ``reported_vs_truth`` audit. The verbatim v1 wrap is faithful, so
+    the relay audit normally scores 0 — the assertion is that the
+    audit fact lands on every relay, not that drift fires."""
+    dispatcher, threads, _agents, lifecycle, projects = await _build(
+        tmp_path,
+        messages=[
+            text_message("Migration succeeded; 71 tests pass."),
+            result_message(),
+        ],
+    )
+    project = await _seed_project(projects)
+    await lifecycle.spawn(SpawnRequest(project_id=project.project_id, display_name="Sam"))
+    thread = await _seed_thread(threads)
+
+    _response, captured = await _send(
+        dispatcher,
+        thread_id=thread.thread_id,
+        prompt="Sam, status?",
+    )
+
+    drift_events = [params for method, params in captured if method == "run.drift"]
+    modes = {ev["mode"] for ev in drift_events}
+    assert modes == {"reported_vs_truth", "relayed_vs_source"}
+    log_entries = [
+        params
+        for method, params in captured
+        if method == "run.action_log" and params["entry"]["kind"] == "info_flow_check"
+    ]
+    log_modes = {entry["entry"]["payload"]["mode"] for entry in log_entries}
+    assert log_modes == {"reported_vs_truth", "relayed_vs_source"}
 
 
 async def test_empty_lead_reply_raises_info_flow_gate(tmp_path: Path) -> None:

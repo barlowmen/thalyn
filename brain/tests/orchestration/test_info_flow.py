@@ -337,6 +337,48 @@ def test_should_raise_gate_low_drift_passes() -> None:
     assert report.should_raise_gate is False
 
 
+def test_combine_confidence_payloads_picks_worst_level() -> None:
+    from thalyn_brain.orchestration.info_flow import combine_confidence_payloads
+
+    clean = InfoFlowAuditReport(
+        mode=InfoFlowMode.REPORTED_VS_TRUTH,
+        drift_score=0.05,
+        confidence="high",
+        summary="clean",
+    )
+    flagged = InfoFlowAuditReport(
+        mode=InfoFlowMode.RELAYED_VS_SOURCE,
+        drift_score=0.6,
+        confidence="medium",
+        summary="relay drops content",
+    )
+    payload = combine_confidence_payloads(clean, flagged)
+    # 0.6 maps to "medium" (≥ 0.3, < 0.7), and that's worse than 0.05's "high".
+    assert payload["level"] == "medium"
+    assert payload["audit"]["mode"] == "relayed_vs_source"
+    assert len(payload["audits"]) == 2
+
+
+def test_combine_confidence_payloads_low_beats_medium() -> None:
+    from thalyn_brain.orchestration.info_flow import combine_confidence_payloads
+
+    medium = InfoFlowAuditReport(
+        mode=InfoFlowMode.REPORTED_VS_TRUTH,
+        drift_score=0.5,
+        confidence="medium",
+        summary="mid",
+    )
+    low = InfoFlowAuditReport(
+        mode=InfoFlowMode.RELAYED_VS_SOURCE,
+        drift_score=0.9,
+        confidence="medium",
+        summary="severe drift",
+    )
+    payload = combine_confidence_payloads(medium, low)
+    assert payload["level"] == "low"
+    assert payload["audit"]["mode"] == "relayed_vs_source"
+
+
 def test_info_flow_check_log_entry_carries_payload() -> None:
     report = InfoFlowAuditReport(
         mode=InfoFlowMode.REPORTED_VS_TRUTH,
