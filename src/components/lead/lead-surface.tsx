@@ -235,7 +235,7 @@ export function LeadSurface({
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-3">
         {error && (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-xs text-danger">
             {error}
           </p>
         )}

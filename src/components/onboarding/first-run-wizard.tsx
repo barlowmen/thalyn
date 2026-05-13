@@ -365,7 +365,7 @@ function BackendOption({
           <p className="text-xs text-muted-foreground">{backend.probe.detail}</p>
         )}
         {backend.probe.error && (
-          <p className="text-xs text-destructive">{backend.probe.error}</p>
+          <p className="text-xs text-danger">{backend.probe.error}</p>
         )}
       </button>
     </li>

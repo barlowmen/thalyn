@@ -85,7 +85,7 @@ export function SchedulesDialog({
             {loading && (
               <p className="text-xs text-muted-foreground">Loading…</p>
             )}
-            {error && <p className="text-xs text-destructive">{error}</p>}
+            {error && <p className="text-xs text-danger">{error}</p>}
             {!loading && schedules.length === 0 && (
               <p className="text-xs text-muted-foreground">
                 None yet — create one above.
@@ -242,7 +242,7 @@ function ScheduleForm({
         />
       </div>
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
 
       <Button type="submit" disabled={submitting}>
         {submitting ? "Creating…" : "Create schedule"}

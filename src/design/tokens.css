@@ -31,12 +31,25 @@
   /* Accent + status — dark-on-bright pairings hit WCAG 2.1 AA at the
      declared `--*-fg` token. The accent ships at 55% L (down from the
      original 70% sketch) so `bg-primary text-primary-foreground` clears
-     the 4.5:1 threshold for normal text. */
+     the 4.5:1 threshold for normal text.
+
+     Surface tones (``--danger`` / ``--success`` / ``--warning``) are
+     tuned for *button-bg use* with white on top: dark enough that
+     ``--*-fg = oklch(98%)`` clears 4.5:1. Foreground-text tones
+     (``--*-text``) are the brighter sibling for use directly as text
+     colour on the page bg (``text-danger``, ``text-success``,
+     ``text-warning`` — wired through ``@theme inline`` in
+     globals.css). One token can't satisfy both: a bg dark enough for
+     white text fails normal-text contrast when *used as* foreground,
+     and vice versa. */
   --accent: oklch(55% 0.18 260);
   --accent-fg: oklch(98% 0 0);
   --success: oklch(50% 0.16 145);
+  --success-text: oklch(78% 0.14 145);
   --warning: oklch(56% 0.15 80);
+  --warning-text: oklch(82% 0.13 80);
   --danger: oklch(52% 0.22 25);
+  --danger-text: oklch(78% 0.16 25);
 
   /* Focus ring — WCAG: ≥ 3:1 against any adjacent surface */
   --focus-ring: oklch(72% 0.16 260);
@@ -90,8 +103,11 @@
   --accent: oklch(48% 0.2 260);
   --accent-fg: oklch(98% 0 0);
   --success: oklch(40% 0.18 145);
+  --success-text: oklch(38% 0.16 145);
   --warning: oklch(48% 0.16 80);
+  --warning-text: oklch(40% 0.14 80);
   --danger: oklch(45% 0.22 25);
+  --danger-text: oklch(40% 0.20 25);
 
   --focus-ring: oklch(48% 0.2 260);
 }
@@ -114,8 +130,11 @@
     --accent: oklch(48% 0.2 260);
     --accent-fg: oklch(98% 0 0);
     --success: oklch(40% 0.18 145);
+    --success-text: oklch(38% 0.16 145);
     --warning: oklch(48% 0.16 80);
+    --warning-text: oklch(40% 0.14 80);
     --danger: oklch(45% 0.22 25);
+    --danger-text: oklch(40% 0.20 25);
 
     --focus-ring: oklch(48% 0.2 260);
   }

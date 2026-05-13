@@ -260,7 +260,7 @@ function ShellInner() {
             {errorMessage && (
               <p
                 role="alert"
-                className="border-t border-border bg-destructive/10 px-6 py-2 text-xs text-destructive"
+                className="border-t border-border bg-destructive/10 px-6 py-2 text-xs text-danger"
               >
                 {errorMessage}
               </p>

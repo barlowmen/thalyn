@@ -419,7 +419,7 @@ export function Composer({
       {permissionDenied && (
         <div
           role="alert"
-          className="flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          className="flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-danger"
         >
           <p className="flex-1">
             Microphone access is blocked. Allow Thalyn in the OS

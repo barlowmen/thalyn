@@ -126,7 +126,7 @@ export function MemoryDialog({
             {loading && (
               <p className="text-xs text-muted-foreground">Loading…</p>
             )}
-            {error && <p className="text-xs text-destructive">{error}</p>}
+            {error && <p className="text-xs text-danger">{error}</p>}
             {!loading && entries.length === 0 && (
               <p className="text-xs text-muted-foreground">
                 None yet — add one above, or let Thalyn remember
@@ -226,7 +226,7 @@ function MemoryForm({ onCreated }: { onCreated: () => void | Promise<void> }) {
           disabled={submitting}
         />
       </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
       <Button type="submit" size="sm" disabled={submitting}>
         {submitting ? "Saving…" : "Add memory"}
       </Button>

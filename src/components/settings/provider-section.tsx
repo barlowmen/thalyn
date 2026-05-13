@@ -46,7 +46,7 @@ export function ProviderSection() {
         </p>
       </header>
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
 
       <ProviderSelector
         providers={providers}

@@ -57,7 +57,7 @@ export function ObservabilitySection() {
         </p>
       </header>
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {error ? <p className="text-sm text-danger">{error}</p> : null}
 
       <div className="space-y-3 rounded-lg border border-border bg-card p-4">
         <h4 className="text-sm font-medium">Trace destination (OTLP)</h4>
@@ -232,7 +232,7 @@ function StatusLine({
   configured: boolean;
 }) {
   if (status.kind === "error") {
-    return <p className="text-sm text-destructive">{status.message}</p>;
+    return <p className="text-sm text-danger">{status.message}</p>;
   }
   if (status.kind === "saved") {
     return <p className="text-sm text-success">Saved.</p>;

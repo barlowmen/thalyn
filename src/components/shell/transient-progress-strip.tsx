@@ -109,6 +109,6 @@ function visualForKind(kind: TransientActivityKind): {
     case "awaiting_approval":
       return { Icon: GaugeCircle, tone: "text-warning" };
     case "drift":
-      return { Icon: AlertTriangle, tone: "text-destructive" };
+      return { Icon: AlertTriangle, tone: "text-danger" };
   }
 }

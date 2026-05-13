@@ -97,7 +97,7 @@ export function PlanApprovalDialog({
         )}
 
         {pending.kind === "error" && (
-          <p className="text-sm text-destructive">{pending.message}</p>
+          <p className="text-sm text-danger">{pending.message}</p>
         )}
 
         <footer className="flex flex-wrap items-center justify-end gap-2">

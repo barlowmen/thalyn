@@ -103,7 +103,7 @@ export function InlineApprovalCard({
           )}
 
           {pending.kind === "error" && (
-            <p className="text-xs text-destructive">{pending.message}</p>
+            <p className="text-xs text-danger">{pending.message}</p>
           )}
 
           <div className="flex flex-wrap items-center gap-2 pt-1">

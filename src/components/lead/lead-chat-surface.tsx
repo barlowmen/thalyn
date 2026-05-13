@@ -79,7 +79,7 @@ export function LeadChatSurface({
       {error && (
         <p
           role="alert"
-          className="border-t border-border bg-destructive/10 px-4 py-1.5 text-[11px] text-destructive"
+          className="border-t border-border bg-destructive/10 px-4 py-1.5 text-[11px] text-danger"
         >
           {error}
         </p>

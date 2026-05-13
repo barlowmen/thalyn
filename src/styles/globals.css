@@ -79,6 +79,17 @@
 
   --color-success: var(--success);
   --color-warning: var(--warning);
+  /* Foreground-only ``text-danger`` is wired through ``--danger-text``
+     — a brighter sibling of ``--danger`` tuned for 4.5:1 contrast as
+     foreground text on the page bg. ``--danger`` (and Tailwind's
+     ``bg-destructive`` / ``text-destructive`` utilities) keeps the
+     existing surface tone so the destructive-variant button stays
+     unchanged. Same shape ships for ``--success-text`` /
+     ``--warning-text`` but isn't wired to a Tailwind utility yet —
+     ``bg-success`` and ``bg-warning`` would shift in appearance if
+     remapped, so the wiring lands when their foreground sibling has
+     a flagged contrast failure to fix. */
+  --color-danger: var(--danger-text);
 
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);

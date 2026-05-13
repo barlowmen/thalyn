@@ -200,7 +200,7 @@ export function ProjectSwitcher({ activeProjectId, preview }: Props) {
           {state.kind === "error" && (
             <p
               role="alert"
-              className="mt-1 px-2 py-1 text-[11px] text-destructive"
+              className="mt-1 px-2 py-1 text-[11px] text-danger"
             >
               {state.message}
             </p>

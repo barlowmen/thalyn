@@ -81,7 +81,7 @@ export function EmailSurface() {
   if (state.error) {
     return (
       <SurfaceFrame heading="Email">
-        <p className="text-sm text-destructive" role="alert">
+        <p className="text-sm text-danger" role="alert">
           {state.error}
         </p>
       </SurfaceFrame>
@@ -227,7 +227,7 @@ function AccountInbox({ account }: { account: EmailAccount }) {
         </div>
         <div className="flex-1 overflow-y-auto" role="listbox" aria-label="Messages">
           {error ? (
-            <p className="p-3 text-xs text-destructive" role="alert">
+            <p className="p-3 text-xs text-danger" role="alert">
               {error}
             </p>
           ) : null}
@@ -316,7 +316,7 @@ function MessageView({
       </header>
       <div className="flex-1 overflow-y-auto whitespace-pre-wrap p-4 text-sm">
         {error ? (
-          <p className="text-destructive" role="alert">
+          <p className="text-danger" role="alert">
             {error}
           </p>
         ) : busy ? (
@@ -449,7 +449,7 @@ function ComposePane({
           />
         </div>
         {error ? (
-          <p className="text-sm text-destructive" role="alert">
+          <p className="text-sm text-danger" role="alert">
             {error}
           </p>
         ) : null}

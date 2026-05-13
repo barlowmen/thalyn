@@ -387,7 +387,7 @@ function DeepgramApiKeyField({
       </div>
 
       {status.kind === "error" && (
-        <p className="text-sm text-destructive">{status.message}</p>
+        <p className="text-sm text-danger">{status.message}</p>
       )}
       {status.kind === "saved" && (
         <p className="text-sm text-success">Saved.</p>

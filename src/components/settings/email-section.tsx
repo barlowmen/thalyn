@@ -75,7 +75,7 @@ export function EmailSection() {
       </header>
 
       {error ? (
-        <p className="text-sm text-destructive" role="alert">
+        <p className="text-sm text-danger" role="alert">
           {error}
         </p>
       ) : null}
@@ -173,7 +173,7 @@ function AddAccountForm({
         </div>
       </div>
       {error ? (
-        <p className="text-sm text-destructive" role="alert">
+        <p className="text-sm text-danger" role="alert">
           {error}
         </p>
       ) : null}
@@ -288,7 +288,7 @@ function AccountCard({
         onClientSecretChange={setClientSecret}
       />
       {error ? (
-        <p className="text-sm text-destructive" role="alert">
+        <p className="text-sm text-danger" role="alert">
           {error}
         </p>
       ) : null}

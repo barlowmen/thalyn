@@ -122,7 +122,7 @@ function PlanStatusIcon({ status }: { status: PlanNodeStatus }) {
       );
     case "errored":
       return (
-        <X className={cn(className, "text-destructive")} aria-label="Errored" />
+        <X className={cn(className, "text-danger")} aria-label="Errored" />
       );
     case "skipped":
       return (

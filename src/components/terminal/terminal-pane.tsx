@@ -102,7 +102,7 @@ export function TerminalPane({
   return (
     <div className={`flex h-full flex-col ${className ?? ""}`}>
       {error && (
-        <p className="border-b border-border bg-destructive/10 px-3 py-1 text-[11px] text-destructive">
+        <p className="border-b border-border bg-destructive/10 px-3 py-1 text-[11px] text-danger">
           {error}
         </p>
       )}

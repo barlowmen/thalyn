@@ -81,7 +81,7 @@ export function ToolCallCard({ callId, tool, input, output, isError }: Props) {
                 className={cn(
                   "overflow-x-auto rounded px-2 py-1.5 font-mono text-xs",
                   isError
-                    ? "bg-destructive/10 text-destructive"
+                    ? "bg-destructive/10 text-danger"
                     : "bg-muted",
                 )}
               >

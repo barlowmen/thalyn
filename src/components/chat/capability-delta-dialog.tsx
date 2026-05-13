@@ -118,7 +118,7 @@ export function CapabilityDeltaDialog({
             Computing delta…
           </p>
         )}
-        {error && <p className="mt-4 text-xs text-destructive">{error}</p>}
+        {error && <p className="mt-4 text-xs text-danger">{error}</p>}
 
         {delta && delta.changes.length > 0 && (
           <ul className="mt-4 space-y-2 text-sm">
