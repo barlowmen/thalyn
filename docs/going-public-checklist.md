@@ -50,6 +50,21 @@ Each item links to the ADR it overrides or extends.
 ### Licensing
 - [x] **Apache-2.0 chosen** (ADR-0030, supersedes ADR-0016). Closed when the source went public; the explicit patent grant matters as soon as the code is visible to anyone who might also hold relevant patents.
 
+### Visual identity
+- [x] **App icon — locked direction shipped.** The A3 gapped-T sigil ships across `.icns` (10 sizes), `.ico` (7 sizes), Linux freedesktop hicolor PNG set (9 sizes), the MSIX `Square*Logo.png` set, and a canonical SVG source at `docs/design/icon-concepts/A3-vector.svg`. Reproducible via `scripts/build-icon-assets.py`. (`docs/design/icon-direction.md` §4.2 and §4.3.)
+- [ ] **Tahoe `.icon` layered variants.** Apple's Icon Composer (Xcode 16+, runs on a Tahoe machine) produces the six layered variants — default, dark, clear-light, clear-dark, tinted-light, tinted-dark. The bundled `.icns` carries the foreground raster set today; the layered `.icon` needs a Tahoe build host. (`docs/design/icon-direction.md` §4.2.)
+- [ ] **Dock side-by-side capture.** 16 × 16 native + 2× DPI screenshots of the Thalyn icon alongside Linear, Raycast, Cursor, Claude Desktop, VS Code in the macOS dock — `docs/design/icon-direction.md` §4.4. Needs a Tahoe machine with those apps installed.
+- [ ] **Light + dark wallpaper validation.** Same Tahoe machine — the squircle background is engineered to read on both, but the validation capture lives with the binary release.
+
+### Performance budgets
+- [x] **NFR1 budgets gated on every push.** Editor cold-start, drawer-open animation, and lead-chat drawer cold-mount all have Playwright gates against generous (~5×) CI-friendly thresholds. The headline NFR1 numbers (≤ 200 ms drawer animation on M-series; < 3 s cold-start on Mac, < 5 s on Windows) are confirmed by the desktop runtime path, not the renderer-via-Vite path.
+- [ ] **NFR1 confirmation on a 2-year-old Windows laptop.** The headline 5-second cold-start and the 250 ms streaming-token p95 are documented against that hardware tier; v1 builds need a measured pass before the public release flips the cross-platform-parity flag green.
+- [ ] **Idle memory budget on M-series Mac.** NFR1 says "< 250 MB resident" excluding the bundled Chromium. Measured locally during development but not gated in CI; pin a measurement to the release artifact.
+
+### Accessibility
+- [x] **WCAG 2.1 AA on the primary surfaces** — chat, lead chat, drawers (logs, lead-chat), command palette — gated via `tests/visual/shell-a11y.spec.ts` and the Storybook a11y harness over every component story. NFR8's WCAG 2.1 AA bar holds across both themes; the dark `--danger` foreground use carries a separate brighter `--danger-text` sibling to clear the 4.5:1 normal-text threshold.
+- [ ] **Third-party a11y review.** The internal audit holds against axe-core's WCAG 2.1 AA rule set; an external pass adds the human-judgment surfaces (screen-reader narrative quality, keyboard-only fluency, voice-control compatibility) that automated rules don't reach.
+
 ### Audit logs
 - [ ] **Hash-chained / signed audit logs** (currently F7.6 ships unsigned NDJSON). Upgrade to a tamper-evident format.
 
