@@ -1,7 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
 import { MessageList, type ProjectsById } from "@/components/chat/message-list";
-import type { Message } from "@/components/chat/types";
+import type {
+  ConfidencePayload,
+  InfoFlowAuditWire,
+  Message,
+} from "@/components/chat/types";
 
 const meta: Meta<typeof MessageList> = {
   title: "Chat/MessageList",
@@ -106,6 +110,84 @@ const projectsById: ProjectsById = new Map([
     { projectId: "proj_offsite", name: "Q3 offsite", slug: "q3-offsite" },
   ],
 ]);
+
+function audit(
+  mode: InfoFlowAuditWire["mode"],
+  driftScore: number,
+  summary: string,
+): InfoFlowAuditWire {
+  return {
+    mode,
+    driftScore,
+    confidence: "medium",
+    summary,
+    sourceRef: { kind: "lead_turn", leadId: "agent_lead_alpha", leadTurnId: "t_lead_1" },
+    outputRef: { kind: "brain_relay_turn", turnId: "m_assistant_delegated" },
+    heuristicScore: driftScore,
+  };
+}
+
+function confidence(
+  level: ConfidencePayload["level"],
+  driftScore: number,
+  summary: string,
+): ConfidencePayload {
+  const a = audit("reported_vs_truth", driftScore, summary);
+  return { level, audit: a, audits: [a] };
+}
+
+export const DelegatedReplyMediumConfidence: Story = {
+  args: {
+    messages: [
+      userMessage,
+      {
+        ...delegatedReply,
+        id: "m_assistant_medium",
+        segments: [
+          {
+            kind: "text",
+            text:
+              "Asking Sam now…\n\nSam says: I'm not sure if the migration finished cleanly — would need to check.",
+          },
+        ],
+        confidence: confidence(
+          "medium",
+          0.55,
+          "report opens with a hedge phrase",
+        ),
+      },
+    ],
+  },
+};
+
+export const DelegatedReplyLowConfidenceDrillable: Story = {
+  args: {
+    onDrillIntoSource: (audit) => {
+      // Storybook stub — a real renderer opens the relevant drawer at
+      // the audit's sourceRef. The action panel reflects the click.
+      // eslint-disable-next-line no-console
+      console.log("drill into", audit.sourceRef);
+    },
+    messages: [
+      userMessage,
+      {
+        ...delegatedReply,
+        id: "m_assistant_low",
+        segments: [
+          {
+            kind: "text",
+            text: "Asking Sam now…\n\nSam says:   ",
+          },
+        ],
+        confidence: confidence(
+          "low",
+          1.0,
+          "report is empty",
+        ),
+      },
+    ],
+  },
+};
 
 export const ProjectTaggedMessages: Story = {
   args: {

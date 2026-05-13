@@ -25,6 +25,36 @@ export type LeadAttribution = {
   displayName?: string;
 };
 
+/**
+ * One F12.7 / ADR-0027 audit verdict in wire shape. Mirrors
+ * ``InfoFlowAuditReport.to_wire()`` on the brain side. ``sourceRef``
+ * and ``outputRef`` are provenance pointers the renderer's drill-
+ * into-source UX (F1.10) follows back to the underlying record.
+ */
+export type InfoFlowAuditWire = {
+  mode: "plan_vs_action" | "reported_vs_truth" | "relayed_vs_source";
+  driftScore: number;
+  confidence: "low" | "medium" | "high";
+  summary: string;
+  sourceRef: Record<string, string | number>;
+  outputRef: Record<string, string | number>;
+  heuristicScore: number;
+  llmScore?: number;
+};
+
+/**
+ * Confidence payload that lands on a delegated assistant turn.
+ * ``level`` is the worst across all audits (the renderer reads it to
+ * choose the pill tone); ``audit`` is the audit driving that level
+ * (the pill's tooltip + drill-into-source target); ``audits`` carries
+ * every audit so the user can navigate to each underlying source.
+ */
+export type ConfidencePayload = {
+  level: "low" | "medium" | "high";
+  audit: InfoFlowAuditWire;
+  audits: InfoFlowAuditWire[];
+};
+
 export type Message =
   | {
       id: string;
@@ -50,6 +80,12 @@ export type Message =
       done: boolean;
       totalCostUsd?: number;
       leadAttribution?: LeadAttribution;
+      /**
+       * Confidence on a delegated relay (ADR-0027). Present when the
+       * brain relayed a lead's reply; absent for the brain's own
+       * direct replies (no source to audit against).
+       */
+      confidence?: ConfidencePayload;
       atMs?: number;
       projectId?: string;
     };

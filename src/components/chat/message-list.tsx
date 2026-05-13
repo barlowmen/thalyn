@@ -1,9 +1,10 @@
 import { UserCog } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
 
+import { ConfidencePill } from "@/components/chat/confidence-pill";
 import { ProjectTag } from "@/components/chat/project-tag";
 import { ToolCallCard } from "@/components/chat/tool-call-card";
-import type { Message } from "@/components/chat/types";
+import type { ConfidencePayload, Message } from "@/components/chat/types";
 import { Badge } from "@/components/ui/badge";
 import type { Project } from "@/lib/projects";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,14 @@ type Props = {
    * the projects RPC.
    */
   projectsById?: ProjectsById;
+  /**
+   * Drill-into-source handler for the F1.10 / ADR-0027 confidence
+   * pill. Receives the audit whose ``sourceRef`` should be opened in
+   * the relevant drawer. Optional — when omitted, the pill renders
+   * as a non-interactive badge and the audit summary surfaces in
+   * the tooltip only.
+   */
+  onDrillIntoSource?: (audit: ConfidencePayload["audit"]) => void;
 };
 
 /**
@@ -45,6 +54,7 @@ export function MessageList({
   header,
   footer,
   projectsById,
+  onDrillIntoSource,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -94,7 +104,11 @@ export function MessageList({
             {showDivider && messageDayMs !== null && (
               <DayDivider dayMs={messageDayMs} />
             )}
-            <MessageBubble message={message} projectsById={projectsById} />
+            <MessageBubble
+              message={message}
+              projectsById={projectsById}
+              onDrillIntoSource={onDrillIntoSource}
+            />
           </div>
         );
       })}
@@ -140,9 +154,11 @@ function DayDivider({ dayMs }: { dayMs: number }) {
 function MessageBubble({
   message,
   projectsById,
+  onDrillIntoSource,
 }: {
   message: Message;
   projectsById?: ProjectsById;
+  onDrillIntoSource?: (audit: ConfidencePayload["audit"]) => void;
 }) {
   const projectTag = renderProjectTag(message.projectId, projectsById);
   if (message.role === "user") {
@@ -159,20 +175,35 @@ function MessageBubble({
   }
 
   const attribution = message.leadAttribution;
+  const confidence = message.confidence;
 
   return (
     <div className="space-y-2">
       {projectTag && <div>{projectTag}</div>}
-      {attribution ? (
+      {attribution || confidence ? (
         <div
-          className="flex items-center gap-1.5 text-xs text-muted-foreground"
-          aria-label={`Delegated to ${attribution.displayName ?? attribution.agentId}`}
+          className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground"
+          aria-label={
+            attribution
+              ? `Delegated to ${attribution.displayName ?? attribution.agentId}`
+              : "Relayed reply"
+          }
         >
-          <UserCog aria-hidden className="size-3" />
-          <span>via</span>
-          <Badge tone="default">
-            {attribution.displayName ?? attribution.agentId}
-          </Badge>
+          {attribution && (
+            <>
+              <UserCog aria-hidden className="size-3" />
+              <span>via</span>
+              <Badge tone="default">
+                {attribution.displayName ?? attribution.agentId}
+              </Badge>
+            </>
+          )}
+          {confidence && (
+            <ConfidencePill
+              confidence={confidence}
+              onDrill={onDrillIntoSource}
+            />
+          )}
         </div>
       ) : null}
       {message.segments.map((segment, idx) => {
