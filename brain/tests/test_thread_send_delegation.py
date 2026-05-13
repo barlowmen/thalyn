@@ -159,7 +159,9 @@ async def test_addressed_lead_runs_delegation_and_persists_lead_turn(tmp_path: P
     assert result["status"] == "completed"
     assert result["delegation"]["leadId"] == lead.agent_id
     assert result["delegation"]["leadDisplayName"] == "Sam"
-    assert result["delegation"]["sanityCheck"]["ok"] is True
+    confidence = result["delegation"]["confidence"]
+    assert confidence["level"] == "high"
+    assert confidence["audit"]["mode"] == "reported_vs_truth"
 
     # Three turns landed: user, lead, brain.
     turns = await threads.list_turns(thread.thread_id)
@@ -280,10 +282,93 @@ async def test_hedged_lead_reply_surfaces_low_confidence_note(tmp_path: Path) ->
     )
 
     result = response["result"]
-    assert result["delegation"]["sanityCheck"]["ok"] is False
-    assert "Low-confidence" in (result["delegation"]["sanityCheck"]["note"] or "")
+    confidence = result["delegation"]["confidence"]
+    # Leading hedge phrase produces mid-band drift → medium confidence
+    # (the pill surfaces, the gate does not).
+    assert confidence["level"] == "medium"
+    assert confidence["audit"]["mode"] == "reported_vs_truth"
+    assert confidence["audit"]["driftScore"] > 0.3
     turns = await threads.list_turns(thread.thread_id)
     assert "Low-confidence" in turns[2].body
+
+
+async def test_addressed_lead_audit_emits_run_drift_with_mode(tmp_path: Path) -> None:
+    """Every lead-delegation hop emits a ``run.drift`` notification
+    carrying the new ``mode`` field, regardless of whether the audit
+    flagged drift. The audit fact is part of the run record, not only
+    the flagging."""
+    dispatcher, threads, _agents, lifecycle, projects = await _build(
+        tmp_path,
+        messages=[
+            text_message("3 commits shipped overnight."),
+            result_message(),
+        ],
+    )
+    project = await _seed_project(projects)
+    await lifecycle.spawn(SpawnRequest(project_id=project.project_id, display_name="Sam"))
+    thread = await _seed_thread(threads)
+
+    response, captured = await _send(
+        dispatcher,
+        thread_id=thread.thread_id,
+        prompt="Sam, status?",
+    )
+
+    drift_events = [params for method, params in captured if method == "run.drift"]
+    assert len(drift_events) == 1
+    assert drift_events[0]["mode"] == "reported_vs_truth"
+    assert drift_events[0]["runId"].startswith("chat:")
+    # No flagging on a clean reply → no info_flow gate.
+    gates = [
+        params
+        for method, params in captured
+        if method == "run.approval_required" and params.get("gateKind") == "info_flow"
+    ]
+    assert gates == []
+    # The audit fact still lands in the action log.
+    log_entries = [
+        params
+        for method, params in captured
+        if method == "run.action_log" and params["entry"]["kind"] == "info_flow_check"
+    ]
+    assert len(log_entries) == 1
+    assert log_entries[0]["entry"]["payload"]["mode"] == "reported_vs_truth"
+    assert response["result"]["delegation"]["confidence"]["level"] == "high"
+
+
+async def test_empty_lead_reply_raises_info_flow_gate(tmp_path: Path) -> None:
+    """A lead replying with whitespace is the canonical
+    "reports X but the action log shows Y" failure mode: the report
+    is empty, the audit flags drift at 1.0, and the runtime surfaces
+    the ``info_flow`` approval gate."""
+    dispatcher, threads, _agents, lifecycle, projects = await _build(
+        tmp_path,
+        messages=[text_message("   "), result_message()],
+    )
+    project = await _seed_project(projects)
+    await lifecycle.spawn(SpawnRequest(project_id=project.project_id, display_name="Sam"))
+    thread = await _seed_thread(threads)
+
+    response, captured = await _send(
+        dispatcher,
+        thread_id=thread.thread_id,
+        prompt="Sam, status?",
+    )
+
+    gates = [
+        params
+        for method, params in captured
+        if method == "run.approval_required" and params.get("gateKind") == "info_flow"
+    ]
+    assert len(gates) == 1
+    summary = gates[0]["infoFlowSummary"]
+    assert summary["mode"] == "reported_vs_truth"
+    assert summary["driftScore"] == 1.0
+    assert summary["sourceRef"]["leadId"]
+    assert summary["outputRef"]["turnId"] == response["result"]["turnId"]
+
+    confidence = response["result"]["delegation"]["confidence"]
+    assert confidence["level"] == "low"
 
 
 async def test_lead_session_loads_thalyn_md_into_system_prompt(tmp_path: Path) -> None:

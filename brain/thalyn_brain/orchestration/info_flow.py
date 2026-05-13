@@ -554,3 +554,35 @@ def info_flow_check_log_entry(report: InfoFlowAuditReport) -> dict[str, Any]:
         "kind": "info_flow_check",
         "payload": report.to_wire(),
     }
+
+
+def confidence_level_for_drift(drift_score: float) -> InfoFlowConfidence:
+    """Translate a drift score into a user-facing confidence level.
+
+    High drift → low confidence in the underlying claim. This is the
+    F12.8 surface — the renderer reads the level off the lead turn's
+    ``confidence`` field to render a pill. The cutoffs are chosen so
+    routine audits sit at ``high`` (no pill), flagged-but-not-gated
+    audits sit at ``medium`` (subtle pill), and gate-worthy audits
+    sit at ``low`` (prominent pill + gate card).
+    """
+    if drift_score < 0.3:
+        return "high"
+    if drift_score < DEFAULT_GATE_THRESHOLD:
+        return "medium"
+    return "low"
+
+
+def report_to_confidence_payload(report: InfoFlowAuditReport) -> dict[str, Any]:
+    """Build the ``confidence`` wire payload that lands on a
+    ``THREAD_TURN`` row.
+
+    The renderer's chat surface reads ``confidence.level`` to render
+    the low-confidence pill, ``confidence.audit`` to render the
+    drill-into-source link, and ``confidence.audit.summary`` for the
+    pill's tooltip.
+    """
+    return {
+        "level": confidence_level_for_drift(report.drift_score),
+        "audit": report.to_wire(),
+    }

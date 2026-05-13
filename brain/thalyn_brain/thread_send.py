@@ -43,14 +43,20 @@ from thalyn_brain.lead_delegation import (
     SUB_LEAD_REPLY_PREFIX_TEMPLATE,
     AddressedLead,
     AttributionChain,
-    SanityCheckVerdict,
     build_attribution_chain,
     collect_lead_reply,
     evaluate_lead_escalation,
     find_addressed_lead,
-    sanity_check_lead_reply,
 )
 from thalyn_brain.memory import MemoryStore
+from thalyn_brain.orchestration.info_flow import (
+    InfoFlowAuditReport,
+    InfoFlowMode,
+    audit_info_flow,
+    confidence_level_for_drift,
+    info_flow_check_log_entry,
+    report_to_confidence_payload,
+)
 from thalyn_brain.pending_actions import (
     ActionApprovalRequiredEvent,
     PendingActionStore,
@@ -93,6 +99,9 @@ THREAD_CHUNK = "thread.chunk"
 LEAD_ESCALATION = "lead.escalation"
 ACTION_FOLLOWUP = "action.followup"
 ACTION_APPROVAL_REQUIRED = "action.approval_required"
+RUN_DRIFT = "run.drift"
+RUN_APPROVAL_REQUIRED = "run.approval_required"
+RUN_ACTION_LOG = "run.action_log"
 DEFAULT_BRAIN_AGENT_ID = "agent_brain"
 
 
@@ -628,7 +637,22 @@ async def _handle_delegated_reply(
         )
         raise RpcError(code=INTERNAL_ERROR, message=lead_error)
 
-    verdict = sanity_check_lead_reply(lead_reply)
+    lead_turn_id = new_turn_id()
+    audit = await audit_info_flow(
+        mode=InfoFlowMode.REPORTED_VS_TRUTH,
+        source=None,
+        output=lead_reply,
+        source_ref={
+            "kind": "lead_turn",
+            "leadId": lead.agent_id,
+            "leadTurnId": lead_turn_id,
+        },
+        output_ref={
+            "kind": "brain_relay_turn",
+            "turnId": brain_turn_id,
+        },
+    )
+    audit_note = _audit_note(audit)
     if lead.kind == "sub_lead" and parent_lead is not None:
         prefix = SUB_LEAD_REPLY_PREFIX_TEMPLATE.format(
             name=lead.display_name,
@@ -637,8 +661,8 @@ async def _handle_delegated_reply(
     else:
         prefix = LEAD_REPLY_PREFIX_TEMPLATE.format(name=lead.display_name)
     wrapped = prefix + lead_reply
-    if verdict.note is not None:
-        wrapped = wrapped + "\n\n" + verdict.note
+    if audit_note is not None:
+        wrapped = wrapped + "\n\n" + audit_note
     delta = "\n\n" + wrapped
     await notify(
         THREAD_CHUNK,
@@ -649,6 +673,35 @@ async def _handle_delegated_reply(
         {"turnId": brain_turn_id, "chunk": {"kind": "stop", "reason": "end_turn"}},
     )
 
+    # Audit-trail emissions land on the wire whether the audit flagged
+    # drift or not: a future hash-chained audit-log needs the run-of-
+    # the-mill no-drift entries too. The synthetic ``runId`` mirrors
+    # the brain turn so the renderer's drill-into-source UX has a
+    # stable handle even without a worker-run agent_runs row.
+    audit_run_id = f"chat:{brain_turn_id}"
+    await notify(
+        RUN_ACTION_LOG,
+        {"runId": audit_run_id, "entry": info_flow_check_log_entry(audit)},
+    )
+    await notify(
+        RUN_DRIFT,
+        {
+            "runId": audit_run_id,
+            "score": audit.drift_score,
+            "mode": audit.mode.value,
+            "deviationSummary": audit.summary,
+        },
+    )
+    if audit.should_raise_gate:
+        await notify(
+            RUN_APPROVAL_REQUIRED,
+            {
+                "runId": audit_run_id,
+                "gateKind": "info_flow",
+                "infoFlowSummary": audit.to_wire(),
+            },
+        )
+
     # F2.5 escalation: when the lead's reply is question-dense, surface
     # a "drop into Lead-X" CTA rather than relying on the user to read
     # 6 questions inline. ``evaluate_lead_escalation`` returns ``None``
@@ -658,7 +711,7 @@ async def _handle_delegated_reply(
         await notify(LEAD_ESCALATION, escalation.to_wire())
 
     now_ms = int(time.time() * 1000)
-    lead_turn_id = new_turn_id()
+    confidence_payload = report_to_confidence_payload(audit)
     lead_provenance: dict[str, Any] = {
         "leadId": lead.agent_id,
         "providerId": lead.default_provider_id,
@@ -674,7 +727,7 @@ async def _handle_delegated_reply(
         role="lead",
         body=lead_reply,
         provenance=lead_provenance,
-        confidence={"sanityCheck": _verdict_to_wire(verdict)},
+        confidence=confidence_payload,
         episodic_index_ptr=None,
         at_ms=now_ms,
         status="completed",
@@ -698,7 +751,7 @@ async def _handle_delegated_reply(
         role="brain",
         body=final_text,
         provenance=brain_provenance,
-        confidence={"sanityCheck": _verdict_to_wire(verdict)},
+        confidence=confidence_payload,
         episodic_index_ptr=None,
         at_ms=now_ms,
         status="completed",
@@ -714,7 +767,7 @@ async def _handle_delegated_reply(
         "leadId": lead.agent_id,
         "leadTurnId": lead_turn_id,
         "leadDisplayName": lead.display_name,
-        "sanityCheck": _verdict_to_wire(verdict),
+        "confidence": confidence_payload,
     }
     if attribution is not None:
         delegation["attributionChain"] = attribution.to_wire()
@@ -890,8 +943,19 @@ async def _handle_action_reply(
     }
 
 
-def _verdict_to_wire(verdict: SanityCheckVerdict) -> dict[str, Any]:
-    return {"ok": verdict.ok, "note": verdict.note}
+def _audit_note(report: InfoFlowAuditReport) -> str | None:
+    """User-facing note to append to the wrapped lead reply.
+
+    Returns ``None`` for clean audits — the reply goes through
+    unannotated. Mid-band audits surface a short note so the user
+    sees the audit's own summary inline rather than only as a pill;
+    gate-worthy audits get a stronger heads-up.
+    """
+    if confidence_level_for_drift(report.drift_score) == "high":
+        return None
+    if report.should_raise_gate:
+        return f"Low-confidence reply — flagging the response for review: {report.summary}"
+    return f"Low-confidence reply — {report.summary}."
 
 
 def _new_project_suggestion(
