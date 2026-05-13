@@ -1,7 +1,7 @@
 # ADR-0013 — Design system: OKLCH tokens, Geist typography, three-panel mosaic
 
-- **Status:** Accepted (provisional) — *layout claim refined by ADR-0026*
-- **Date:** 2026-04-25 (revised 2026-04-29)
+- **Status:** Accepted (provisional) — *layout claim refined by ADR-0026; status-token shape refined 2026-05-13*
+- **Date:** 2026-04-25 (revised 2026-04-29, 2026-05-13)
 
 ## Context
 
@@ -51,3 +51,36 @@ drawer-host primitive lands.
 
 Token-level decisions (colour, type, motion, iconography, surfaces) are
 not reopened by ADR-0026; this ADR remains authoritative for those.
+
+### Revision 2026-05-13 — status tokens grow a surface/text split
+
+The status family (``--danger`` / ``--success`` / ``--warning``)
+shipped as one token per status. The dark-theme tones were tuned
+for *button-bg use* — dark enough that white text on the coloured
+button cleared 4.5:1 — but that same value used as foreground text
+on the page bg sat at ~3.6:1 against the dark surface and ~3.3:1
+against a 10%-tinted surface, failing NFR8's WCAG 2.1 AA bar
+across every visible error state. One token can't satisfy both
+constraints simultaneously.
+
+Each status family now ships as a pair: ``--danger`` /
+``--success`` / ``--warning`` for surface use (button bg, tinted
+panel bg) and ``--danger-text`` / ``--success-text`` /
+``--warning-text`` for foreground-text use, tuned for ≥4.5:1
+against the page bg. The Tailwind utility ``text-danger`` is
+wired through ``--color-danger`` in `globals.css`; every
+``text-destructive`` foreground call site swapped to it.
+``bg-destructive`` (the button variant) keeps the surface tone,
+so the destructive-button family is unchanged.
+
+``--success-text`` and ``--warning-text`` ship in
+`src/design/tokens.css` but aren't yet wired to a Tailwind
+utility — remapping ``bg-success`` and ``bg-warning`` to their
+brighter siblings would shift surface appearance everywhere those
+classes are used. The wiring lands the next time a foreground
+contrast failure is flagged for those tones; the tokens exist so
+the wiring is a one-line `globals.css` edit when it's needed.
+
+OKLCH colour as the primary system, dark-first, the calm
+blue-violet accent — all unchanged. This is a refinement of the
+status-token table, not a posture shift.
