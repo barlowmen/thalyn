@@ -35,7 +35,7 @@ This directory contains Thalyn's ADRs — one decision per file, in [MADR](https
 | [0024](0024-project-mobility-and-pluggable-classifier.md) | Project mobility (merge) + pluggable classifier interface | Accepted |
 | [0025](0025-voice-input-stt.md) | Voice input: Whisper.cpp local-first STT with Deepgram cloud fallback | Accepted |
 | [0026](0026-chat-first-shell-and-drawer-system.md) | App shape: chat-first shell + on-demand drawer system | Accepted |
-| [0027](0027-info-flow-drift-critic.md) | Information-flow drift: critic generalization across the EM hierarchy | Proposed |
+| [0027](0027-info-flow-drift-critic.md) | Information-flow drift: critic generalization across the EM hierarchy | Accepted |
 | [0029](0029-in-process-cef-tao-integration.md) | In-process CEF embedding: tao integration via runtime swizzle | Accepted |
 | [0030](0030-license-apache-2.md) | License: Apache-2.0 (supersedes ADR-0016) | Accepted |
 | [0031](0031-repo-public-source-visibility.md) | Repo public: source visibility precedes app distribution | Accepted |

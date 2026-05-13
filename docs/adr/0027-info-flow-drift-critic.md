@@ -1,7 +1,7 @@
 # ADR-0027 — Information-flow drift: critic generalization across the EM hierarchy
 
-- **Status:** Proposed
-- **Date:** 2026-05-12
+- **Status:** Accepted
+- **Date:** 2026-05-12 (Proposed) · 2026-05-12 (Accepted)
 - **Deciders:** Barlow
 - **Supersedes:** —
 - **Superseded by:** —
